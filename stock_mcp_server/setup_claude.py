@@ -1,7 +1,6 @@
-"""Claude Desktop 설정 파일에 stock-data MCP 서버를 등록합니다.
+"""Claude Desktop 설정에 stock-data MCP 서버를 등록하는 CLI.
 
-install.bat / install.sh에서 호출되는 헬퍼 스크립트입니다.
-기존 설정을 보존하면서 stock-data 항목만 추가/업데이트합니다.
+설치 후 `stock-mcp-setup` 명령어로 실행할 수 있습니다.
 """
 
 import json
@@ -19,43 +18,34 @@ def get_config_path() -> Path:
         return Path(appdata) / "Claude" / "claude_desktop_config.json"
     elif sys.platform == "darwin":
         return Path.home() / "Library" / "Application Support" / "Claude" / "claude_desktop_config.json"
-    else:  # linux 및 기타
+    else:
         return Path.home() / ".config" / "Claude" / "claude_desktop_config.json"
 
 
 def configure(command: str = "stock-mcp-server") -> None:
     config_path = get_config_path()
     config_dir = config_path.parent
-
-    # 디렉토리 생성
     config_dir.mkdir(parents=True, exist_ok=True)
 
-    # 기존 설정 읽기
     if config_path.exists():
         try:
             with open(config_path, "r", encoding="utf-8") as f:
                 config = json.load(f)
-            # 백업 생성
             backup_path = config_path.with_suffix(".json.backup")
             with open(backup_path, "w", encoding="utf-8") as f:
                 json.dump(config, f, indent=2, ensure_ascii=False)
-            print(f"  기존 설정 백업: {backup_path}")
+            print(f"  [OK] 기존 설정 백업: {backup_path}")
         except json.JSONDecodeError:
             print("  [WARN] 기존 설정 파일이 손상되어 있습니다. 새로 만듭니다.")
             config = {}
     else:
         config = {}
 
-    # mcpServers 섹션 보장
     if "mcpServers" not in config:
         config["mcpServers"] = {}
 
-    # stock-data 등록/업데이트
-    config["mcpServers"]["stock-data"] = {
-        "command": command,
-    }
+    config["mcpServers"]["stock-data"] = {"command": command}
 
-    # 저장
     with open(config_path, "w", encoding="utf-8") as f:
         json.dump(config, f, indent=2, ensure_ascii=False)
 
@@ -65,8 +55,15 @@ def configure(command: str = "stock-mcp-server") -> None:
 
 def main():
     command = sys.argv[1] if len(sys.argv) > 1 else "stock-mcp-server"
+    print("==============================================")
+    print("  naver-stock-mcp - Claude Desktop 설정")
+    print("==============================================")
+    print()
     try:
         configure(command)
+        print()
+        print("설정이 완료되었습니다.")
+        print("Claude Desktop을 완전히 종료했다가 다시 실행하세요.")
     except Exception as e:
         print(f"  [ERROR] 오류: {e}", file=sys.stderr)
         sys.exit(1)

@@ -3,12 +3,9 @@ chcp 65001 >nul
 setlocal
 
 echo ==============================================
-echo   naver-stock-mcp 자동 설치 스크립트 (Windows)
+echo   naver-stock-mcp 자동 설치 (Windows)
 echo ==============================================
 echo.
-
-REM 스크립트 위치로 이동
-cd /d "%~dp0"
 
 REM [1/3] Python 설치 확인
 echo [1/3] Python 설치 확인...
@@ -29,23 +26,21 @@ for /f "tokens=2" %%v in ('python --version 2^>^&1') do set PYVER=%%v
 echo       O Python %PYVER% 감지됨
 echo.
 
-REM [2/3] 패키지 설치
-echo [2/3] 패키지 설치 중...
-python -m pip install -e . >nul 2>&1
+REM [2/3] PyPI에서 패키지 설치 (또는 업그레이드)
+echo [2/3] naver-stock-mcp 설치 중...
+python -m pip install --upgrade naver-stock-mcp
 if errorlevel 1 (
     echo       X 패키지 설치 실패
-    echo       상세 에러를 보려면 아래 명령어를 직접 실행해보세요:
-    echo         python -m pip install -e .
     echo.
     pause
     exit /b 1
 )
-echo       O stock-mcp-server 설치 완료
+echo       O naver-stock-mcp 설치 완료
 echo.
 
 REM [3/3] Claude Desktop 설정
 echo [3/3] Claude Desktop 설정 중...
-python scripts\configure_claude.py stock-mcp-server
+python -m stock_mcp_server.setup_claude stock-mcp-server
 if errorlevel 1 (
     echo       X Claude Desktop 설정 실패
     pause
