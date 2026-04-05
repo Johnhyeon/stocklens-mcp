@@ -81,7 +81,7 @@ python --version
 **방법 A: Git이 설치되어 있는 경우**
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/stock-mcp-server.git
+git clone https://github.com/Johnhyeon/naver-stock-mcp.git
 ```
 
 **방법 B: Git이 없는 경우**
