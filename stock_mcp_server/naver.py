@@ -59,7 +59,7 @@ async def search_stock(query: str) -> list[dict]:
 async def get_ohlcv(
     code: str,
     timeframe: str = "day",
-    count: int = 60,
+    count: int = 180,
 ) -> list[dict]:
     """네이버 차트 API에서 OHLCV(시가/고가/저가/종가/거래량) 데이터를 가져옵니다.
 

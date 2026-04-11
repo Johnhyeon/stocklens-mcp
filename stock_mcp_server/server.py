@@ -56,7 +56,21 @@ mcp = FastMCP(
 
 ## 차트 시각화 규칙
 
-캔들 차트를 HTML Canvas로 렌더링할 때는 반드시 아래 레이아웃 구조를 따를 것.
+캔들 차트를 HTML Canvas/SVG로 렌더링할 때는 반드시 아래 규칙을 따를 것.
+
+### 기본 기간
+- **차트는 기본 180일(약 9개월)을 사용한다.** 사용자가 다른 기간을 명시하지 않으면 180일.
+- get_chart 호출 시 count=180이 기본값.
+
+### 필수 구성 (절대 생략 금지)
+- **캔들 차트는 반드시 상단 캔들 패널 + 하단 거래량 패널 세트로 구성한다.**
+- 거래량 패널 없이 캔들만 그리는 것은 금지. 무조건 세트로 묶일 것.
+
+### 레이아웃
+- 캔들 패널: 전체 차트 높이의 약 73%
+- 간격(GAP): 두 패널 사이 ≈ 10px 공백
+- 거래량 패널: 전체 차트 높이의 약 22%
+- 거래량 바 색상은 해당 봉의 상승/하락 색상과 동일하게 (양봉 빨강, 음봉 파랑)
 
 ### 영역 구분
 - 전체 오른쪽 여백: PAD_R = AXIS_W + LABEL_W
@@ -64,10 +78,10 @@ mcp = FastMCP(
 - LABEL_W (≈ 148px): AXIS_W 오른쪽. S/R 라벨명과 가격을 2줄로 좌측 정렬 표시
 - 두 영역은 물리적으로 분리되어 절대 겹치지 않아야 함
 
-### 패널 구성
-- 캔들 패널: 전체 높이의 약 75% (상단)
-- 거래량 패널: 전체 높이의 약 22% (하단), 캔들 패널과 GAP(≈ 10px) 간격
-- 거래량 바 색상은 해당 봉의 상승/하락 색상과 동일하게 적용
+### 가격축
+- 눈금선(grid)은 PAD_L ~ AXIS_X 구간에만 그릴 것
+- tick은 AXIS_X에서 오른쪽으로 4px 짧게 표시
+- 가격 숫자는 tick 바로 오른쪽(AXIS_X + 6px)에 표시
 
 ### S/R 라벨 렌더링
 - S/R 선은 캔들 패널 내 AXIS_X(= W - PAD_R) 까지만 그릴 것
@@ -75,48 +89,56 @@ mcp = FastMCP(
 - 1행: 라벨명 (예: "강한 지지 (이중저점)")
 - 2행: 가격 (예: "16.7만"), 1행보다 약간 작은 폰트 + 낮은 opacity
 
-### 가격축
-- 눈금선(grid)은 PAD_L ~ AXIS_X 구간에만 그릴 것
-- tick은 AXIS_X에서 오른쪽으로 4px 짧게 표시
-- 가격 숫자는 tick 바로 오른쪽(AXIS_X + 6px)에 표시
-
 ### 캔들 스페이싱 (중요)
 
 캔들 간 간격과 몸통 너비는 **가용 폭과 데이터 개수에 따라 동적 계산**할 것.
-고정값 100px 같은 값을 쓰지 말 것.
+고정값(예: CANDLE_W = 100)을 쓰지 말 것.
 
-**공식:**
+**공식 (최종):**
 ```
 availableW = W - PAD_L - PAD_R            # 캔들 영역 실제 폭
 step = availableW / candles.length         # 캔들 간 간격 (center-to-center)
-bodyW = max(1, step * 0.7)                 # 몸통 너비 = step의 70%
-wickStrokeW = max(1, min(1.5, bodyW / 8))  # 심지 두께
+bodyW = Math.max(1, step - 1)              # 몸통 = step에서 1px만 뺌 (양옆 0.5px)
+wickStrokeW = Math.max(1, Math.min(1.5, bodyW / 6))  # 심지 두께
 ```
+
+**중요: bodyW = step * 0.7 같은 비율 기반 공식은 쓰지 말 것.
+간격이 실제보다 넓어 보여서 이질감이 생김.**
 
 **제약:**
 - `step`은 최소 2px, 최대 20px로 클램프
-- 60일 일봉 기준 `step`은 대략 8~12px가 자연스러움
+- 180일 일봉 + 폭 800px + PAD(좌40, 우190) 기준 → step ≈ 3.2px, bodyW ≈ 2.2px (자연스러움)
+- 60일 일봉 + 폭 800px 기준 → step ≈ 9.5px, bodyW ≈ 8.5px
 - 캔들 x좌표: `x = PAD_L + (i + 0.5) * step`  (center 기준)
 - 몸통 rect의 x: `x - bodyW / 2`
 
 **나쁜 예시:**
 ```javascript
-const CANDLE_W = 100;                      // ❌ 고정값, 너무 큼
-const x = i * CANDLE_W + 50;               // ❌ 폭 고려 안 함
-<rect x="${x-6}" width="12" .../>          // ❌ 간격 대비 몸통이 12%
+const CANDLE_W = 100;                      // 고정값 금지
+const bodyW = step * 0.7;                  // 비율 금지 — 너무 벌어짐
+<rect x="${x-6}" width="12" .../>          // 간격 대비 몸통 12%는 띄엄띄엄함
 ```
 
 **좋은 예시:**
 ```javascript
 const availableW = W - PAD_L - PAD_R;
 const step = Math.max(2, Math.min(20, availableW / candles.length));
-const bodyW = Math.max(1, step * 0.7);
+const bodyW = Math.max(1, step - 1);  // 핵심: step - 1
 candles.forEach((c, i) => {
   const cx = PAD_L + (i + 0.5) * step;
   // 심지
   line(cx, py(c.high), cx, py(c.low), strokeWidth=1);
   // 몸통
   rect(cx - bodyW/2, py(top), bodyW, bodyH);
+});
+
+// 거래량 패널 (필수)
+const maxVol = Math.max(...candles.map(c => c.volume));
+candles.forEach((c, i) => {
+  const cx = PAD_L + (i + 0.5) * step;
+  const h = (c.volume / maxVol) * volPanelH;
+  const color = c.close >= c.open ? redColor : blueColor;
+  rect(cx - bodyW/2, volPanelBottom - h, bodyW, h, fill=color);
 });
 ```
 """,
@@ -144,14 +166,15 @@ async def search(query: str) -> str:
 
 @mcp.tool()
 @safe_tool
-async def get_chart(code: str, timeframe: str = "day", count: int = 60) -> str:
+async def get_chart(code: str, timeframe: str = "day", count: int = 180) -> str:
     """차트데이터 — 종목의 OHLCV(시가/고가/저가/종가/거래량) 차트 데이터를 가져옵니다.
     "삼성전자 일봉", "차트 보여줘", "3개월 주봉", "월봉 데이터" 같은 질문에 사용합니다.
+    기본 180일(약 9개월)로, 충분한 기술적 분석이 가능한 기간.
 
     Args:
         code: 종목코드 6자리 (예: "005930")
         timeframe: "day"(일봉), "week"(주봉), "month"(월봉)
-        count: 가져올 봉 개수 (기본 60, 최대 500)
+        count: 가져올 봉 개수 (기본 180, 최대 500)
     """
     count = min(count, 500)
     data = await get_ohlcv(code, timeframe, count)
