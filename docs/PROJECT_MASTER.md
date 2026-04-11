@@ -272,17 +272,29 @@ MCP는 프로토콜이고 네이버 데이터는 공개다. 무료 유지가 전
 
 ## 🗂 개발 브랜치 전략
 
+### 원칙
+**새로운 기능이나 큰 변경 작업은 반드시 별도 브랜치에서 진행.** 기능 완성 후 상위 브랜치로 merge.
+
+### 브랜치 계층 구조
 ```
-main         ← 배포된 안정 버전 (현재 v0.1.2)
- └─ develop/v2  ← v2 개발 브랜치 (스크리닝 도구 7개)
+main                              ← 배포된 안정 버전 (현재 v0.1.2)
+ └─ develop/v2                    ← v2 메이저 기능 통합 브랜치
+     └─ feature/v2-performance    ← 성능 최적화 (캐시, 싱글톤 등)
+     └─ feature/v2-xxx            ← 추후 다른 v2 기능 작업 시
 ```
 
+### 네이밍 컨벤션
+- `develop/v<숫자>` — 메이저 버전 개발 통합 브랜치
+- `feature/v<숫자>-<기능명>` — 특정 기능 작업 브랜치
+- `fix/<버그명>` — 핫픽스 (main에서 직접 분기)
+
 ### 업데이트 배포 흐름
-1. `develop/v2`에서 개발
-2. 테스트 완료 후 `main`으로 merge
-3. `pyproject.toml` version bump
-4. `python -m build && python -m twine upload dist/*`
-5. 구글폼 수집 이메일에 업데이트 공지 발송
+1. 기능 브랜치에서 개발 (예: `feature/v2-performance`)
+2. 완료 후 `develop/v2`로 merge
+3. v2 전체 테스트 후 `main`으로 merge
+4. `pyproject.toml` version bump
+5. `python -m build && python -m twine upload dist/*`
+6. 구글폼 수집 이메일에 업데이트 공지 발송
 
 ### 사용자 업데이트 방법
 - **자동 업데이트 없음** (Python 패키지 특성)
@@ -292,7 +304,21 @@ main         ← 배포된 안정 버전 (현재 v0.1.2)
 
 ## 📝 최근 수정 이력
 
-### 2026-04-11
+### 2026-04-11 (오후)
+- **v2 스크리닝 도구 8개 추가** (`develop/v2` 커밋됨)
+  - list_themes, get_theme_stocks, list_sectors, get_sector_stocks
+  - get_volume_ranking, get_change_ranking, get_market_cap_ranking
+  - get_multi_stocks (벌크 조회, 병렬 처리)
+  - 총 도구 수: 6개 → 14개
+- **get_current_price 버그 수정**: 거래량/시가/고가/저가 파싱 (HTML 구조 변경 대응)
+- **영숫자 종목코드 지원**: `0088M0 메쥬` 같은 신규 상장 종목 대응
+- **토큰 최적화**: 편입사유 p.info_txt만 추출, include_reason 옵션
+- **리서치 완료**: 다른 금융 MCP (Polygon, Finnhub, Maverick 등)의 최적화 패턴 조사
+- **`feature/v2-performance` 브랜치 생성**: 성능 최적화 작업 시작 예정
+  - httpx.AsyncClient 싱글톤
+  - In-memory TTL 캐시 (데이터 종류별 차등)
+
+### 2026-04-11 (오전)
 - **v0.1.2 핫픽스**: `get_investor_flow` 파싱 오류 수정
   - 네이버 `frgn.naver` 페이지에서 두 번째 `table.type2`가 수급 테이블 (첫 번째는 거래원)
   - `td span.tah` 선택자 제거, 직접 `td` 접근으로 변경
