@@ -593,12 +593,14 @@ def _market_to_sosok(market: str) -> str | None:
 
 
 @cached(ttl_market=60, ttl_closed=3600)  # 장중 1분, 장마감 1시간
-async def _fetch_ranking_page(url: str, sosok: str | None) -> list[dict]:
-    """네이버 랭킹 페이지 HTML을 파싱해서 종목 리스트 반환.
+async def _fetch_ranking_page(url: str, sosok: str | None, page: int = 1) -> list[dict]:
+    """네이버 랭킹 페이지 HTML을 파싱해서 종목 리스트 반환 (한 페이지 = 50개).
 
     거래량/상승률/하락률 페이지 공통 구조 (12 cells).
     """
-    params = {"sosok": sosok} if sosok is not None else {}
+    params: dict[str, str | int] = {"page": page}
+    if sosok is not None:
+        params["sosok"] = sosok
     client = get_client()
     resp = await client.get(url, params=params)
     soup = BeautifulSoup(resp.text, "lxml")
@@ -637,29 +639,47 @@ async def _fetch_ranking_page(url: str, sosok: str | None) -> list[dict]:
     return results
 
 
+async def _fetch_ranking_multi_page(
+    url: str,
+    sosok: str | None,
+    count: int,
+) -> list[dict]:
+    """count에 맞춰 여러 페이지를 병렬로 가져옴 (네이버는 페이지당 50개)."""
+    pages_needed = (count + 49) // 50  # 올림
+    pages_needed = max(1, min(pages_needed, 10))  # 1~10 페이지 제한
+
+    results_list = await asyncio.gather(
+        *[_fetch_ranking_page(url, sosok, page=p) for p in range(1, pages_needed + 1)]
+    )
+    # 여러 페이지 병합
+    merged = []
+    for page_results in results_list:
+        merged.extend(page_results)
+    return merged[:count]
+
+
 async def get_volume_ranking(market: str = "ALL", count: int = 50) -> list[dict]:
     """거래량 상위 종목을 가져옵니다.
 
     Args:
         market: "KOSPI" / "KOSDAQ" / "ALL" (기본 ALL = KOSPI+KOSDAQ 합산)
-        count: 최대 반환 개수 (기본 50, 최대 100)
+        count: 최대 반환 개수 (기본 50, 최대 500)
     """
-    count = min(count, 100)
+    count = min(count, 500)
     url = f"{BASE_URL}/sise/sise_quant.naver"
 
     if market.upper() == "ALL":
-        # 병렬 페치
+        # KOSPI/KOSDAQ 각각 count개씩 가져와서 병합
         kospi, kosdaq = await asyncio.gather(
-            _fetch_ranking_page(url, "0"),
-            _fetch_ranking_page(url, "1"),
+            _fetch_ranking_multi_page(url, "0", count),
+            _fetch_ranking_multi_page(url, "1", count),
         )
         # 거래량 기준 내림차순 병합
         merged = sorted(kospi + kosdaq, key=lambda x: x["volume"], reverse=True)
         return merged[:count]
     else:
         sosok = _market_to_sosok(market)
-        results = await _fetch_ranking_page(url, sosok)
-        return results[:count]
+        return await _fetch_ranking_multi_page(url, sosok, count)
 
 
 async def get_change_ranking(direction: str = "up", market: str = "ALL", count: int = 50) -> list[dict]:
@@ -668,53 +688,39 @@ async def get_change_ranking(direction: str = "up", market: str = "ALL", count: 
     Args:
         direction: "up"(상승률) / "down"(하락률)
         market: "KOSPI" / "KOSDAQ" / "ALL"
-        count: 최대 반환 개수 (기본 50, 최대 100)
+        count: 최대 반환 개수 (기본 50, 최대 500)
     """
-    count = min(count, 100)
-    page = "sise_rise.naver" if direction.lower() == "up" else "sise_fall.naver"
-    url = f"{BASE_URL}/sise/{page}"
+    count = min(count, 500)
+    page_url = "sise_rise.naver" if direction.lower() == "up" else "sise_fall.naver"
+    url = f"{BASE_URL}/sise/{page_url}"
 
     if market.upper() == "ALL":
-        # 병렬 페치
         kospi, kosdaq = await asyncio.gather(
-            _fetch_ranking_page(url, "0"),
-            _fetch_ranking_page(url, "1"),
+            _fetch_ranking_multi_page(url, "0", count),
+            _fetch_ranking_multi_page(url, "1", count),
         )
         merged = kospi + kosdaq
-        # 등락률 숫자 추출해서 정렬
+
         def parse_rate(s: str) -> float:
             try:
                 return float(s.replace("%", "").replace("+", ""))
             except ValueError:
                 return 0.0
+
         reverse = direction.lower() == "up"
         merged.sort(key=lambda x: parse_rate(x["change_rate"]), reverse=reverse)
         return merged[:count]
     else:
         sosok = _market_to_sosok(market)
-        results = await _fetch_ranking_page(url, sosok)
-        return results[:count]
+        return await _fetch_ranking_multi_page(url, sosok, count)
 
 
 @cached(ttl_market=300, ttl_closed=3600)  # 장중 5분, 장마감 1시간
-async def get_market_cap_ranking(market: str = "KOSPI", count: int = 50) -> list[dict]:
-    """시가총액 상위 종목을 가져옵니다.
-
-    시가총액 페이지는 cells 수(13)가 다르고 시가총액 컬럼이 [6]에 있음.
-
-    Args:
-        market: "KOSPI" / "KOSDAQ" (ALL 미지원 — 시장별 조회만)
-        count: 최대 반환 개수 (기본 50, 최대 100)
-    """
-    count = min(count, 100)
-    sosok = _market_to_sosok(market)
-    if sosok is None:
-        # ALL이면 일단 KOSPI 기본값
-        sosok = "0"
-
+async def _fetch_market_cap_page(sosok: str, page: int = 1) -> list[dict]:
+    """시가총액 페이지 1페이지(50개)를 파싱. cells=13 구조."""
     url = f"{BASE_URL}/sise/sise_market_sum.naver"
     client = get_client()
-    resp = await client.get(url, params={"sosok": sosok})
+    resp = await client.get(url, params={"sosok": sosok, "page": page})
     soup = BeautifulSoup(resp.text, "lxml")
 
     table = soup.select_one("table.type_2")
@@ -748,7 +754,29 @@ async def get_market_cap_ranking(market: str = "KOSPI", count: int = 50) -> list
             "volume": _parse_int(cells[9].text),
         })
 
-    return results[:count]
+    return results
+
+
+async def get_market_cap_ranking(market: str = "KOSPI", count: int = 50) -> list[dict]:
+    """시가총액 상위 종목을 가져옵니다.
+
+    네이버 페이지당 50개이므로 count가 50 넘으면 여러 페이지 병렬 요청.
+
+    Args:
+        market: "KOSPI" / "KOSDAQ" (ALL 미지원)
+        count: 최대 반환 개수 (기본 50, 최대 500)
+    """
+    count = min(count, 500)
+    sosok = _market_to_sosok(market) or "0"
+
+    pages_needed = max(1, min((count + 49) // 50, 10))
+    results_list = await asyncio.gather(
+        *[_fetch_market_cap_page(sosok, page=p) for p in range(1, pages_needed + 1)]
+    )
+    merged = []
+    for page_results in results_list:
+        merged.extend(page_results)
+    return merged[:count]
 
 
 @cached(ttl_market=30, ttl_closed=3600)  # 장중 30초, 장마감 1시간

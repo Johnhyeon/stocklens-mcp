@@ -412,9 +412,9 @@ async def get_volume_ranking(market: str = "ALL", count: int = 50) -> str:
 
     Args:
         market: "KOSPI" / "KOSDAQ" / "ALL" (기본 ALL)
-        count: 가져올 종목 수 (기본 50, 최대 100)
+        count: 가져올 종목 수 (기본 50, 최대 500)
     """
-    count = min(count, 100)
+    count = min(count, 500)
     ranks = await naver_get_volume_ranking(market=market, count=count)
     if not ranks:
         return f"{market} 거래량 순위를 가져올 수 없습니다."
@@ -443,9 +443,9 @@ async def get_change_ranking(
     Args:
         direction: "up"(상승률 상위) / "down"(하락률 상위)
         market: "KOSPI" / "KOSDAQ" / "ALL" (기본 ALL)
-        count: 가져올 종목 수 (기본 50, 최대 100)
+        count: 가져올 종목 수 (기본 50, 최대 500)
     """
-    count = min(count, 100)
+    count = min(count, 500)
     ranks = await naver_get_change_ranking(direction=direction, market=market, count=count)
     if not ranks:
         return f"{direction} 등락률 순위를 가져올 수 없습니다."
@@ -470,9 +470,9 @@ async def get_market_cap_ranking(market: str = "KOSPI", count: int = 50) -> str:
 
     Args:
         market: "KOSPI" / "KOSDAQ" (기본 KOSPI, ALL 미지원)
-        count: 가져올 종목 수 (기본 50, 최대 100)
+        count: 가져올 종목 수 (기본 50, 최대 500)
     """
-    count = min(count, 100)
+    count = min(count, 500)
     ranks = await naver_get_market_cap_ranking(market=market, count=count)
     if not ranks:
         return f"{market} 시가총액 순위를 가져올 수 없습니다."
