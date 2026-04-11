@@ -23,6 +23,7 @@ from stock_mcp_server.naver import (
     get_change_ranking as naver_get_change_ranking,
     get_market_cap_ranking as naver_get_market_cap_ranking,
     get_multi_stocks as naver_get_multi_stocks,
+    get_multi_chart_stats as naver_get_multi_chart_stats,
 )
 
 
@@ -515,6 +516,56 @@ async def get_multi_stocks(codes: list[str]) -> str:
         lines.append(
             f"{s['code']} | {s['name']} | {s['price']:,} | "
             f"{change_str} | {s['change_rate']} | {s['volume']:,}"
+        )
+    return "\n".join(lines)
+
+
+@mcp.tool()
+@safe_tool
+async def get_multi_chart_stats(codes: list[str], days: int = 260) -> str:
+    """차트통계벌크 — 여러 종목의 차트 통계(최고가/최저가/현재가/낙폭)를 한 번에 병렬 조회.
+
+    ⭐ 스크리닝 필수 도구. 개별 get_chart 를 N번 호출하지 말고 이것 한 번으로 해결.
+
+    각 종목의 지정 기간 내:
+      - high/high_date: 최고가 + 그날 날짜
+      - low/low_date: 최저가 + 그날 날짜
+      - current_price: 현재가
+      - drawdown_pct: 현재가가 최고가 대비 얼마나 내렸는지 (음수)
+      - recovery_pct: 현재가가 최저가에서 얼마나 올랐는지 (양수)
+      - period_return_pct: 기간 시작 대비 수익률
+      - avg_volume: 평균 거래량
+
+    활용 예시:
+      - "52주 고점 대비 30% 이상 하락한 종목 찾기" → days=260, drawdown_pct < -30 필터
+      - "52주 신고가 근접 종목" → days=260, drawdown_pct > -5 필터
+      - "가격 박스권 횡보 종목" → drawdown_pct와 recovery_pct 모두 작은 종목
+
+    Args:
+        codes: 종목코드 리스트 (최대 100개)
+        days: 과거 조회 일수 (기본 260 = 52주)
+    """
+    if not codes:
+        return "종목코드 리스트가 비어 있습니다."
+    if days < 10:
+        days = 10
+    if days > 500:
+        days = 500
+
+    stats = await naver_get_multi_chart_stats(codes, days=days)
+    if not stats:
+        return "차트 통계를 가져올 수 없습니다."
+
+    lines = [f"차트 통계 ({len(stats)}개 종목, 최근 {days}일):", ""]
+    lines.append("코드 | 현재가 | 최고가(날짜) | 최저가(날짜) | 고점대비낙폭 | 기간수익률")
+    lines.append("---|---|---|---|---|---")
+    for s in stats:
+        lines.append(
+            f"{s['code']} | {s['current_price']:,} | "
+            f"{s['high']:,}({s['high_date']}) | "
+            f"{s['low']:,}({s['low_date']}) | "
+            f"{s['drawdown_pct']:+.1f}% | "
+            f"{s['period_return_pct']:+.1f}%"
         )
     return "\n".join(lines)
 

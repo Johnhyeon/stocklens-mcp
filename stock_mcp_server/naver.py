@@ -547,8 +547,6 @@ async def get_multi_stocks(codes: list[str]) -> list[dict]:
     Returns:
         [{code, name, price, change, change_rate, volume}] 형태의 리스트
     """
-    import asyncio
-
     # 최대 30개 제한 (네이버 rate limit 및 응답 크기 제어)
     codes = codes[:30]
 
@@ -579,6 +577,97 @@ async def get_multi_stocks(codes: list[str]) -> list[dict]:
             return None
 
     results = await asyncio.gather(*[fetch_one(code) for code in codes])
+    return [r for r in results if r is not None]
+
+
+async def get_multi_chart_stats(
+    codes: list[str],
+    days: int = 260,
+) -> list[dict]:
+    """여러 종목의 차트 통계를 병렬로 가져옵니다 (스크리닝 전용).
+
+    각 종목에 대해 지정 기간 내 OHLCV를 받아서 통계만 계산해 반환한다.
+    전체 OHLCV 데이터 대신 요약만 주기 때문에:
+      - 100종목 × 260일 × 6필드 = 156,000개 숫자 → Claude 컨텍스트 폭발
+      - 100종목 요약만 반환 → 약 100줄 텍스트
+
+    활용 예시:
+      - 52주 고점 대비 낙폭 스크리닝
+      - 52주 신고가 돌파 종목 찾기
+      - 가격 범위 내 횡보 종목 찾기
+      - 변동성 비교
+
+    Args:
+        codes: 종목코드 리스트 (최대 100개)
+        days: 조회할 과거 일수 (기본 260 = 52주)
+
+    Returns:
+        각 종목마다:
+        {
+            code, bars_count,
+            current_price, current_date,
+            high, high_date,              # 기간 내 최고가
+            low, low_date,                # 기간 내 최저가
+            drawdown_pct,                 # 현재가가 고점 대비 얼마나 내렸는지 (음수)
+            recovery_pct,                 # 현재가가 저점에서 얼마나 올랐는지 (양수)
+            period_return_pct,            # 첫 봉 시가 대비 현재 종가
+            avg_volume,                   # 평균 거래량
+        }
+    """
+    codes = codes[:100]  # 최대 100개
+
+    async def fetch_one(code: str) -> dict | None:
+        try:
+            ohlcv = await get_ohlcv(code, "day", days)
+            if not ohlcv:
+                return None
+
+            # 날짜 오름차순 정렬 보장 (네이버는 오래된 것 먼저)
+            # 마지막 행이 최신
+            highs = [r["high"] for r in ohlcv]
+            lows = [r["low"] for r in ohlcv]
+            closes = [r["close"] for r in ohlcv]
+            volumes = [r["volume"] for r in ohlcv]
+
+            current_price = closes[-1]
+            current_date = ohlcv[-1]["date"]
+
+            high = max(highs)
+            high_idx = highs.index(high)
+            high_date = ohlcv[high_idx]["date"]
+
+            low = min(lows)
+            low_idx = lows.index(low)
+            low_date = ohlcv[low_idx]["date"]
+
+            drawdown_pct = ((current_price - high) / high * 100) if high > 0 else 0.0
+            recovery_pct = ((current_price - low) / low * 100) if low > 0 else 0.0
+
+            first_open = ohlcv[0]["open"]
+            period_return_pct = (
+                ((current_price - first_open) / first_open * 100) if first_open > 0 else 0.0
+            )
+
+            avg_volume = sum(volumes) // len(volumes) if volumes else 0
+
+            return {
+                "code": code,
+                "bars_count": len(ohlcv),
+                "current_price": current_price,
+                "current_date": current_date,
+                "high": high,
+                "high_date": high_date,
+                "low": low,
+                "low_date": low_date,
+                "drawdown_pct": round(drawdown_pct, 2),
+                "recovery_pct": round(recovery_pct, 2),
+                "period_return_pct": round(period_return_pct, 2),
+                "avg_volume": avg_volume,
+            }
+        except Exception:
+            return None
+
+    results = await asyncio.gather(*[fetch_one(c) for c in codes])
     return [r for r in results if r is not None]
 
 
