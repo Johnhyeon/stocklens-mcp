@@ -58,9 +58,11 @@ mcp = FastMCP(
 
 캔들 차트를 HTML Canvas/SVG로 렌더링할 때는 반드시 아래 규칙을 따를 것.
 
-### 기본 기간
-- **차트는 기본 180일(약 9개월)을 사용한다.** 사용자가 다른 기간을 명시하지 않으면 180일.
-- get_chart 호출 시 count=180이 기본값.
+### 기본 기간 (매우 중요)
+- **차트는 반드시 120일 이상 불러와서 그린다.** 60일 같은 짧은 기간으로 호출하지 말 것.
+- `get_chart` 호출 시 `count` 파라미터를 명시적으로 120 이상으로 설정할 것.
+- 사용자가 "3개월" 같이 짧은 기간을 요청해도 최소 120일 데이터는 불러와야 기술적 분석이 의미 있음.
+- 최소 권장: 120, 기본 권장: 120~180, 상한: 500.
 
 ### 필수 구성 (절대 생략 금지)
 - **캔들 차트는 반드시 상단 캔들 패널 + 하단 거래량 패널 세트로 구성한다.**
@@ -89,55 +91,81 @@ mcp = FastMCP(
 - 1행: 라벨명 (예: "강한 지지 (이중저점)")
 - 2행: 가격 (예: "16.7만"), 1행보다 약간 작은 폰트 + 낮은 opacity
 
-### 캔들 스페이싱 (중요)
+### 캔들 스페이싱 (⚠️ 반드시 준수)
 
-캔들 간 간격과 몸통 너비는 **가용 폭과 데이터 개수에 따라 동적 계산**할 것.
-고정값(예: CANDLE_W = 100)을 쓰지 말 것.
+**이 공식을 무조건 사용할 것. 다른 공식 쓰지 말 것:**
 
-**공식 (최종):**
-```
-availableW = W - PAD_L - PAD_R            # 캔들 영역 실제 폭
-step = availableW / candles.length         # 캔들 간 간격 (center-to-center)
-bodyW = Math.max(1, step - 1)              # 몸통 = step에서 1px만 뺌 (양옆 0.5px)
-wickStrokeW = Math.max(1, Math.min(1.5, bodyW / 6))  # 심지 두께
-```
-
-**중요: bodyW = step * 0.7 같은 비율 기반 공식은 쓰지 말 것.
-간격이 실제보다 넓어 보여서 이질감이 생김.**
-
-**제약:**
-- `step`은 최소 2px, 최대 20px로 클램프
-- 180일 일봉 + 폭 800px + PAD(좌40, 우190) 기준 → step ≈ 3.2px, bodyW ≈ 2.2px (자연스러움)
-- 60일 일봉 + 폭 800px 기준 → step ≈ 9.5px, bodyW ≈ 8.5px
-- 캔들 x좌표: `x = PAD_L + (i + 0.5) * step`  (center 기준)
-- 몸통 rect의 x: `x - bodyW / 2`
-
-**나쁜 예시:**
-```javascript
-const CANDLE_W = 100;                      // 고정값 금지
-const bodyW = step * 0.7;                  // 비율 금지 — 너무 벌어짐
-<rect x="${x-6}" width="12" .../>          // 간격 대비 몸통 12%는 띄엄띄엄함
-```
-
-**좋은 예시:**
 ```javascript
 const availableW = W - PAD_L - PAD_R;
-const step = Math.max(2, Math.min(20, availableW / candles.length));
-const bodyW = Math.max(1, step - 1);  // 핵심: step - 1
+const step = availableW / candles.length;
+const bodyW = Math.max(1, step - 1);
+// 거래량 바도 동일한 bodyW 사용
+```
+
+**절대 쓰면 안 되는 패턴 (Claude가 자주 실수하는 것):**
+
+```javascript
+// ❌ 금지 1: 비율 기반 — 간격이 너무 벌어져서 이질감 발생
+const bW = sw * 0.7;
+const bW = sw * 0.62;
+const bW = step * 0.8;
+
+// ❌ 금지 2: 최소값 강제 — step이 작을 때 캔들 겹침
+const bW = Math.max(3, sw * 0.62);
+const bW = Math.max(2, ...);
+
+// ❌ 금지 3: 고정값
+const CANDLE_W = 100;
+const bW = 12;
+```
+
+**반드시 써야 하는 패턴:**
+
+```javascript
+// ✅ 올바른 공식 — 이것만 사용
+const bodyW = Math.max(1, step - 1);
+```
+
+**이 공식의 의미:**
+- `step - 1`: 캔들 간 1px 공백 (양쪽 0.5px씩)
+- `Math.max(1, ...)`: step이 1px 이하일 때도 최소 1px 보장
+- 비율이 아니라 **절대값 1px 공백**이 핵심
+
+**예시 값:**
+- 120일 일봉 + 폭 800px → step ≈ 6px, bodyW ≈ 5px (자연스러움)
+- 60일 일봉 + 폭 800px → step ≈ 12px, bodyW ≈ 11px
+
+### 전체 캔들 차트 렌더링 참고 코드
+
+```javascript
+// 1. 가용 공간 계산
+const availableW = W - PAD_L - PAD_R;
+const step = availableW / candles.length;
+const bodyW = Math.max(1, step - 1);   // ← 이 공식 그대로 사용
+const wickW = 1;                        // 심지는 1px 고정
+
+// 2. 캔들 그리기
 candles.forEach((c, i) => {
   const cx = PAD_L + (i + 0.5) * step;
-  // 심지
-  line(cx, py(c.high), cx, py(c.low), strokeWidth=1);
+  const up = c.close >= c.open;
+  const color = up ? '#E24B4A' : '#1D9E75';  // 한국식: 양봉 빨강, 음봉 파랑
+
+  // 심지 (high-low)
+  line(cx, py(c.high), cx, py(c.low), strokeWidth=wickW, stroke=color);
+
   // 몸통
-  rect(cx - bodyW/2, py(top), bodyW, bodyH);
+  const bodyTop = py(Math.max(c.open, c.close));
+  const bodyH = Math.max(1, Math.abs(py(c.open) - py(c.close)));
+  rect(cx - bodyW/2, bodyTop, bodyW, bodyH, fill=color);
 });
 
-// 거래량 패널 (필수)
+// 3. 거래량 패널 (필수, 같은 bodyW 사용)
 const maxVol = Math.max(...candles.map(c => c.volume));
 candles.forEach((c, i) => {
   const cx = PAD_L + (i + 0.5) * step;
-  const h = (c.volume / maxVol) * volPanelH;
-  const color = c.close >= c.open ? redColor : blueColor;
+  const up = c.close >= c.open;
+  const color = up ? '#E24B4A' : '#1D9E75';
+  const h = (c.volume / maxVol) * (volPanelH - 4);
   rect(cx - bodyW/2, volPanelBottom - h, bodyW, h, fill=color);
 });
 ```
@@ -166,15 +194,15 @@ async def search(query: str) -> str:
 
 @mcp.tool()
 @safe_tool
-async def get_chart(code: str, timeframe: str = "day", count: int = 180) -> str:
+async def get_chart(code: str, timeframe: str = "day", count: int = 120) -> str:
     """차트데이터 — 종목의 OHLCV(시가/고가/저가/종가/거래량) 차트 데이터를 가져옵니다.
     "삼성전자 일봉", "차트 보여줘", "3개월 주봉", "월봉 데이터" 같은 질문에 사용합니다.
-    기본 180일(약 9개월)로, 충분한 기술적 분석이 가능한 기간.
+    **기본값 120일 (약 6개월 거래일)**. 사용자가 다른 기간을 명시하지 않으면 120 사용.
 
     Args:
         code: 종목코드 6자리 (예: "005930")
         timeframe: "day"(일봉), "week"(주봉), "month"(월봉)
-        count: 가져올 봉 개수 (기본 180, 최대 500)
+        count: 가져올 봉 개수 (기본 120, 최대 500)
     """
     count = min(count, 500)
     data = await get_ohlcv(code, timeframe, count)
