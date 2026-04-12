@@ -35,6 +35,7 @@ from stock_mcp_server._excel import (
     load_excel,
     apply_filters,
 )
+from stock_mcp_server._chart_html import render_chart_html
 import pandas as pd
 
 
@@ -67,7 +68,34 @@ mcp = FastMCP(
 
 ## 차트 시각화 규칙
 
-캔들 차트를 HTML Canvas/SVG로 렌더링할 때는 반드시 아래 규칙을 따를 것.
+### ⚠️ 필수: 차트는 `create_chart_file` 도구를 사용할 것
+
+**Claude가 직접 HTML/SVG/Canvas 코드를 작성하지 말 것.**
+차트가 필요한 상황이라면 `create_chart_file(code, timeframe, count)` 도구를 호출해라.
+
+이유:
+- 서버 사이드에서 일관된 스타일로 렌더링됨
+- 캔들 간격, 색상, 레이아웃, MA 라인, 거래량 패널, 툴팁 전부 표준화
+- 속도 30초 → 즉시 (토큰 생성 없음)
+- 텍스트 잘림, 이질감 같은 시각적 버그 없음
+
+**올바른 사용:**
+```
+사용자: "삼성전자 차트 보여줘"
+Claude: create_chart_file(code="005930") 호출
+     → "✓ 차트 파일 생성 완료: C:\\Users\\...\\chart_005930.html"
+```
+
+**잘못된 사용 (금지):**
+```
+사용자: "삼성전자 차트 그려줘"
+Claude: <!DOCTYPE html>... 를 직접 작성  ← ❌ 절대 금지
+```
+
+### 차트 이외의 시각화가 필요한 경우 (예: 여러 종목 비교 대시보드)
+
+`create_chart_file`로 커버 안 되는 특수 요청일 때만 직접 렌더링.
+그 경우에도 아래 규칙을 반드시 따를 것.
 
 ### 기본 기간 (매우 중요)
 - **차트는 반드시 120일 이상 불러와서 그린다.** 60일 같은 짧은 기간으로 호출하지 말 것.
@@ -832,6 +860,83 @@ async def query_excel(
         lines.append("| " + " | ".join(values) + " |")
 
     return "\n".join(lines)
+
+
+@mcp.tool()
+@safe_tool
+async def create_chart_file(
+    code: str,
+    timeframe: str = "day",
+    count: int = 120,
+    title: str = "",
+) -> str:
+    """차트파일생성 — 완성된 캔들차트 HTML 파일을 즉시 생성합니다.
+
+    ⭐ 차트 시각화의 표준 방법. Claude가 직접 HTML을 만들지 말고 이 도구를 사용할 것.
+
+    특징:
+    - 서버 사이드 렌더링 (Claude가 HTML 코드 생성 안 함 → 매우 빠름)
+    - 일관된 스타일 (캔들 간격, 색상, 레이아웃 전부 표준화)
+    - SVG 기반 (선명, 반응형, 오프라인 OK)
+    - MA5/20/60 이동평균선 + 거래량 패널 자동 포함
+    - 마우스 오버 툴팁 (OHLCV 정보)
+    - 고점/저점 마커
+    - 라이트/다크 모드 자동 감지
+    - 한국식 양봉(빨강)/음봉(파랑)
+
+    Args:
+        code: 종목코드 6자리 (예: "005930")
+        timeframe: "day"(일봉), "week"(주봉), "month"(월봉)
+        count: 봉 개수 (기본 120, 최대 500)
+        title: 차트 제목 (비우면 자동 생성)
+
+    Returns:
+        저장된 HTML 파일 경로 + 요약 정보
+    """
+    count = min(max(count, 20), 500)
+
+    # 1) OHLCV 수집
+    ohlcv = await get_ohlcv(code, timeframe, count)
+    if not ohlcv:
+        return f"차트 데이터를 가져올 수 없습니다: {code}"
+
+    # 2) 종목명 조회 (current_price에서)
+    price_info = await get_current_price(code)
+    name = price_info.get("name", code) if price_info else code
+
+    # 3) HTML 생성
+    try:
+        html = render_chart_html(
+            code=code,
+            name=name,
+            ohlcv=ohlcv,
+            timeframe=timeframe,
+            title=title,
+        )
+    except Exception as e:
+        return f"차트 HTML 생성 실패: {type(e).__name__}: {e}"
+
+    # 4) 파일 저장
+    filename = generate_filename(f"chart_{code}", ext="html")
+    file_path = get_snapshot_dir() / filename
+    file_path.write_text(html, encoding="utf-8")
+
+    # 5) 요약 반환
+    first_date = ohlcv[0]["date"]
+    last_date = ohlcv[-1]["date"]
+    current = ohlcv[-1]["close"]
+    high = max(r["high"] for r in ohlcv)
+    low = min(r["low"] for r in ohlcv)
+
+    return (
+        f"✓ 차트 파일 생성 완료\n"
+        f"경로: {file_path.resolve()}\n"
+        f"종목: {name} ({code})\n"
+        f"기간: {first_date[:8]} ~ {last_date[:8]} ({len(ohlcv)}봉)\n"
+        f"현재가: {current:,}원\n"
+        f"최고가: {high:,} / 최저가: {low:,}\n\n"
+        f"💡 브라우저에서 위 경로를 열면 인터랙티브 차트가 표시됩니다."
+    )
 
 
 def main():
