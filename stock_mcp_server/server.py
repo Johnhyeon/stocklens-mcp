@@ -88,15 +88,21 @@ mcp = FastMCP(
 **올바른 사용:**
 ```
 사용자: "삼성전자 차트 보여줘"
-Claude: create_chart_file(code="005930") 호출
-     → "✓ 차트 파일 생성 완료: C:\\Users\\...\\chart_005930.html"
+Claude: create_chart_file(code="005930") 호출 → 끝. 추가 작업 없음.
+        브라우저가 자동으로 열리므로 사용자에게 "차트를 열었습니다" 안내만 하면 됨.
+        get_chart를 추가 호출하거나 HTML/SVG를 직접 작성하면 안 됨.
 ```
 
-**잘못된 사용 (금지):**
+**잘못된 사용 (전부 금지):**
 ```
-사용자: "삼성전자 차트 그려줘"
-Claude: <!DOCTYPE html>... 를 직접 작성  ← ❌ 절대 금지
+❌ create_chart_file 호출 후 get_chart를 또 호출
+❌ create_chart_file 호출 후 HTML/SVG/Canvas 코드 작성
+❌ get_chart 데이터로 차트 렌더링 (시각화 요청 시)
+❌ <!DOCTYPE html>... 를 직접 작성
 ```
+
+**핵심: create_chart_file은 브라우저에서 자동으로 차트를 보여줌.
+따라서 채팅 안에서 추가로 차트를 만들 필요가 전혀 없음.**
 
 ### 차트 이외의 시각화가 필요한 경우 (예: 여러 종목 비교 대시보드)
 
@@ -242,9 +248,16 @@ async def search(query: str) -> str:
 @safe_tool
 @track_metrics("get_chart")
 async def get_chart(code: str, timeframe: str = "day", count: int = 120) -> str:
-    """차트데이터 — 종목의 OHLCV(시가/고가/저가/종가/거래량) 차트 데이터를 가져옵니다.
-    "삼성전자 일봉", "차트 보여줘", "3개월 주봉", "월봉 데이터" 같은 질문에 사용합니다.
-    **기본값 120일 (약 6개월 거래일)**. 사용자가 다른 기간을 명시하지 않으면 120 사용.
+    """차트데이터 — 종목의 OHLCV 원시 데이터(텍스트 테이블)를 가져옵니다.
+
+    ⚠️ 차트를 "보여줘/그려줘" 요청에는 이 도구 대신 create_chart_file을 사용할 것.
+    이 도구는 이동평균 계산, 수치 비교 등 텍스트 기반 분석이 필요할 때만 사용.
+
+    올바른 사용:
+    - "삼성전자 20일 이동평균 계산해줘" → get_chart (데이터 필요)
+    - "삼성전자 차트 보여줘/그려줘" → create_chart_file (시각화)
+
+    **기본값 120일 (약 6개월 거래일)**.
 
     Args:
         code: 종목코드 6자리 (예: "005930")
@@ -946,7 +959,22 @@ async def create_chart_file(
     file_path = get_snapshot_dir() / filename
     file_path.write_text(html, encoding="utf-8")
 
-    # 5) 요약 반환
+    # 5) 브라우저에서 자동 열기
+    import subprocess
+    import sys as _sys
+    try:
+        abs_path = str(file_path.resolve())
+        if _sys.platform == "win32":
+            import os
+            os.startfile(abs_path)
+        elif _sys.platform == "darwin":
+            subprocess.Popen(["open", abs_path])
+        else:
+            subprocess.Popen(["xdg-open", abs_path])
+    except Exception:
+        pass  # 열기 실패해도 파일은 이미 저장됨
+
+    # 6) 요약 반환
     first_date = ohlcv[0]["date"]
     last_date = ohlcv[-1]["date"]
     current = ohlcv[-1]["close"]
@@ -954,13 +982,14 @@ async def create_chart_file(
     low = min(r["low"] for r in ohlcv)
 
     return (
-        f"✓ 차트 파일 생성 완료\n"
-        f"경로: {file_path.resolve()}\n"
+        f"✓ 차트를 브라우저에서 열었습니다.\n"
         f"종목: {name} ({code})\n"
         f"기간: {first_date[:8]} ~ {last_date[:8]} ({len(ohlcv)}봉)\n"
         f"현재가: {current:,}원\n"
-        f"최고가: {high:,} / 최저가: {low:,}\n\n"
-        f"💡 브라우저에서 위 경로를 열면 인터랙티브 차트가 표시됩니다."
+        f"최고가: {high:,} / 최저가: {low:,}\n"
+        f"파일: {file_path.resolve()}\n\n"
+        f"이 도구가 차트를 이미 보여줬으므로, "
+        f"추가로 HTML이나 SVG 코드를 작성할 필요가 없습니다."
     )
 
 
