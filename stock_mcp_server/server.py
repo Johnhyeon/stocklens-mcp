@@ -36,6 +36,12 @@ from stock_mcp_server._excel import (
     apply_filters,
 )
 from stock_mcp_server._chart_html import render_chart_html
+from stock_mcp_server._metrics import (
+    track_metrics,
+    load_metrics,
+    summarize_metrics,
+    get_metrics_file,
+)
 import pandas as pd
 
 
@@ -214,6 +220,7 @@ candles.forEach((c, i) => {
 
 @mcp.tool()
 @safe_tool
+@track_metrics("search")
 async def search(query: str) -> str:
     """종목검색 — 종목명 또는 종목코드로 검색합니다.
     "삼성전자 종목코드", "반도체 관련주", "005930 뭐야" 같은 질문에 사용합니다.
@@ -233,6 +240,7 @@ async def search(query: str) -> str:
 
 @mcp.tool()
 @safe_tool
+@track_metrics("get_chart")
 async def get_chart(code: str, timeframe: str = "day", count: int = 120) -> str:
     """차트데이터 — 종목의 OHLCV(시가/고가/저가/종가/거래량) 차트 데이터를 가져옵니다.
     "삼성전자 일봉", "차트 보여줘", "3개월 주봉", "월봉 데이터" 같은 질문에 사용합니다.
@@ -262,6 +270,7 @@ async def get_chart(code: str, timeframe: str = "day", count: int = 120) -> str:
 
 @mcp.tool()
 @safe_tool
+@track_metrics("get_price")
 async def get_price(code: str) -> str:
     """현재가 — 종목의 현재 시세 정보를 가져옵니다.
     "삼성전자 지금 얼마", "현재가", "오늘 시세", "주가 알려줘" 같은 질문에 사용합니다.
@@ -293,6 +302,7 @@ async def get_price(code: str) -> str:
 
 @mcp.tool()
 @safe_tool
+@track_metrics("get_flow")
 async def get_flow(code: str, days: int = 20) -> str:
     """투자자수급 — 투자자별 매매동향 (외국인/기관/개인 순매수량)을 가져옵니다.
     "외국인 수급", "기관 순매수", "수급 분석", "누가 사고 있어" 같은 질문에 사용합니다.
@@ -326,6 +336,7 @@ async def get_flow(code: str, days: int = 20) -> str:
 
 @mcp.tool()
 @safe_tool
+@track_metrics("get_financial")
 async def get_financial(code: str) -> str:
     """재무지표 — 종목의 주요 재무지표(PER, PBR, 시가총액 등)를 가져옵니다.
     "PER", "PBR", "재무제표", "시가총액", "저평가" 같은 질문에 사용합니다.
@@ -350,6 +361,7 @@ async def get_financial(code: str) -> str:
 
 @mcp.tool()
 @safe_tool
+@track_metrics("get_index")
 async def get_index() -> str:
     """시장지수 — KOSPI, KOSDAQ 지수 현재값을 가져옵니다.
     "코스피", "코스닥", "시장 지수", "오늘 시장 어때" 같은 질문에 사용합니다.
@@ -366,6 +378,7 @@ async def get_index() -> str:
 
 @mcp.tool()
 @safe_tool
+@track_metrics("list_themes")
 async def list_themes(page: int = 1) -> str:
     """테마목록 — 네이버 증권의 테마 목록을 가져옵니다.
     "어떤 테마가 있어?", "테마 리스트", "오늘 강세 테마" 같은 질문에 사용합니다.
@@ -393,6 +406,7 @@ async def list_themes(page: int = 1) -> str:
 
 @mcp.tool()
 @safe_tool
+@track_metrics("get_theme_stocks")
 async def get_theme_stocks(
     theme_name: str,
     count: int = 30,
@@ -445,6 +459,7 @@ async def get_theme_stocks(
 
 @mcp.tool()
 @safe_tool
+@track_metrics("list_sectors")
 async def list_sectors() -> str:
     """업종목록 — 네이버 증권의 업종(섹터) 목록을 가져옵니다.
     "업종별 현황", "섹터 리스트", "업종 등락률" 같은 질문에 사용합니다.
@@ -467,6 +482,7 @@ async def list_sectors() -> str:
 
 @mcp.tool()
 @safe_tool
+@track_metrics("get_sector_stocks")
 async def get_sector_stocks(sector_name: str, count: int = 30) -> str:
     """업종종목 — 특정 업종에 속한 종목 리스트를 가져옵니다.
     "통신장비 업종 종목", "반도체 업종", "제약 섹터 종목" 같은 질문에 사용합니다.
@@ -497,6 +513,7 @@ async def get_sector_stocks(sector_name: str, count: int = 30) -> str:
 
 @mcp.tool()
 @safe_tool
+@track_metrics("get_volume_ranking")
 async def get_volume_ranking(market: str = "ALL", count: int = 50) -> str:
     """거래량순위 — 거래량 상위 종목을 가져옵니다.
     "거래량 많은 종목", "거래 활발한 종목", "오늘 가장 많이 거래된 종목" 같은 질문에 사용합니다.
@@ -523,6 +540,7 @@ async def get_volume_ranking(market: str = "ALL", count: int = 50) -> str:
 
 @mcp.tool()
 @safe_tool
+@track_metrics("get_change_ranking")
 async def get_change_ranking(
     direction: str = "up",
     market: str = "ALL",
@@ -555,6 +573,7 @@ async def get_change_ranking(
 
 @mcp.tool()
 @safe_tool
+@track_metrics("get_market_cap_ranking")
 async def get_market_cap_ranking(market: str = "KOSPI", count: int = 50) -> str:
     """시가총액순위 — 시가총액 상위 종목을 가져옵니다.
     "대형주", "시가총액 TOP", "코스피 대장주" 같은 질문에 사용합니다.
@@ -581,6 +600,7 @@ async def get_market_cap_ranking(market: str = "KOSPI", count: int = 50) -> str:
 
 @mcp.tool()
 @safe_tool
+@track_metrics("get_multi_stocks")
 async def get_multi_stocks(codes: list[str]) -> str:
     """벌크조회 — 여러 종목의 기본 정보(가격/등락률/거래량)를 한 번에 가져옵니다.
     "이 종목들 현재가 보여줘", "리스트 종목 시세 한번에" 같은 질문에 사용합니다.
@@ -612,6 +632,7 @@ async def get_multi_stocks(codes: list[str]) -> str:
 
 @mcp.tool()
 @safe_tool
+@track_metrics("get_multi_chart_stats")
 async def get_multi_chart_stats(codes: list[str], days: int = 260) -> str:
     """차트통계벌크 — 여러 종목의 차트 통계(최고가/최저가/현재가/낙폭)를 한 번에 병렬 조회.
 
@@ -662,6 +683,7 @@ async def get_multi_chart_stats(codes: list[str], days: int = 260) -> str:
 
 @mcp.tool()
 @safe_tool
+@track_metrics("export_to_excel")
 async def export_to_excel(
     data_type: str,
     code: str = "",
@@ -729,6 +751,7 @@ async def export_to_excel(
 
 @mcp.tool()
 @safe_tool
+@track_metrics("scan_to_excel")
 async def scan_to_excel(
     codes: list[str],
     days: int = 260,
@@ -787,6 +810,7 @@ async def scan_to_excel(
 
 @mcp.tool()
 @safe_tool
+@track_metrics("query_excel")
 async def query_excel(
     file_path: str,
     filters: dict | None = None,
@@ -864,6 +888,7 @@ async def query_excel(
 
 @mcp.tool()
 @safe_tool
+@track_metrics("create_chart_file")
 async def create_chart_file(
     code: str,
     timeframe: str = "day",
@@ -937,6 +962,75 @@ async def create_chart_file(
         f"최고가: {high:,} / 최저가: {low:,}\n\n"
         f"💡 브라우저에서 위 경로를 열면 인터랙티브 차트가 표시됩니다."
     )
+
+
+@mcp.tool()
+@safe_tool
+@track_metrics("get_metrics_summary")
+async def get_metrics_summary(days: int = 1) -> str:
+    """사용량통계 — 최근 N일간 MCP 도구 사용량을 집계해서 보여줍니다.
+
+    디버깅/최적화용. 도구별로:
+    - 호출 횟수
+    - 평균/p50/p95 실행 시간
+    - 평균 토큰 소모량
+    - 캐시 히트율
+    - 에러 발생 횟수
+    를 보여줍니다.
+
+    로그 파일 위치: ~/Downloads/kstock/logs/metrics_YYYYMMDD.jsonl
+
+    Args:
+        days: 조회할 일수 (기본 1, 오늘만. 최대 30)
+    """
+    days = max(1, min(days, 30))
+
+    records = load_metrics(days=days)
+    if not records:
+        return (
+            f"최근 {days}일간 기록이 없습니다.\n"
+            f"로그 파일: {get_metrics_file()}"
+        )
+
+    summary = summarize_metrics(records)
+
+    sorted_tools = sorted(
+        summary.items(),
+        key=lambda x: x[1]["call_count"],
+        reverse=True,
+    )
+
+    lines = [
+        f"📊 MCP 사용량 통계 (최근 {days}일, 총 {len(records)}회 호출)",
+        "",
+        "도구 | 호출 | 평균시간 | p95시간 | 평균토큰 | 캐시율 | 에러",
+        "---|---|---|---|---|---|---",
+    ]
+
+    total_tokens = 0
+    total_calls = 0
+
+    for tool, s in sorted_tools:
+        total_tokens += s["total_output_tokens"]
+        total_calls += s["call_count"]
+        lines.append(
+            f"{tool} | "
+            f"{s['call_count']} | "
+            f"{s['avg_duration_ms']}ms | "
+            f"{s['p95_duration_ms']}ms | "
+            f"{s['avg_tokens']:,} | "
+            f"{s['cache_hit_rate']}% | "
+            f"{s['errors']}"
+        )
+
+    lines.append("")
+    lines.append(f"**총 소모 토큰: {total_tokens:,}**")
+    lines.append(f"**총 호출: {total_calls}회**")
+    lines.append(f"**평균 호출당 토큰: {total_tokens // max(total_calls, 1):,}**")
+    lines.append("")
+    lines.append(f"로그 파일: {get_metrics_file()}")
+
+    return "\n".join(lines)
 
 
 def main():
