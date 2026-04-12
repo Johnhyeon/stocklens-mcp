@@ -707,6 +707,8 @@ async def export_to_excel(
         return f"지원하지 않는 data_type: {data_type}. 'chart', 'flow', 'financial' 중 선택."
 
     fname = filename or generate_filename(prefix)
+    if not fname.endswith(".xlsx"):
+        fname += ".xlsx"
     file_path = get_snapshot_dir() / fname
     saved = save_dataframe_to_excel(df, file_path, sheet_name=sheet)
 
@@ -756,6 +758,8 @@ async def scan_to_excel(
 
     df = pd.DataFrame(rows)
     fname = filename or generate_filename(f"snapshot_{len(df)}stocks")
+    if not fname.endswith(".xlsx"):
+        fname += ".xlsx"
     file_path = get_snapshot_dir() / fname
 
     saved = save_dataframe_to_excel(
