@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="512" y2="512" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#0f172a"/>
+      <stop offset="100%" stop-color="#1e293b"/>
+    </linearGradient>
+    <!-- 돋보기 렌즈 안쪽 하이라이트 -->
+    <radialGradient id="lensGlow" cx="0.4" cy="0.35" r="0.6">
+      <stop offset="0%" stop-color="rgba(255,255,255,0.12)"/>
+      <stop offset="100%" stop-color="rgba(255,255,255,0)"/>
+    </radialGradient>
+  </defs>
+
+  <!-- 배경 -->
+  <rect width="512" height="512" rx="96" fill="url(#bg)"/>
+
+  <!-- 캔들 3개 -->
+
+  <!-- 캔들 1: 음봉 (파랑, 좌) -->
+  <line x1="130" y1="145" x2="130" y2="320" stroke="#3a7bd5" stroke-width="6" stroke-linecap="round"/>
+  <rect x="112" y="185" width="36" height="90" rx="4" fill="#3a7bd5"/>
+
+  <!-- 캔들 2: 양봉 (빨강, 중앙, 메인) -->
+  <line x1="228" y1="100" x2="228" y2="330" stroke="#e5414a" stroke-width="7" stroke-linecap="round"/>
+  <rect x="202" y="140" width="52" height="130" rx="5" fill="#e5414a"/>
+
+  <!-- 캔들 3: 양봉 (빨강, 우) -->
+  <line x1="326" y1="120" x2="326" y2="290" stroke="#e5414a" stroke-width="6" stroke-linecap="round"/>
+  <rect x="308" y="155" width="36" height="85" rx="4" fill="#e5414a"/>
+
+  <!-- 돋보기 (우하단) -->
+  <!-- 렌즈 원 -->
+  <circle cx="370" cy="340" r="72" fill="none" stroke="rgba(255,255,255,0.9)" stroke-width="10"/>
+  <!-- 렌즈 안쪽 글로우 -->
+  <circle cx="370" cy="340" r="66" fill="url(#lensGlow)"/>
+  <!-- 손잡이 -->
+  <line x1="420" y1="392" x2="456" y2="432" stroke="rgba(255,255,255,0.9)" stroke-width="12" stroke-linecap="round"/>
+
+  <!-- 렌즈 안에 미니 상승 차트 라인 (확대된 데이터 느낌) -->
+  <polyline
+    points="315,370 335,355 355,362 375,338 395,320 415,325"
+    stroke="#22c55e"
+    stroke-width="4"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    fill="none"
+    opacity="0.9"
+  />
+  <!-- 라인 아래 미세한 영역 채우기 -->
+  <polyline
+    points="315,370 335,355 355,362 375,338 395,320 415,325 415,375 315,375"
+    fill="#22c55e"
+    opacity="0.1"
+  />
+</svg>

@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>naver-stock-mcp Logo Preview</title>
+<style>
+  body {
+    margin: 0;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 40px;
+    font-family: -apple-system, 'Malgun Gothic', sans-serif;
+    background: #f1f5f9;
+  }
+  .dark { background: #0f172a; color: #f1f5f9; }
+  .row {
+    display: flex;
+    align-items: center;
+    gap: 30px;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+  .size-label {
+    text-align: center;
+    font-size: 12px;
+    color: #94a3b8;
+    margin-top: 6px;
+  }
+  .logo-card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+  h1 { font-size: 28px; margin: 0; }
+  h2 { font-size: 18px; margin: 30px 0 10px; color: #64748b; }
+  .toggle {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    padding: 8px 16px;
+    border: 1px solid #94a3b8;
+    border-radius: 6px;
+    cursor: pointer;
+    background: transparent;
+    color: inherit;
+    font-size: 13px;
+  }
+
+  /* 텍스트 로고 */
+  .text-logo {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+  }
+  .text-logo .brand {
+    font-size: 32px;
+    font-weight: 800;
+    letter-spacing: -0.5px;
+  }
+  .text-logo .brand .k { color: #e5414a; }
+  .text-logo .brand .stock { color: #f1f5f9; }
+  .text-logo .sub {
+    font-size: 13px;
+    color: #94a3b8;
+    margin-top: 4px;
+  }
+</style>
+</head>
+<body>
+
+<button class="toggle" onclick="document.body.classList.toggle('dark')">Light / Dark</button>
+
+<h1>naver-stock-mcp Logo</h1>
+
+<h2>Icon Sizes</h2>
+<div class="row">
+  <div class="logo-card">
+    <img src="logo.svg" width="256" height="256">
+    <div class="size-label">256px</div>
+  </div>
+  <div class="logo-card">
+    <img src="logo.svg" width="128" height="128">
+    <div class="size-label">128px</div>
+  </div>
+  <div class="logo-card">
+    <img src="logo.svg" width="64" height="64">
+    <div class="size-label">64px</div>
+  </div>
+  <div class="logo-card">
+    <img src="logo.svg" width="32" height="32">
+    <div class="size-label">32px</div>
+  </div>
+  <div class="logo-card">
+    <img src="logo.svg" width="16" height="16">
+    <div class="size-label">16px</div>
+  </div>
+</div>
+
+<h2>With Text (GitHub README Header)</h2>
+<div class="row" style="background: #0f172a; padding: 30px 50px; border-radius: 12px;">
+  <div class="text-logo">
+    <img src="logo.svg" width="52" height="52">
+    <div>
+      <div class="brand"><span class="k">Stock</span><span class="stock">Lens</span></div>
+      <div class="sub">AI가 진짜 데이터로 분석합니다</div>
+    </div>
+  </div>
+</div>
+
+<h2>Color Variants</h2>
+<div class="row">
+  <!-- 라이트 배경용 -->
+  <div class="logo-card" style="background: white; padding: 20px; border-radius: 12px; border: 1px solid #e2e8f0;">
+    <svg width="80" height="80" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <rect width="512" height="512" rx="96" fill="#f8fafc" stroke="#e2e8f0" stroke-width="8"/>
+      <line x1="148" y1="155" x2="148" y2="340" stroke="#3a7bd5" stroke-width="6" stroke-linecap="round"/>
+      <rect x="128" y="195" width="40" height="100" rx="4" fill="#3a7bd5"/>
+      <line x1="256" y1="105" x2="256" y2="350" stroke="#e5414a" stroke-width="8" stroke-linecap="round"/>
+      <rect x="226" y="150" width="60" height="140" rx="6" fill="#e5414a"/>
+      <line x1="364" y1="130" x2="364" y2="310" stroke="#e5414a" stroke-width="6" stroke-linecap="round"/>
+      <rect x="344" y="165" width="40" height="95" rx="4" fill="#e5414a"/>
+      <circle cx="390" cy="400" r="62" fill="#16a34a"/>
+      <polyline points="358,400 380,425 422,378" stroke="white" stroke-width="14" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+    </svg>
+    <div class="size-label">Light BG</div>
+  </div>
+
+  <!-- 다크 배경용 (기본) -->
+  <div class="logo-card" style="background: #0f172a; padding: 20px; border-radius: 12px;">
+    <img src="logo.svg" width="80" height="80">
+    <div class="size-label" style="color:#94a3b8;">Dark BG (기본)</div>
+  </div>
+
+  <!-- 투명 배경 -->
+  <div class="logo-card" style="background: repeating-conic-gradient(#ddd 0% 25%, white 0% 50%) 50% / 16px 16px; padding: 20px; border-radius: 12px;">
+    <svg width="80" height="80" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <line x1="148" y1="155" x2="148" y2="340" stroke="#3a7bd5" stroke-width="6" stroke-linecap="round"/>
+      <rect x="128" y="195" width="40" height="100" rx="4" fill="#3a7bd5"/>
+      <line x1="256" y1="105" x2="256" y2="350" stroke="#e5414a" stroke-width="8" stroke-linecap="round"/>
+      <rect x="226" y="150" width="60" height="140" rx="6" fill="#e5414a"/>
+      <line x1="364" y1="130" x2="364" y2="310" stroke="#e5414a" stroke-width="6" stroke-linecap="round"/>
+      <rect x="344" y="165" width="40" height="95" rx="4" fill="#e5414a"/>
+      <circle cx="390" cy="400" r="62" fill="#16a34a"/>
+      <polyline points="358,400 380,425 422,378" stroke="white" stroke-width="14" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+    </svg>
+    <div class="size-label">Transparent</div>
+  </div>
+</div>
+
+<h2>Usage Examples</h2>
+<div class="row" style="gap: 50px;">
+  <!-- GitHub Badge -->
+  <div class="logo-card">
+    <div style="background: #0d1117; padding: 16px 24px; border-radius: 8px; display: flex; align-items: center; gap: 10px;">
+      <img src="logo.svg" width="24" height="24">
+      <span style="color: #f0f6fc; font-size: 16px; font-weight: 600;">Johnhyeon/naver-stock-mcp</span>
+    </div>
+    <div class="size-label">GitHub Repo</div>
+  </div>
+
+  <!-- PyPI Badge -->
+  <div class="logo-card">
+    <div style="background: white; padding: 12px 20px; border-radius: 8px; border: 1px solid #ddd; display: flex; align-items: center; gap: 8px;">
+      <img src="logo.svg" width="20" height="20">
+      <span style="color: #333; font-size: 14px;">naver-stock-mcp 0.2.0</span>
+    </div>
+    <div class="size-label">PyPI Package</div>
+  </div>
+</div>
+
+<div style="height: 60px;"></div>
+</body>
+</html>
