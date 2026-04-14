@@ -117,11 +117,9 @@ Downloads and runs install.bat automatically. No `.txt` save issue.
 ### Method C: Download install.bat (Visual step-by-step)
 
 **Windows**:
-1. Visit https://github.com/Johnhyeon/stocklens-mcp/releases/latest/download/install.bat
-2. Right-click → **"Save Link As"** → save somewhere
-3. Double-click the saved `install.bat`
-4. A terminal window opens and runs automatically
-5. Wait for "Installation complete!"
+1. Click **[📥 Download installer](https://github.com/Johnhyeon/stocklens-mcp/releases/latest/download/install.bat)** → starts download
+2. Double-click the downloaded `install.bat`
+3. A terminal opens and runs automatically → wait for "Installation complete!"
 
 **⚠️ If the file opens as `.txt` (common issue):**
 Some browsers save the file as `install.bat.txt`. Fix:
