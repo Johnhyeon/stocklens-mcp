@@ -48,7 +48,7 @@ API 키, 증권 계좌는 필요 없습니다.
 
 
 ```powershell
-py--version
+py --version
 ```
 
 `Python 3.12.x` 같은 버전이 나오면 성공.

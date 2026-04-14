@@ -45,9 +45,11 @@ Open **PowerShell** or **Command Prompt (cmd)**:
 
 <img width="394" height="202" alt="image" src="https://github.com/user-attachments/assets/8a9a020c-8fcf-4fd2-9ad1-5413df43f311" />
 
+<img width="526" height="279" alt="image" src="https://github.com/user-attachments/assets/4e9f01bd-1146-4b66-bdce-b5e06d3952aa" />
+
 
 ```powershell
-python --version
+py --version
 ```
 
 You should see `Python 3.12.x` or similar.
