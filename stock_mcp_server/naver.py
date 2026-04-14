@@ -31,25 +31,32 @@ def _parse_int(text: str, default: int = 0) -> int:
 
 @cached(ttl_market=600, ttl_closed=86400)  # 장중 10분, 장마감 1일
 async def search_stock(query: str) -> list[dict]:
-    """종목명 또는 코드로 검색하여 종목 코드를 반환합니다."""
-    # 메인 사이트 검색 페이지 사용 (ac.finance.naver.com보다 안정적)
-    url = f"{BASE_URL}/search/searchList.naver"
-    params = {"query": query}
-    resp = await fetch(url, params=params)
-    soup = BeautifulSoup(resp.text, "lxml")
+    """종목명 또는 코드로 검색하여 종목 코드를 반환합니다.
 
+    네이버 모바일 증권의 autoComplete JSON API 사용.
+    (이전 finance.naver.com/search/searchList.naver 엔드포인트는 2026년경 폐지)
+    """
+    url = "https://m.stock.naver.com/front-api/search/autoComplete"
+    params = {"query": query, "target": "stock"}
+    try:
+        resp = await fetch(url, params=params)
+        data = resp.json()
+    except Exception:
+        return []
+
+    if not data.get("isSuccess"):
+        return []
+
+    items = data.get("result", {}).get("items", []) or []
     results = []
-    # 검색 결과 테이블에서 종목명+코드 추출
-    links = soup.select("a.tit")
-    for link in links:
-        href = link.get("href", "")
-        name = link.text.strip()
-        # /item/main.naver?code=005930 형태에서 코드 추출
-        code_match = re.search(r"code=([A-Za-z0-9]{6})", href)
-        if code_match and name:
+    for it in items:
+        code = it.get("code")
+        name = it.get("name")
+        if code and name and re.match(r"^[A-Za-z0-9]{6}$", code):
             results.append({
-                "code": code_match.group(1),
+                "code": code,
                 "name": name,
+                "market": it.get("typeName", ""),  # "코스닥" / "코스피"
             })
     return results[:5]
 
@@ -816,13 +823,16 @@ async def _fetch_ranking_page(url: str, sosok: str | None, page: int = 1) -> lis
         if not code_match:
             continue
 
+        price = _parse_int(cells[2].text)
+        volume = _parse_int(cells[5].text)
         results.append({
             "rank": int(rank_text),
             "code": code_match.group(1),
             "name": name_a.text.strip(),
-            "price": _parse_int(cells[2].text),
+            "price": price,
             "change_rate": cells[4].text.strip(),
-            "volume": _parse_int(cells[5].text),
+            "volume": volume,
+            "trade_value_krw": price * volume,
         })
 
     return results
@@ -847,28 +857,40 @@ async def _fetch_ranking_multi_page(
     return merged[:count]
 
 
-async def get_volume_ranking(market: str = "ALL", count: int = 50) -> list[dict]:
-    """거래량 상위 종목을 가져옵니다.
+async def get_volume_ranking(
+    market: str = "ALL",
+    count: int = 50,
+    sort_by: str = "volume",
+) -> list[dict]:
+    """거래량/거래대금 상위 종목을 가져옵니다.
 
     Args:
         market: "KOSPI" / "KOSDAQ" / "ALL" (기본 ALL = KOSPI+KOSDAQ 합산)
         count: 최대 반환 개수 (기본 50, 최대 500)
+        sort_by: "volume"(거래량=주수) / "trade_value"(거래대금=원). 기본 volume.
     """
     count = min(count, 500)
     url = f"{BASE_URL}/sise/sise_quant.naver"
+    sort_key = "trade_value_krw" if sort_by == "trade_value" else "volume"
 
     if market.upper() == "ALL":
-        # KOSPI/KOSDAQ 각각 count개씩 가져와서 병합
         kospi, kosdaq = await asyncio.gather(
             _fetch_ranking_multi_page(url, "0", count),
             _fetch_ranking_multi_page(url, "1", count),
         )
-        # 거래량 기준 내림차순 병합
-        merged = sorted(kospi + kosdaq, key=lambda x: x["volume"], reverse=True)
+        merged = sorted(kospi + kosdaq, key=lambda x: x.get(sort_key, 0), reverse=True)
+        # 랭크 재부여 (병합 후 순위)
+        for i, item in enumerate(merged[:count], 1):
+            item["rank"] = i
         return merged[:count]
     else:
         sosok = _market_to_sosok(market)
-        return await _fetch_ranking_multi_page(url, sosok, count)
+        results = await _fetch_ranking_multi_page(url, sosok, count)
+        if sort_by == "trade_value":
+            results = sorted(results, key=lambda x: x.get("trade_value_krw", 0), reverse=True)
+            for i, item in enumerate(results[:count], 1):
+                item["rank"] = i
+        return results[:count]
 
 
 async def get_change_ranking(direction: str = "up", market: str = "ALL", count: int = 50) -> list[dict]:
@@ -969,23 +991,40 @@ async def get_market_cap_ranking(market: str = "KOSPI", count: int = 50) -> list
 
 @cached(ttl_market=30, ttl_closed=3600)  # 장중 30초, 장마감 1시간
 async def get_market_index() -> list[dict]:
-    """KOSPI, KOSDAQ 지수 현재값을 가져옵니다."""
-    url = f"{BASE_URL}/sise/sise_index.naver?code=KOSPI"
-    url2 = f"{BASE_URL}/sise/sise_index.naver?code=KOSDAQ"
+    """KOSPI, KOSDAQ 지수 현재값을 가져옵니다.
 
-    results = []
-    for idx_url, name in [(url, "KOSPI"), (url2, "KOSDAQ")]:
-        resp = await fetch(idx_url)
+    네이버 증권의 `#now_value` (em), `#change_value_and_rate` (span) 파싱.
+    """
+    url_base = f"{BASE_URL}/sise/sise_index.naver"
+
+    async def fetch_one(code: str) -> dict:
+        resp = await fetch(url_base, params={"code": code})
         soup = BeautifulSoup(resp.text, "lxml")
 
-        now_val = soup.select_one("div#now_value")
-        change_val = soup.select_one("div#change_value_and_rate")
+        item: dict = {"index": code}
 
-        item = {"index": name}
+        now_val = soup.select_one("#now_value")
         if now_val:
-            item["value"] = now_val.text.strip().replace(",", "")
-        if change_val:
-            item["change"] = change_val.text.strip()
-        results.append(item)
+            try:
+                item["value"] = float(now_val.text.strip().replace(",", ""))
+            except ValueError:
+                item["value"] = now_val.text.strip()
 
-    return results
+        change_val = soup.select_one("#change_value_and_rate")
+        if change_val:
+            # 구조: <span class="fluc">...<span>값</span> +X.XX%<span class="blind">상승/하락</span></span>
+            raw = change_val.get_text(" ", strip=True)
+            item["change_raw"] = raw
+            # 수치 분리 시도
+            parts = raw.replace("상승", "+").replace("하락", "-").split()
+            for p in parts:
+                if "%" in p:
+                    try:
+                        item["change_rate"] = float(p.replace("%", "").replace("+", ""))
+                    except ValueError:
+                        pass
+
+        return item
+
+    results = await asyncio.gather(fetch_one("KOSPI"), fetch_one("KOSDAQ"))
+    return list(results)

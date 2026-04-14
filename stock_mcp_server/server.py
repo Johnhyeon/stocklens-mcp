@@ -11,7 +11,7 @@ import httpx
 
 from mcp.server.fastmcp import FastMCP
 from stock_mcp_server.naver import (
-    search_stock,
+    search_stock as naver_search_stock,
     get_ohlcv,
     get_current_price,
     get_investor_flow,
@@ -41,6 +41,12 @@ from stock_mcp_server._metrics import (
     summarize_metrics,
     get_metrics_file,
 )
+from stock_mcp_server._indicators import (
+    compute_indicators,
+    AVAILABLE_INDICATORS,
+)
+import asyncio
+import json
 import pandas as pd
 
 
@@ -71,7 +77,36 @@ mcp = FastMCP(
 종목코드(예: 005930)나 종목명(예: 삼성전자)으로 검색할 수 있습니다.
 차트 데이터, 투자자 수급, 재무지표, 시장 지수를 제공합니다.
 
+## 🚨 종목코드 규칙 (절대 원칙)
+
+사용자가 6자리 코드가 아닌 **종목명**을 주면, **반드시 아래 순서를 지켜라**:
+
+1. 먼저 `search` 또는 `search_stock` 도구로 종목명 조회
+2. 검색 결과가 여러 개면 사용자에게 확인 요청
+3. 검색 결과 없으면 "종목명을 찾을 수 없습니다. 6자리 코드를 알려주세요" 요청
+4. **종목 코드 추측 절대 금지** — 학습 지식으로 "아마 XXXXXX일 것" 식 추론 금지
+5. 종목 코드는 상장폐지·합병·재할당으로 바뀔 수 있음. 반드시 실시간 조회로 검증.
+
+이 규칙을 어기면 잘못된 종목 분석으로 사용자를 오도할 수 있다.
+
 ## 차트 시각화 규칙
+
+### 🚨 주가 시계열 차트 **선행 조건** (절대 원칙)
+
+가격 시계열을 차트로 렌더링할 때 **반드시 `get_chart` 도구 호출**로 OHLCV 원본 수집.
+
+**금지 패턴:**
+- `get_flow`의 [참고] 종가·거래량 컬럼을 차트 소스로 전용 금지
+- `get_multi_chart_stats`의 집계값으로 시계열 차트 대체 금지
+- `get_indicators`의 `candle` 키 (최신 1봉만)로 시계열 차트 구성 금지
+- `get_price`의 스냅샷으로 차트 구성 금지
+
+**올바른 패턴:**
+- 일봉 차트 → `get_chart(code, "day", count=120~260)`
+- 주봉 차트 → `get_chart(code, "week", count=52~150)`
+- 월봉 차트 → `get_chart(code, "month", count=24~60)`
+
+OHL 없이 close만으로 line chart 그리지 말 것. 원본 OHLCV가 없으면 차트 포기하고 텍스트 분석으로 대체하는 것이 허구 차트보다 나음.
 
 ### 기본 기간
 - **차트는 반드시 120일 이상 불러와서 그린다.** 60일 같은 짧은 기간으로 호출하지 말 것.
@@ -188,24 +223,58 @@ candles.forEach((c, i) => {
 )
 
 
+async def _search_impl(query: str) -> str:
+    """공통 구현 — search와 search_stock 도구에서 공유."""
+    results = await naver_search_stock(query)
+    if not results:
+        return f"'{query}'에 대한 검색 결과가 없습니다. 6자리 코드를 직접 알려주세요."
+
+    lines = [f"검색 결과 ({len(results)}건):"]
+    for r in results:
+        market = r.get("market", "")
+        suffix = f" [{market}]" if market else ""
+        lines.append(f"  - {r['name']} ({r['code']}){suffix}")
+    return "\n".join(lines)
+
+
 @mcp.tool()
 @safe_tool
 @track_metrics("search")
 async def search(query: str) -> str:
-    """종목검색 — 종목명 또는 종목코드로 검색합니다.
+    """종목검색 — 종목명 또는 종목코드로 한국 주식 종목을 조회합니다.
     "삼성전자 종목코드", "반도체 관련주", "005930 뭐야" 같은 질문에 사용합니다.
 
-    Args:
-        query: 검색할 종목명 또는 코드 (예: "삼성전자", "005930")
-    """
-    results = await search_stock(query)
-    if not results:
-        return f"'{query}'에 대한 검색 결과가 없습니다."
+    ⚠️ 사용자가 종목명만 주고 코드를 모를 때 **반드시 이 도구를 먼저 호출**.
+    종목 코드를 추측하지 말 것. 상장폐지·재할당으로 코드가 바뀔 수 있음.
 
-    lines = [f"검색 결과 ({len(results)}건):"]
-    for r in results:
-        lines.append(f"  - {r['name']} ({r['code']})")
-    return "\n".join(lines)
+    search_stock으로도 동일하게 호출 가능 (별명).
+
+    Args:
+        query: 검색할 종목명 또는 코드 (예: "삼성전자", "005930", "알멕")
+    """
+    return await _search_impl(query)
+
+
+@mcp.tool()
+@safe_tool
+@track_metrics("search_stock")
+async def search_stock(query: str) -> str:
+    """종목코드조회 (stock lookup) — 한국 주식 종목명/코드 조회 전용 도구.
+
+    `search`와 동일 기능. 도구 디스커버리에서 "stock"/"ticker"/"종목" 키워드로
+    빠르게 매칭되도록 명확한 이름을 갖는 별명입니다.
+
+    ⚠️ 종목명만 있고 6자리 코드를 모를 때 **이 도구를 먼저 호출**해야 합니다.
+    코드 추측(guessing) 금지. 다른 도구(get_price, get_chart 등)에 잘못된 코드를
+    넣으면 엉뚱한 종목이 조회됩니다.
+
+    Args:
+        query: 종목명(한/영) 또는 6자리 코드. 예: "알멕", "Samsung", "005930"
+
+    Returns:
+        매칭된 종목 리스트. 여러 개면 사용자에게 확인 요청 필요.
+    """
+    return await _search_impl(query)
 
 
 @mcp.tool()
@@ -242,8 +311,10 @@ async def get_chart(code: str, timeframe: str = "day", count: int = 120) -> str:
 @safe_tool
 @track_metrics("get_price")
 async def get_price(code: str) -> str:
-    """현재가 — 종목의 현재 시세 정보를 가져옵니다.
+    """현재가 — 종목의 현재 시세 스냅샷 (오늘 하루치 OHLC + 거래량).
     "삼성전자 지금 얼마", "현재가", "오늘 시세", "주가 알려줘" 같은 질문에 사용합니다.
+
+    ⚠️ **단일 시점 스냅샷**. 과거 시계열 아님. 차트/히스토리 필요 시 get_chart 사용.
 
     Args:
         code: 종목코드 6자리 (예: "005930")
@@ -287,19 +358,25 @@ async def get_flow(code: str, days: int = 20) -> str:
         return f"종목코드 {code}의 수급 데이터를 가져올 수 없습니다."
 
     lines = [f"종목 {code} 투자자별 매매동향 ({len(data)}일):", ""]
-    lines.append("날짜 | 종가 | 거래량 | 기관 순매매 | 외국인 순매매")
+    lines.append("날짜 | [주] 기관 순매매 | [주] 외국인 순매매 | [참고] 종가 | [참고] 거래량")
     lines.append("---|---|---|---|---")
     for row in data:
         lines.append(
-            f"{row['date']} | {row['close']:,} | {row['volume']:,} | "
-            f"{row['institutional']:,} | {row['foreign']:,}"
+            f"{row['date']} | {row['institutional']:,} | {row['foreign']:,} | "
+            f"{row['close']:,} | {row['volume']:,}"
         )
 
     # 합계
     total_inst = sum(r["institutional"] for r in data)
     total_frgn = sum(r["foreign"] for r in data)
     lines.append("")
-    lines.append(f"합계 | - | - | {total_inst:,} | {total_frgn:,}")
+    lines.append(f"합계 | {total_inst:,} | {total_frgn:,} | - | -")
+    lines.append("")
+    lines.append(
+        "※ [주] 필드는 이 도구의 주 목적 (수급 분석). "
+        "[참고] 종가·거래량은 편의 제공이며, **가격 차트·시계열 분석 소스로 사용 금지**. "
+        "차트는 get_chart, 현재가는 get_price 사용."
+    )
 
     return "\n".join(lines)
 
@@ -342,7 +419,13 @@ async def get_index() -> str:
 
     lines = ["시장 지수:"]
     for item in data:
-        lines.append(f"  {item['index']}: {item.get('value', '-')} ({item.get('change', '-')})")
+        value = item.get("value", "-")
+        if isinstance(value, float):
+            value = f"{value:,.2f}"
+        change = item.get("change_raw") or ""
+        rate = item.get("change_rate")
+        rate_str = f" ({rate:+.2f}%)" if rate is not None else ""
+        lines.append(f"  {item['index']}: {value}{rate_str} {change}".rstrip())
     return "\n".join(lines)
 
 
@@ -484,26 +567,40 @@ async def get_sector_stocks(sector_name: str, count: int = 30) -> str:
 @mcp.tool()
 @safe_tool
 @track_metrics("get_volume_ranking")
-async def get_volume_ranking(market: str = "ALL", count: int = 50) -> str:
-    """거래량순위 — 거래량 상위 종목을 가져옵니다.
-    "거래량 많은 종목", "거래 활발한 종목", "오늘 가장 많이 거래된 종목" 같은 질문에 사용합니다.
+async def get_volume_ranking(
+    market: str = "ALL",
+    count: int = 50,
+    sort_by: str = "volume",
+) -> str:
+    """거래량/거래대금 순위 — 상위 종목을 가져옵니다.
+
+    "거래량 많은 종목" → sort_by="volume" (기본, 주수 기준)
+    "거래대금 많은 종목"/"거래 규모 큰 종목" → sort_by="trade_value" (원 기준)
+
+    대형 고단가 종목(삼전·하이닉스 등)은 거래량(주수)이 작아도 거래대금은 클 수 있어
+    스크리닝 시에는 sort_by="trade_value"가 더 적합한 경우가 많습니다.
 
     Args:
         market: "KOSPI" / "KOSDAQ" / "ALL" (기본 ALL)
         count: 가져올 종목 수 (기본 50, 최대 500)
+        sort_by: "volume"(거래량 주수) / "trade_value"(거래대금 원)
     """
     count = min(count, 500)
-    ranks = await naver_get_volume_ranking(market=market, count=count)
+    ranks = await naver_get_volume_ranking(market=market, count=count, sort_by=sort_by)
     if not ranks:
         return f"{market} 거래량 순위를 가져올 수 없습니다."
 
-    lines = [f"거래량 상위 ({market}, {len(ranks)}개):", ""]
-    lines.append("순위 | 코드 | 종목명 | 현재가 | 등락률 | 거래량")
-    lines.append("---|---|---|---|---|---")
-    for i, r in enumerate(ranks, 1):
+    sort_label = "거래대금" if sort_by == "trade_value" else "거래량"
+    lines = [f"{sort_label} 상위 ({market}, {len(ranks)}개, 정렬={sort_by}):", ""]
+    lines.append("순위 | 코드 | 종목명 | 현재가 | 등락률 | 거래량(주) | 거래대금(원)")
+    lines.append("---|---|---|---|---|---|---")
+    for r in ranks:
+        tv = r.get("trade_value_krw", 0)
+        # 거래대금 억원 단위 표시 (가독성)
+        tv_billion = tv / 100_000_000
         lines.append(
-            f"{i} | {r['code']} | {r['name']} | {r['price']:,} | "
-            f"{r['change_rate']} | {r['volume']:,}"
+            f"{r['rank']} | {r['code']} | {r['name']} | {r['price']:,} | "
+            f"{r['change_rate']} | {r['volume']:,} | {tv_billion:,.1f}억"
         )
     return "\n".join(lines)
 
@@ -604,14 +701,17 @@ async def get_multi_stocks(codes: list[str]) -> str:
 @safe_tool
 @track_metrics("get_multi_chart_stats")
 async def get_multi_chart_stats(codes: list[str], days: int = 260) -> str:
-    """차트통계벌크 — 여러 종목의 차트 통계(최고가/최저가/현재가/낙폭)를 한 번에 병렬 조회.
+    """차트통계벌크 — 여러 종목의 **집계 통계**(최고가/최저가/현재가/낙폭)를 한 번에 병렬 조회.
+
+    ⚠️ **시계열 도구 아님.** 기간 내 요약값(집계)만 반환. 캔들 차트·시계열 시각화는
+    get_chart 별도 호출 필수. 이름에 "차트"가 들어 있지만 시계열 OHLCV를 주지 않음.
 
     ⭐ 스크리닝 필수 도구. 개별 get_chart 를 N번 호출하지 말고 이것 한 번으로 해결.
 
-    각 종목의 지정 기간 내:
+    각 종목의 지정 기간 내 (모두 집계값):
       - high/high_date: 최고가 + 그날 날짜
       - low/low_date: 최저가 + 그날 날짜
-      - current_price: 현재가
+      - current_price: 현재가 (오늘 종가)
       - drawdown_pct: 현재가가 최고가 대비 얼마나 내렸는지 (음수)
       - recovery_pct: 현재가가 최저가에서 얼마나 올랐는지 (양수)
       - period_return_pct: 기간 시작 대비 수익률
@@ -637,7 +737,7 @@ async def get_multi_chart_stats(codes: list[str], days: int = 260) -> str:
     if not stats:
         return "차트 통계를 가져올 수 없습니다."
 
-    lines = [f"차트 통계 ({len(stats)}개 종목, 최근 {days}일):", ""]
+    lines = [f"차트 통계 ({len(stats)}개 종목, 최근 {days}일 집계):", ""]
     lines.append("코드 | 현재가 | 최고가(날짜) | 최저가(날짜) | 고점대비낙폭 | 기간수익률")
     lines.append("---|---|---|---|---|---")
     for s in stats:
@@ -648,7 +748,132 @@ async def get_multi_chart_stats(codes: list[str], days: int = 260) -> str:
             f"{s['drawdown_pct']:+.1f}% | "
             f"{s['period_return_pct']:+.1f}%"
         )
+    lines.append("")
+    lines.append(
+        "※ 기간 **집계값**만 반환. 시계열 OHLCV 아님. "
+        "**캔들 차트·시계열 시각화는 get_chart 별도 호출** 필수."
+    )
     return "\n".join(lines)
+
+
+@mcp.tool()
+@safe_tool
+@track_metrics("get_indicators")
+async def get_indicators(
+    code: str,
+    days: int = 260,
+    include: list[str] | None = None,
+    timeframe: str = "day",
+) -> str:
+    """기술지표 — 단일 종목의 이평선·RSI·MACD·볼린저·스토캐스틱 등 종합 판정.
+
+    OHLCV 원본 대신 계산·판정 결과만 JSON으로 반환해 토큰을 절약합니다.
+    플레이북 스크리닝·차트 상태 판정에 사용.
+
+    Args:
+        code: 종목코드 (예: "005930")
+        days: 조회 일수 (기본 260, 최소 30, 최대 500)
+        include: 계산할 지표 키 리스트. 기본 ["ma", "ma_phase", "volume", "candle"].
+            스냅샷 지표: ma / ma_phase / ma_slope / ma_cross / rsi / macd / bollinger /
+                       stochastic / obv / volume / position / candle
+            구조 분석: support_resistance / volume_profile / price_channel
+            (구조 분석은 days=500~750 등 긴 lookback 권장)
+        timeframe: "day"(일봉) / "week"(주봉) / "month"(월봉). 분봉은 현재 미지원.
+
+    ma_phase 값:
+        0 완전역배열 / 1 단기상승꼬임 / 2 꼬임 / 3 단기하락꼬임 / 4 완전정배열
+
+    support_resistance 반환:
+        피벗 자동 추출 + 클러스터링 + 터치 횟수·일자·강도(weak/medium/strong).
+        2~3년치 일봉 권장. 근거 없는 S/R 추정 제거 목적.
+
+    volume_profile 반환:
+        가격대별 누적 거래량, POC(최대 매물 집중), Value Area(70% 구간).
+
+    price_channel 반환:
+        Donchian 채널. Upper=N봉 고가, Lower=N봉 저가, 현재 위치 %.
+
+    반환: JSON 문자열.
+    """
+    if not code:
+        return "종목코드가 필요합니다."
+    if include is None:
+        include = ["ma", "ma_phase", "volume", "candle"]
+    unknown = [k for k in include if k not in AVAILABLE_INDICATORS]
+    if unknown:
+        return (
+            f"지원하지 않는 지표: {unknown}\n"
+            f"사용 가능: {AVAILABLE_INDICATORS}"
+        )
+    days = max(30, min(days, 500))
+
+    ohlcv = await get_ohlcv(code, timeframe=timeframe, count=days)
+    if not ohlcv:
+        return f"차트 데이터를 가져올 수 없습니다: {code}"
+
+    result = compute_indicators(ohlcv, include)
+    payload = {
+        "code": code,
+        "timeframe": timeframe,
+        "days": days,
+        "indicators": result,
+    }
+    return json.dumps(payload, ensure_ascii=False, indent=2)
+
+
+@mcp.tool()
+@safe_tool
+@track_metrics("get_indicators_bulk")
+async def get_indicators_bulk(
+    codes: list[str],
+    days: int = 260,
+    include: list[str] | None = None,
+    timeframe: str = "day",
+) -> str:
+    """기술지표벌크 — 여러 종목의 지표를 병렬 계산. 스크리닝 핵심 도구.
+
+    최대 100개 종목의 이평선 Phase·RSI·MACD 등을 한 번에 판정합니다.
+    get_indicators를 N번 부르지 말고 이걸로 일괄 처리.
+
+    Args:
+        codes: 종목코드 리스트 (최대 100개)
+        days: 조회 일수 (기본 260)
+        include: 지표 키 리스트 (기본 ["ma_phase", "volume"]). get_indicators 참조.
+        timeframe: "day" / "week" / "month"
+
+    반환: 코드별 지표 결과 JSON.
+    """
+    if not codes:
+        return "종목코드 리스트가 비어 있습니다."
+    if include is None:
+        include = ["ma_phase", "volume"]
+    unknown = [k for k in include if k not in AVAILABLE_INDICATORS]
+    if unknown:
+        return (
+            f"지원하지 않는 지표: {unknown}\n"
+            f"사용 가능: {AVAILABLE_INDICATORS}"
+        )
+    codes = codes[:100]
+    days = max(30, min(days, 500))
+
+    async def one(code: str) -> tuple[str, dict]:
+        try:
+            ohlcv = await get_ohlcv(code, timeframe=timeframe, count=days)
+            if not ohlcv:
+                return code, {"error": "OHLCV 없음"}
+            return code, compute_indicators(ohlcv, include)
+        except Exception as e:
+            return code, {"error": f"{type(e).__name__}: {e}"}
+
+    results = await asyncio.gather(*[one(c) for c in codes])
+    payload = {
+        "timeframe": timeframe,
+        "days": days,
+        "include": include,
+        "count": len(results),
+        "results": {code: data for code, data in results},
+    }
+    return json.dumps(payload, ensure_ascii=False, indent=2)
 
 
 @mcp.tool()

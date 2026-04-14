@@ -43,4 +43,5 @@ ENV/
 htmlcov/
 test_v2.py
 docs/
+plays/
 assets/logo_preview.html
