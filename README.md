@@ -37,22 +37,23 @@ AI에게 차트 이미지를 보여주면 **숫자를 추측해서 틀린 분석
 
 ## 빠른 시작
 
-### ⭐ 방법 A: 명령어 복붙 (가장 권장)
+> 📌 **Python 3.11 이상 필수.** 터미널에서 `py --version` 또는 `python --version` 으로 확인. 3.10 이하면 [python.org](https://www.python.org/downloads/) 에서 3.12 설치(Add to PATH 체크).
 
-터미널(PowerShell / cmd / Terminal) 열고 두 줄 복붙:
+### 설치 (명령어 3줄)
+
+PowerShell / cmd / Terminal 열고:
 
 ```bash
-pip install stocklens-mcp
-stocklens-setup
+py -m pip install stocklens-mcp
+py -m stock_mcp_server.setup_claude
+py -m stock_mcp_server.doctor
 ```
 
-### 방법 B: 파일 다운로드 (비개발자)
+1. 설치 → 2. Claude Desktop 설정 → 3. 검증
 
-[install.bat](https://github.com/Johnhyeon/stocklens-mcp/releases/latest/download/install.bat) (Windows) 또는 [install.sh](https://github.com/Johnhyeon/stocklens-mcp/releases/latest/download/install.sh) (Mac/Linux) 다운로드 → 더블클릭 실행
+**Claude Desktop**을 완전히 종료했다가 재시작하세요. (트레이 아이콘 우클릭 → Quit)
 
-> ⚠️ Windows에서 파일이 **메모장으로 열리면** `install.bat.txt`로 저장된 경우. 우클릭 → "연결 프로그램" → "Windows 명령 프로세서" 선택하거나, [상세 가이드](guides/ko/INSTALL.md#step-3-stocklens-설치) 참조.
-
-**Claude Desktop**을 완전히 종료했다가 재시작하세요.
+> 💡 macOS/Linux에서 `py`가 없으면 `python3` 으로 대체. 예: `python3 -m pip install stocklens-mcp`
 
 ## 동작 확인
 

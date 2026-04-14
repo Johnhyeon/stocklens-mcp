@@ -37,20 +37,23 @@ When you show AI a chart image, it **guesses the numbers and often gets them wro
 
 ## Quick Start
 
-### ⭐ Method A: Copy-Paste Commands (Most Recommended)
+> 📌 **Python 3.11+ required.** Check with `py --version` or `python --version`. If older, install 3.12 from [python.org](https://www.python.org/downloads/) (check "Add to PATH").
 
-Open your terminal (PowerShell / cmd / Terminal) and paste:
+### Install (3 commands)
+
+Open your terminal (PowerShell / cmd / Terminal):
 
 ```bash
-pip install stocklens-mcp
-stocklens-setup
+py -m pip install stocklens-mcp
+py -m stock_mcp_server.setup_claude
+py -m stock_mcp_server.doctor
 ```
 
-### Method B: Download Installer (Non-developers)
+1. Install → 2. Configure Claude Desktop → 3. Verify
 
-Download [install.bat](https://github.com/Johnhyeon/stocklens-mcp/releases/latest/download/install.bat) (Windows) or [install.sh](https://github.com/Johnhyeon/stocklens-mcp/releases/latest/download/install.sh) (Mac/Linux) and double-click.
+Then **fully quit and restart Claude Desktop** (tray icon → Quit).
 
-> ⚠️ If the file opens in **Notepad** on Windows, your browser saved it as `install.bat.txt`. Right-click → "Open with" → "Windows Command Processor", or see [detailed guide](guides/en/INSTALL.md#step-3-install-stocklens).
+> 💡 On macOS/Linux, use `python3` if `py` isn't available. E.g., `python3 -m pip install stocklens-mcp`
 
 Then **fully quit and restart Claude Desktop**.
 

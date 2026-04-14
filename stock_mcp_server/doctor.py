@@ -135,7 +135,23 @@ def check_stocklens_command() -> Check:
 def check_config() -> Check:
     c = Check("Claude Desktop Config")
     config_path = get_config_path()
+
+    # Store 버전 감지 알림
+    if "Packages" in str(config_path) and "LocalCache" in str(config_path):
+        c.info("Detected: Microsoft Store version (sandboxed path)")
     c.info(f"Path:       {config_path}")
+
+    # 두 경로 모두 존재하는 비정상 케이스 경고
+    from stock_mcp_server.setup_claude import _find_store_config_path
+    import os as _os
+    store = _find_store_config_path()
+    std_appdata = _os.environ.get("APPDATA")
+    std_path = Path(std_appdata) / "Claude" / "claude_desktop_config.json" if std_appdata else None
+    if store and std_path and store.exists() and std_path.exists() and store != std_path:
+        c.warn(
+            f"Both Store and standard config files exist. Active: {config_path}",
+            fix=f"Remove unused: {std_path if config_path == store else store}",
+        )
 
     if not config_path.exists():
         c.fail(

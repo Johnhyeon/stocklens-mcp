@@ -1,6 +1,6 @@
 [project]
 name = "stocklens-mcp"
-version = "0.2.2"
+version = "0.2.3"
 description = "StockLens — AI가 진짜 데이터로 분석합니다. 네이버 증권 기반 한국 주식 MCP 서버 (차트, 수급, 재무, 스크리닝, Excel)"
 readme = "README.md"
 license = { text = "MIT" }

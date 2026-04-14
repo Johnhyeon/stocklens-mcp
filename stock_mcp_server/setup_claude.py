@@ -54,8 +54,44 @@ def resolve_server_entry(preferred_command: str = "stocklens") -> dict:
     }
 
 
+def _find_store_config_path() -> Path | None:
+    """Microsoft Store 버전 Claude Desktop의 샌드박스 config 경로 탐색.
+
+    Store 앱은 `%LOCALAPPDATA%\\Packages\\Claude_<hash>\\LocalCache\\Roaming\\Claude\\`
+    안에 config를 보관. 해시가 사용자별로 달라서 glob으로 찾음.
+
+    Returns:
+        Path if Store version detected, else None.
+    """
+    local_appdata = os.environ.get("LOCALAPPDATA")
+    if not local_appdata:
+        return None
+    packages_dir = Path(local_appdata) / "Packages"
+    if not packages_dir.exists():
+        return None
+    # Claude_xxx 또는 AnthropicPBC.Claude_xxx 등 변종 대응
+    for pattern in ("Claude_*", "*Claude*"):
+        for pkg in packages_dir.glob(pattern):
+            candidate = pkg / "LocalCache" / "Roaming" / "Claude" / "claude_desktop_config.json"
+            # 부모 디렉토리 존재 = Claude가 최소 한 번 실행됨
+            if candidate.parent.exists():
+                return candidate
+    return None
+
+
 def get_config_path() -> Path:
+    """Claude Desktop config 경로 탐지.
+
+    Windows 우선순위:
+    1. Microsoft Store 버전 (샌드박스 경로) — Packages\\Claude_*\\LocalCache\\...
+    2. 표준 .exe 설치 버전 — %APPDATA%\\Claude\\...
+
+    Store 버전이 감지되면 그쪽을 씀. 아니면 표준 경로.
+    """
     if sys.platform == "win32":
+        store = _find_store_config_path()
+        if store is not None:
+            return store
         appdata = os.environ.get("APPDATA")
         if not appdata:
             raise RuntimeError("APPDATA environment variable not found.")

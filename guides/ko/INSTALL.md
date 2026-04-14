@@ -82,59 +82,34 @@ https://claude.ai/download
 
 ---
 
-## Step 3. StockLens 설치
+## Step 3. StockLens 설치 (명령어 3줄)
 
-아래 **3가지 방법** 중 하나 선택. **방법 A 가장 쉬움**.
+파일 다운로드 없이 터미널에 복붙. Windows/macOS/Linux 모두 동일.
 
-### ⭐ 방법 A: 명령어 복붙 (가장 권장)
-
-파일 다운로드 없이 터미널에 **한 번만 복붙**하면 끝. Windows/macOS/Linux 모두 동일.
-
-**Windows** — PowerShell 또는 명령 프롬프트(cmd) 열고:
+**Windows** — PowerShell 또는 명령 프롬프트(cmd):
 ```powershell
-pip install stocklens-mcp
-stocklens-setup
+py -m pip install stocklens-mcp
+py -m stock_mcp_server.setup_claude
+py -m stock_mcp_server.doctor
 ```
 
-**macOS/Linux** — 터미널에서:
+**macOS/Linux** — 터미널:
 ```bash
-pip3 install stocklens-mcp
-stocklens-setup
+python3 -m pip install stocklens-mcp
+python3 -m stock_mcp_server.setup_claude
+python3 -m stock_mcp_server.doctor
 ```
 
-두 줄만 실행하면 설치 + Claude Desktop 연결까지 자동 완료.
+### 각 줄의 역할
+1. **설치** — PyPI에서 stocklens-mcp 패키지 설치
+2. **설정** — Claude Desktop config에 stocklens 추가 (절대 경로, Microsoft Store 버전 자동 감지)
+3. **검증** — Python·패키지·명령·config 4단계 점검, 문제 있으면 고치는 명령까지 표시
 
-> 💡 `pip`가 인식 안 되면 → `py -m pip install stocklens-mcp` (Windows) 또는 `python3 -m pip install stocklens-mcp` (mac/Linux) 로 대체.
+### `py` / `python3` 이 인식 안 되면
+Python이 PATH에 없거나 설치 안 된 경우. Step 1로 돌아가서 Python 3.11+ 설치하고 "Add Python to PATH" 체크.
 
-### 방법 B: 파워셸 원라이너 (Windows 전용, 다운로드+실행 한 번에)
-
-PowerShell에 복붙:
-```powershell
-irm https://github.com/Johnhyeon/stocklens-mcp/releases/latest/download/install.bat -OutFile "$env:TEMP\stocklens_install.bat"; & "$env:TEMP\stocklens_install.bat"
-```
-
-install.bat를 자동으로 다운로드하고 실행. `.txt`로 저장되는 문제 없음.
-
-### 방법 C: install.bat 파일 다운로드 (시각적으로 단계 보고 싶을 때)
-
-**Windows**:
-1. **[📥 설치파일 다운로드](https://github.com/Johnhyeon/stocklens-mcp/releases/latest/download/install.bat)** 클릭 → 바로 다운로드
-2. 다운로드된 `install.bat` 더블클릭
-3. 창이 열리고 자동 진행 → "Installation complete!" 메시지 확인
-
-**⚠️ `.txt` 파일로 열리는 경우 (흔함):**
-브라우저가 `install.bat.txt`로 저장하는 경우가 있습니다. 해결:
-
-- **확장자 확인:** 파일 탐색기 "보기" → "파일 확장명" 체크 → `install.bat.txt`면 **파일명 변경해서 `.txt` 삭제**
-- **또는** 파일 우클릭 → **"연결 프로그램" → "Windows 명령 프로세서"** 선택
-- **또는** 우클릭 → **"관리자 권한으로 실행"**
-
-**macOS/Linux**:
-```bash
-curl -O https://github.com/Johnhyeon/stocklens-mcp/releases/latest/download/install.sh
-chmod +x install.sh
-./install.sh
-```
+### 여러 Python 버전 설치된 경우
+`py` (Windows Launcher) 또는 `python3` (mac/Linux)가 최신 버전을 자동 선택. 그냥 `pip install` 대신 `py -m pip install` 쓰는 게 안전.
 
 ---
 

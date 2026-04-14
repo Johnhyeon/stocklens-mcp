@@ -17,6 +17,14 @@ echo [1/4] Checking Python...
 
 set "PYTHON_CMD="
 
+REM `py -3` Python Launcher 우선 — 여러 Python 설치된 경우 **최신 버전** 자동 선택
+REM (사용자 PATH에 3.9가 먼저 있어도 Launcher는 3.11+ 를 고름)
+py -3 --version >nul 2>&1
+if not errorlevel 1 (
+    set "PYTHON_CMD=py -3"
+    goto :found_python
+)
+
 python --version >nul 2>&1
 if not errorlevel 1 (
     set "PYTHON_CMD=python"
@@ -26,12 +34,6 @@ if not errorlevel 1 (
 python3 --version >nul 2>&1
 if not errorlevel 1 (
     set "PYTHON_CMD=python3"
-    goto :found_python
-)
-
-py -3 --version >nul 2>&1
-if not errorlevel 1 (
-    set "PYTHON_CMD=py -3"
     goto :found_python
 )
 
@@ -67,7 +69,32 @@ exit /b 1
 for /f "tokens=*" %%v in ('!PYTHON_CMD! --version 2^>^&1') do set PYVER=%%v
 echo       [OK] %PYVER% found
 echo       Using: !PYTHON_CMD!
+
+REM Python 버전 체크 — 3.11 이상 필수
+for /f "tokens=2 delims=. " %%a in ('!PYTHON_CMD! --version 2^>^&1') do set PY_MAJOR=%%a
+for /f "tokens=3 delims=. " %%a in ('!PYTHON_CMD! --version 2^>^&1') do set PY_MINOR=%%a
+if !PY_MAJOR! LSS 3 goto :py_too_old
+if !PY_MAJOR! EQU 3 if !PY_MINOR! LSS 11 goto :py_too_old
+echo       [OK] Python version check passed (3.11+)
 echo.
+goto :py_version_ok
+
+:py_too_old
+echo.
+echo       [FAIL] Python !PY_MAJOR!.!PY_MINOR! is too old. Python 3.11 or newer required.
+echo.
+echo       현재 Python: %PYVER%
+echo       필요 Python: 3.11 이상
+echo.
+echo       1. https://www.python.org/downloads/ 에서 Python 3.12 다운로드
+echo       2. 설치 시 "Add Python to PATH" 체크 필수
+echo       3. PowerShell/cmd 완전히 닫고 새로 열기
+echo       4. 이 install.bat 다시 실행
+echo.
+pause
+exit /b 1
+
+:py_version_ok
 
 REM [2/4] Remove legacy package (naver-stock-mcp) if present
 echo [2/4] Checking legacy package (naver-stock-mcp)...

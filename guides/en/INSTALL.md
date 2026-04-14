@@ -81,59 +81,34 @@ Download from https://claude.ai/download — select your OS, install, sign in.
 
 ---
 
-## Step 3. Install StockLens
+## Step 3. Install StockLens (3 commands)
 
-Choose one of **3 methods**. **Method A is easiest**.
+No file download needed. Paste into terminal. Works on Windows/macOS/Linux.
 
-### ⭐ Method A: Copy-Paste Commands (Most Recommended)
-
-No file download needed. Paste once into your terminal — works on Windows/macOS/Linux.
-
-**Windows** — open PowerShell or Command Prompt (cmd):
+**Windows** — PowerShell or Command Prompt (cmd):
 ```powershell
-pip install stocklens-mcp
-stocklens-setup
+py -m pip install stocklens-mcp
+py -m stock_mcp_server.setup_claude
+py -m stock_mcp_server.doctor
 ```
 
-**macOS/Linux** — open Terminal:
+**macOS/Linux** — Terminal:
 ```bash
-pip3 install stocklens-mcp
-stocklens-setup
+python3 -m pip install stocklens-mcp
+python3 -m stock_mcp_server.setup_claude
+python3 -m stock_mcp_server.doctor
 ```
 
-These two lines install the package AND configure Claude Desktop automatically.
+### What each line does
+1. **Install** — Install stocklens-mcp package from PyPI
+2. **Configure** — Add stocklens entry to Claude Desktop config (absolute path, auto-detects Microsoft Store version)
+3. **Verify** — 4-step health check (Python / package / command / config). Shows fix commands if anything fails.
 
-> 💡 If `pip` isn't recognized → use `py -m pip install stocklens-mcp` (Windows) or `python3 -m pip install stocklens-mcp` (mac/Linux).
+### If `py` / `python3` is not recognized
+Python isn't in PATH or not installed. Go back to Step 1 and install Python 3.11+ with "Add Python to PATH" checked.
 
-### Method B: PowerShell One-liner (Windows, download+run in one shot)
-
-Paste into PowerShell:
-```powershell
-irm https://github.com/Johnhyeon/stocklens-mcp/releases/latest/download/install.bat -OutFile "$env:TEMP\stocklens_install.bat"; & "$env:TEMP\stocklens_install.bat"
-```
-
-Downloads and runs install.bat automatically. No `.txt` save issue.
-
-### Method C: Download install.bat (Visual step-by-step)
-
-**Windows**:
-1. Click **[📥 Download installer](https://github.com/Johnhyeon/stocklens-mcp/releases/latest/download/install.bat)** → starts download
-2. Double-click the downloaded `install.bat`
-3. A terminal opens and runs automatically → wait for "Installation complete!"
-
-**⚠️ If the file opens as `.txt` (common issue):**
-Some browsers save the file as `install.bat.txt`. Fix:
-
-- **Check extension:** File Explorer → "View" → check "File name extensions" → if `install.bat.txt`, **rename and remove `.txt`**
-- **Or** right-click → **"Open with" → "Windows Command Processor"**
-- **Or** right-click → **"Run as administrator"**
-
-**macOS/Linux**:
-```bash
-curl -O https://github.com/Johnhyeon/stocklens-mcp/releases/latest/download/install.sh
-chmod +x install.sh
-./install.sh
-```
+### Multiple Python versions installed
+`py` (Windows Launcher) or `python3` (mac/Linux) automatically picks the latest version. Using `py -m pip install` is safer than plain `pip install` which may pick an older Python.
 
 ---
 
