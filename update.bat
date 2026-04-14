@@ -1,31 +1,12 @@
 @echo off
-setlocal
+REM [DEPRECATED] update.bat은 install.bat으로 통합됐습니다.
+REM install.bat 하나로 신규 설치·업데이트·마이그레이션 모두 처리합니다.
 
 echo ==============================================
-echo   StockLens Update
+echo   [안내] update.bat은 더 이상 별도 유지되지 않습니다.
+echo   install.bat이 신규 설치·업데이트·마이그레이션 모두 처리합니다.
+echo   install.bat을 실행합니다...
 echo ==============================================
 echo.
 
-python --version >nul 2>&1
-if errorlevel 1 (
-    echo Python is not installed.
-    pause
-    exit /b 1
-)
-
-echo Updating to latest version...
-python -m pip install --upgrade stocklens-mcp
-if errorlevel 1 (
-    echo Update failed.
-    pause
-    exit /b 1
-)
-
-echo.
-echo ==============================================
-echo   Update complete!
-echo ==============================================
-echo.
-echo Please restart Claude Desktop.
-echo.
-pause
+call "%~dp0install.bat"

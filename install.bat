@@ -3,11 +3,12 @@ setlocal EnableDelayedExpansion
 
 echo ==============================================
 echo   StockLens Installer (Windows)
+echo   신규 설치 · 업데이트 · 마이그레이션 통합
 echo ==============================================
 echo.
 
-REM [1/3] Find Python
-echo [1/3] Checking Python...
+REM [1/4] Find Python
+echo [1/4] Checking Python...
 
 set "PYTHON_CMD="
 
@@ -63,8 +64,20 @@ echo       [OK] %PYVER% found
 echo       Using: !PYTHON_CMD!
 echo.
 
-REM [2/3] Install stocklens-mcp from PyPI
-echo [2/3] Installing stocklens-mcp...
+REM [2/4] Remove legacy package (naver-stock-mcp) if present
+echo [2/4] Checking legacy package (naver-stock-mcp)...
+!PYTHON_CMD! -m pip show naver-stock-mcp >nul 2>&1
+if not errorlevel 1 (
+    echo       [INFO] Legacy naver-stock-mcp detected. Removing...
+    !PYTHON_CMD! -m pip uninstall -y naver-stock-mcp
+    echo       [OK] naver-stock-mcp removed
+) else (
+    echo       [SKIP] No legacy package to remove
+)
+echo.
+
+REM [3/4] Install / upgrade stocklens-mcp
+echo [3/4] Installing / upgrading stocklens-mcp...
 !PYTHON_CMD! -m pip install --upgrade stocklens-mcp
 if errorlevel 1 (
     echo       [FAIL] Package installation failed.
@@ -73,11 +86,11 @@ if errorlevel 1 (
     pause
     exit /b 1
 )
-echo       [OK] stocklens-mcp installed
+echo       [OK] stocklens-mcp installed / upgraded
 echo.
 
-REM [3/3] Configure Claude Desktop
-echo [3/3] Configuring Claude Desktop...
+REM [4/4] Configure Claude Desktop
+echo [4/4] Configuring Claude Desktop...
 !PYTHON_CMD! -m stock_mcp_server.setup_claude stocklens
 if errorlevel 1 (
     echo       [FAIL] Claude Desktop configuration failed.
@@ -87,13 +100,12 @@ if errorlevel 1 (
 echo.
 
 echo ==============================================
-echo   Installation complete!
+echo   완료! (Installation complete)
 echo ==============================================
 echo.
-echo Next steps:
-echo   1. Quit Claude Desktop completely.
-echo      (Right-click tray icon, then Quit)
-echo   2. Restart Claude Desktop.
-echo   3. Try asking: "Samsung Electronics current price"
+echo 다음 단계:
+echo   1. Claude Desktop 완전히 종료 (트레이 아이콘 우클릭 → Quit)
+echo   2. Claude Desktop 재시작
+echo   3. 테스트: "삼성전자 현재가"
 echo.
 pause

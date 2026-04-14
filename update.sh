@@ -1,26 +1,13 @@
 #!/bin/bash
-# StockLens Update (macOS / Linux)
-
-set -e
-
-GREEN='\033[0;32m'
-NC='\033[0m'
+# [DEPRECATED] update.sh는 install.sh로 통합됐습니다.
+# install.sh 하나로 신규 설치·업데이트·마이그레이션 모두 처리합니다.
 
 echo "=============================================="
-echo "  StockLens Update"
+echo "  [안내] update.sh는 더 이상 별도 유지되지 않습니다."
+echo "  install.sh가 신규 설치·업데이트·마이그레이션 모두 처리합니다."
+echo "  install.sh를 실행합니다..."
 echo "=============================================="
 echo ""
 
-if command -v python3 &> /dev/null; then
-    PYTHON_CMD="python3"
-else
-    PYTHON_CMD="python"
-fi
-
-echo "Updating to latest version..."
-$PYTHON_CMD -m pip install --upgrade stocklens-mcp
-echo ""
-echo -e "${GREEN}✓ Update complete!${NC}"
-echo ""
-echo "Please restart Claude Desktop."
-echo ""
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+exec "$SCRIPT_DIR/install.sh"

@@ -1,5 +1,6 @@
 #!/bin/bash
 # StockLens Installer (macOS / Linux)
+# 신규 설치 · 업데이트 · 마이그레이션 통합
 
 set -e
 
@@ -10,6 +11,7 @@ NC='\033[0m'
 
 echo "=============================================="
 echo "  StockLens Installer"
+echo "  신규 설치 · 업데이트 · 마이그레이션 통합"
 echo "=============================================="
 echo ""
 
@@ -23,8 +25,8 @@ fi
 echo "  Detected OS: $OS"
 echo ""
 
-# [1/3] Python
-echo "[1/3] Checking Python..."
+# [1/4] Python
+echo "[1/4] Checking Python..."
 if command -v python3 &> /dev/null; then
     PYTHON_CMD="python3"
 elif command -v python &> /dev/null; then
@@ -52,10 +54,21 @@ if [ "$PYMAJOR" -lt 3 ] || ([ "$PYMAJOR" -eq 3 ] && [ "$PYMINOR" -lt 11 ]); then
 fi
 echo ""
 
-# [2/3] Install
-echo "[2/3] Installing stocklens-mcp..."
+# [2/4] Remove legacy package (naver-stock-mcp) if present
+echo "[2/4] Checking legacy package (naver-stock-mcp)..."
+if $PYTHON_CMD -m pip show naver-stock-mcp > /dev/null 2>&1; then
+    echo "      (info) Legacy naver-stock-mcp detected. Removing..."
+    $PYTHON_CMD -m pip uninstall -y naver-stock-mcp
+    echo -e "      ${GREEN}✓ naver-stock-mcp removed${NC}"
+else
+    echo "      (skip) No legacy package to remove"
+fi
+echo ""
+
+# [3/4] Install / upgrade stocklens-mcp
+echo "[3/4] Installing / upgrading stocklens-mcp..."
 if $PYTHON_CMD -m pip install --upgrade stocklens-mcp > /tmp/stocklens-install.log 2>&1; then
-    echo -e "      ${GREEN}✓ stocklens-mcp installed${NC}"
+    echo -e "      ${GREEN}✓ stocklens-mcp installed / upgraded${NC}"
 else
     echo -e "      ${RED}✗ Installation failed${NC}"
     echo "      Log: /tmp/stocklens-install.log"
@@ -63,20 +76,20 @@ else
 fi
 echo ""
 
-# [3/3] Configure
-echo "[3/3] Configuring Claude Desktop..."
+# [4/4] Configure Claude Desktop
+echo "[4/4] Configuring Claude Desktop..."
 $PYTHON_CMD -m stock_mcp_server.setup_claude stocklens
 echo ""
 
 echo "=============================================="
-echo "  Installation complete!"
+echo "  완료! (Installation complete)"
 echo "=============================================="
 echo ""
-echo "Next steps:"
-echo "  1. Quit Claude Desktop completely."
+echo "다음 단계:"
+echo "  1. Claude Desktop 완전히 종료"
 if [[ "$OS" == "macOS" ]]; then
     echo "     (Cmd+Q or Menu > Quit)"
 fi
-echo "  2. Restart Claude Desktop."
-echo "  3. Try: \"Samsung Electronics current price\""
+echo "  2. Claude Desktop 재시작"
+echo "  3. 테스트: \"삼성전자 현재가\""
 echo ""
