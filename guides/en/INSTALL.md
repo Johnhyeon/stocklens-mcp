@@ -24,6 +24,8 @@ No API keys or brokerage accounts required.
 2. Click the yellow **"Download Python 3.x.x"** button
 3. Run the downloaded installer (`python-3.12.x-amd64.exe`)
 
+<img width="653" height="401" alt="python_path" src="https://github.com/user-attachments/assets/acdbe3a9-82cb-484f-b4cf-5fda4a6829c9" />
+
 **⚠️ IMPORTANT: Check the checkbox at the bottom of the installer window**
 
 ```
@@ -40,6 +42,9 @@ Without checking, the `python` command won't work in terminal.
 ### Verify Installation
 
 Open **PowerShell** or **Command Prompt (cmd)**:
+
+<img width="394" height="202" alt="image" src="https://github.com/user-attachments/assets/8a9a020c-8fcf-4fd2-9ad1-5413df43f311" />
+
 
 ```powershell
 python --version
@@ -68,6 +73,9 @@ sudo apt install python3 python3-pip  # Ubuntu/Debian
 ---
 
 ## Step 2. Install Claude Desktop
+
+<img width="458" height="644" alt="image" src="https://github.com/user-attachments/assets/5cb8847a-b1bf-4125-a2f0-d7e763234efe" />
+
 
 Download from https://claude.ai/download — select your OS, install, sign in.
 
@@ -114,10 +122,16 @@ Then launch Claude Desktop again.
 
 ## Step 5. Verify It Works
 
+<img width="850" height="415" alt="image" src="https://github.com/user-attachments/assets/ac50dd95-85b8-4471-a79c-6aa196f62af4" />
+
+
 In Claude:
 ```
 Show me Samsung Electronics (005930) current price
 ```
+
+<img width="797" height="948" alt="image" src="https://github.com/user-attachments/assets/1daa0535-4ab5-480c-b70f-dcfdb5c5c864" />
+
 
 Expected response:
 ```
