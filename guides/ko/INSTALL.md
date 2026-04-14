@@ -24,6 +24,8 @@ API 키, 증권 계좌는 필요 없습니다.
 2. 노란색 **"Download Python 3.x.x"** 버튼 클릭
 3. 다운로드된 설치 파일(`python-3.12.x-amd64.exe`) 실행
 
+<img width="653" height="401" alt="python_path" src="https://github.com/user-attachments/assets/acdbe3a9-82cb-484f-b4cf-5fda4a6829c9" />
+
 **⚠️ 중요: 설치 화면 맨 아래에 있는 체크박스를 반드시 체크**
 
 ```
@@ -40,8 +42,11 @@ API 키, 증권 계좌는 필요 없습니다.
 
 **PowerShell 또는 명령 프롬프트(cmd)** 열고:
 
+<img width="394" height="202" alt="image" src="https://github.com/user-attachments/assets/8a9a020c-8fcf-4fd2-9ad1-5413df43f311" />
+
+
 ```powershell
-python --version
+py--version
 ```
 
 `Python 3.12.x` 같은 버전이 나오면 성공.
@@ -67,6 +72,9 @@ sudo apt install python3 python3-pip  # Ubuntu/Debian
 ---
 
 ## Step 2. Claude Desktop 설치
+
+<img width="458" height="644" alt="image" src="https://github.com/user-attachments/assets/5cb8847a-b1bf-4125-a2f0-d7e763234efe" />
+
 
 https://claude.ai/download
 
@@ -116,10 +124,16 @@ stocklens-setup
 
 ## Step 5. 동작 확인
 
+<img width="850" height="415" alt="image" src="https://github.com/user-attachments/assets/ac50dd95-85b8-4471-a79c-6aa196f62af4" />
+
+
 Claude에서:
 ```
 삼성전자 현재가 알려줘
 ```
+
+<img width="797" height="948" alt="image" src="https://github.com/user-attachments/assets/1daa0535-4ab5-480c-b70f-dcfdb5c5c864" />
+
 
 정상 응답:
 ```
