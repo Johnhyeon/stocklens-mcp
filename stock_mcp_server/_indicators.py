@@ -33,6 +33,21 @@ def _to_df(ohlcv: list[dict]) -> pd.DataFrame:
 
 _MA_PERIODS = (5, 20, 60, 120, 240)
 
+# 한국어 트레이딩 전문용어 라벨.
+# 서버가 직접 반환해야 LLM 출력에서 "꼭임"/"꿰임" 같은 토크나이저 오류 방지.
+_MA_PHASE_LABELS = {
+    0: "완전역배열",
+    1: "단기상승꼬임",
+    2: "꼬임",
+    3: "단기하락꼬임",
+    4: "완전정배열",
+}
+
+_CROSS_LABELS = {
+    "golden": "골든크로스",
+    "dead": "데드크로스",
+}
+
 
 def compute_ma(df: pd.DataFrame, periods: tuple[int, ...] = _MA_PERIODS) -> dict:
     """각 기간의 이동평균 최신값."""
@@ -97,7 +112,7 @@ def compute_ma_phase(df: pd.DataFrame) -> dict:
         "price_vs_ma120": round(float((df["close"].iloc[-1] - m120) / m120 * 100), 2),
     }
 
-    return {"phase": phase, "pairs": pairs}
+    return {"phase": phase, "phase_label": _MA_PHASE_LABELS[phase], "pairs": pairs}
 
 
 def compute_ma_cross(df: pd.DataFrame, short: int = 20, long: int = 60, within_days: int = 30) -> dict:
@@ -116,11 +131,11 @@ def compute_ma_cross(df: pd.DataFrame, short: int = 20, long: int = 60, within_d
         if pd.isna(prev) or pd.isna(curr):
             continue
         if prev <= 0 < curr:
-            return {"type": "golden", "days_ago": i, "short": short, "long": long}
+            return {"type": "golden", "type_label": _CROSS_LABELS["golden"], "days_ago": i, "short": short, "long": long}
         if prev >= 0 > curr:
-            return {"type": "dead", "days_ago": i, "short": short, "long": long}
+            return {"type": "dead", "type_label": _CROSS_LABELS["dead"], "days_ago": i, "short": short, "long": long}
 
-    return {"type": None, "days_ago": None, "short": short, "long": long}
+    return {"type": None, "type_label": None, "days_ago": None, "short": short, "long": long}
 
 
 # ─────────────────────────────────────────────────────────────
@@ -166,17 +181,17 @@ def compute_macd(df: pd.DataFrame, fast: int = 12, slow: int = 26, signal: int =
         signal_line = macd_line.ewm(span=signal, adjust=False).mean()
         hist = macd_line - signal_line
 
-    cross = {"type": None, "days_ago": None}
+    cross = {"type": None, "type_label": None, "days_ago": None}
     for i in range(1, min(30, len(hist) - 1)):
         prev = hist.iloc[-i - 1]
         curr = hist.iloc[-i]
         if pd.isna(prev) or pd.isna(curr):
             continue
         if prev <= 0 < curr:
-            cross = {"type": "golden", "days_ago": i}
+            cross = {"type": "golden", "type_label": _CROSS_LABELS["golden"], "days_ago": i}
             break
         if prev >= 0 > curr:
-            cross = {"type": "dead", "days_ago": i}
+            cross = {"type": "dead", "type_label": _CROSS_LABELS["dead"], "days_ago": i}
             break
 
     return {
@@ -204,12 +219,24 @@ def compute_bollinger(df: pd.DataFrame, period: int = 20, std: float = 2.0) -> d
     percent_b = (price - l) / (u - l)
     bandwidth = (u - l) / m * 100
 
+    if percent_b > 1.0:
+        position = "상단 돌파"
+    elif percent_b >= 0.8:
+        position = "상단 근접"
+    elif percent_b >= 0.2:
+        position = "밴드 내"
+    elif percent_b >= 0.0:
+        position = "하단 근접"
+    else:
+        position = "하단 이탈"
+
     return {
         "upper": round(float(u), 2),
         "middle": round(float(m), 2),
         "lower": round(float(l), 2),
         "percent_b": round(float(percent_b), 3),
         "bandwidth": round(float(bandwidth), 2),
+        "position": position,
         "period": period,
     }
 

@@ -872,6 +872,9 @@ async def get_indicators(
 
     ma_phase 값:
         0 완전역배열 / 1 단기상승꼬임 / 2 꼬임 / 3 단기하락꼬임 / 4 완전정배열
+        ⚠️ 반환값의 `phase_label` 필드를 **그대로** 사용. 직접 "꼬임"을 타이핑하지 말 것 (토크나이저 오류 위험).
+        ma_cross/macd.cross도 `type_label` 필드(골든크로스/데드크로스) 그대로 사용.
+        bollinger는 `position` 필드 (상단 돌파/상단 근접/밴드 내/하단 근접/하단 이탈)
 
     support_resistance 반환:
         피벗 자동 추출 + 클러스터링 + 터치 횟수·일자·강도(weak/medium/strong).
