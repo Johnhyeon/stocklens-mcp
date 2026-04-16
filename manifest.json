@@ -1,0 +1,45 @@
+{
+  "manifest_version": "0.4",
+  "name": "stocklens-mcp",
+  "display_name": "StockLens",
+  "version": "0.2.3",
+  "description": "네이버 증권 기반 한국 주식 MCP 서버. 차트·수급·재무·스크리닝·Excel 스냅샷으로 Claude에서 바로 분석.",
+  "author": {
+    "name": "Johnhyeon"
+  },
+  "homepage": "https://github.com/Johnhyeon/stocklens-mcp",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Johnhyeon/stocklens-mcp"
+  },
+  "license": "MIT",
+  "keywords": [
+    "stock",
+    "mcp",
+    "claude",
+    "naver",
+    "korea",
+    "finance",
+    "stocklens",
+    "investment"
+  ],
+  "server": {
+    "type": "uv",
+    "entry_point": "stock_mcp_server/server.py",
+    "mcp_config": {
+      "command": "uv",
+      "args": [
+        "run",
+        "--directory",
+        "${__dirname}",
+        "stock_mcp_server/server.py"
+      ]
+    }
+  },
+  "compatibility": {
+    "platforms": ["darwin", "linux", "win32"],
+    "runtimes": {
+      "python": ">=3.11"
+    }
+  }
+}

@@ -1,0 +1,50 @@
+# Build artifacts
+dist/
+build/
+*.egg-info/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Virtual envs
+venv/
+.venv/
+env/
+
+# VCS
+.git/
+.gitignore
+.gitattributes
+
+# Docs & assets (not needed inside the bundle)
+docs/
+assets/
+guides/
+plays/
+README.md
+README.en.md
+CLAUDE.md
+LICENSE
+
+# Scripts (pip-based install, not relevant for .mcpb users)
+install.bat
+install.sh
+
+# Tests
+test_*.py
+*_test.py
+tests/
+
+# Generated bundles (avoid recursion)
+*.mcpb
+
+# CI / tooling
+.github/
+.vscode/
+.idea/
+
+# OS junk
+.DS_Store
+Thumbs.db
