@@ -45,18 +45,22 @@ from stock_mcp_server._indicators import (
     compute_indicators,
     AVAILABLE_INDICATORS,
 )
+from stock_mcp_server._chart_html import render_chart_html
 import asyncio
 import json
 import pandas as pd
 
 
 def safe_tool(func):
-    """MCP 도구 함수의 예외를 사용자 친화적 메시지로 변환합니다."""
+    """MCP 도구 함수의 예외를 사용자 친화적 메시지로 변환합니다.
+
+    성공 응답에는 하루 1회 업데이트 알림을 덧붙여 LLM이 사용자에게 전달합니다.
+    """
 
     @functools.wraps(func)
     async def wrapper(*args, **kwargs):
         try:
-            return await func(*args, **kwargs)
+            result = await func(*args, **kwargs)
         except httpx.TimeoutException:
             return "⚠️ 네이버 증권 응답이 지연되고 있습니다. 잠시 후 다시 시도해주세요."
         except httpx.ConnectError:
@@ -68,6 +72,17 @@ def safe_tool(func):
                 f"⚠️ 데이터 처리 중 오류가 발생했습니다: {type(e).__name__}\n"
                 f"종목코드가 올바른지, 상장된 종목인지 확인해주세요."
             )
+
+        if isinstance(result, str):
+            try:
+                from stock_mcp_server._update_check import get_update_notice
+
+                notice = await get_update_notice()
+                if notice:
+                    result = result + notice
+            except Exception:
+                pass  # 알림 실패가 tool 응답을 막아선 안 됨
+        return result
 
     return wrapper
 
@@ -313,6 +328,42 @@ async def get_chart(code: str, timeframe: str = "day", count: int = 120) -> str:
             f"{row['low']:,} | {row['close']:,} | {row['volume']:,}"
         )
     return "\n".join(lines)
+
+
+@mcp.tool()
+@safe_tool
+@track_metrics("get_chart_html")
+async def get_chart_html(code: str, timeframe: str = "day", count: int = 120) -> str:
+    """차트HTML — 완성된 캔들+거래량 차트 HTML을 반환합니다. artifact에 그대로 복붙하면 즉시 렌더링.
+
+    ⭐ **"차트 보여줘" / "시각화" / "대시보드" / "캔들 차트"** 요청 시 사용.
+    SVG 기반 완성본. MA5/20/60 이평선, 고점/저점 마커, 거래량 패널, 라이트/다크 자동 포함.
+
+    ⚠️ **절대 규칙 (읽기 전 reasoning 금지):**
+    - 이 도구 결과는 **완전한 HTML 문서**입니다. artifact에 **그대로** 출력하세요.
+    - Chart.js / 커스텀 Canvas / SVG를 **직접 작성하지 마세요**. 이미 완성됨.
+    - 캔들 너비·레이아웃·색상·날짜 라벨 등 **재작성 불필요**. 그대로 사용.
+    - 데이터를 다시 파싱해서 재렌더링하지 마세요.
+
+    ⚠️ **용도 구분:**
+    - 데이터 수치 분석용이면 get_chart(OHLCV 텍스트) 사용
+    - 이 도구는 **시각화 전용**
+    - "분석해줘" (시각화 요청 없음) → 이 도구 호출 X, 다른 데이터 도구로 답변
+
+    Args:
+        code: 종목코드 6자리 (예: "005930")
+        timeframe: "day"(일봉), "week"(주봉), "month"(월봉)
+        count: 캔들 개수 (기본 120, 최대 500)
+    """
+    count = min(count, 500)
+    info = await get_current_price(code)
+    name = info.get("name", code) if info else code
+
+    ohlcv = await get_ohlcv(code, timeframe, count)
+    if not ohlcv:
+        return f"종목코드 {code}의 차트 데이터를 가져올 수 없습니다."
+
+    return render_chart_html(code, name, ohlcv, timeframe=timeframe)
 
 
 @mcp.tool()
