@@ -412,17 +412,35 @@ async def get_chart_html(
                 frames.append({"timeframe": tf, "ohlcv": ohlcv})
         if not frames:
             return f"종목코드 {code}의 차트 데이터를 가져올 수 없습니다."
-        return render_multi_chart_html(code, name, frames, show_sr=show_sr, custom_sr=custom_sr)
+        html = render_multi_chart_html(code, name, frames, show_sr=show_sr, custom_sr=custom_sr)
+    else:
+        # 단일 프레임 모드
+        count = min(count, 500)
+        ohlcv = await get_ohlcv(code, timeframe, count)
+        if not ohlcv:
+            return f"종목코드 {code}의 차트 데이터를 가져올 수 없습니다."
+        html = render_chart_html(
+            code, name, ohlcv,
+            timeframe=timeframe, show_sr=show_sr, custom_sr=custom_sr,
+        )
 
-    # 단일 프레임 모드
-    count = min(count, 500)
-    ohlcv = await get_ohlcv(code, timeframe, count)
-    if not ohlcv:
-        return f"종목코드 {code}의 차트 데이터를 가져올 수 없습니다."
+    # 결과가 60KB 초과 시 파일 저장 + 경로 반환 (MCP 응답 크기 제한 회피)
+    MAX_INLINE = 60_000
+    if len(html) <= MAX_INLINE:
+        return html
 
-    return render_chart_html(
-        code, name, ohlcv,
-        timeframe=timeframe, show_sr=show_sr, custom_sr=custom_sr,
+    chart_dir = get_snapshot_dir() / "charts"
+    chart_dir.mkdir(parents=True, exist_ok=True)
+    tf_label = "-".join(timeframes) if timeframes else timeframe
+    fname = chart_dir / f"{code}_{tf_label}.html"
+    fname.write_text(html, encoding="utf-8")
+    size_kb = len(html) / 1024
+
+    return (
+        f"✓ 차트 HTML 생성 완료 ({size_kb:.0f}KB — 멀티프레임이라 파일로 저장)\n"
+        f"경로: {fname}\n\n"
+        f"사용자에게 이 경로를 안내해주세요. 브라우저에서 직접 열면 "
+        f"캔들차트 + 거래량 + S/R 오버레이가 표시됩니다."
     )
 
 
