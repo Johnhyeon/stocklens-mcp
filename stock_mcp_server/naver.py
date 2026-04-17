@@ -1231,3 +1231,200 @@ async def get_etf_detail(code: str) -> dict:
         result["holdings_has_weight"] = has_weight
 
     return result
+
+
+# ---------------------------------------------------------------------------
+# 컨센서스 / 목표가
+# ---------------------------------------------------------------------------
+
+WISEREPORT_CONSENSUS_URL = "https://navercomp.wisereport.co.kr/v2/company/c1010001.aspx"
+
+
+@cached(ttl_market=600, ttl_closed=86400)  # 장중 10분, 장마감 1일
+async def get_consensus(code: str) -> dict:
+    """종목의 컨센서스 (투자의견, 목표주가, 실적 추정치)를 가져옵니다."""
+    resp = await fetch(WISEREPORT_CONSENSUS_URL, params={"cmp_cd": code})
+    html = resp.text
+
+    import json as _json
+
+    def _extract_json_var(var_name: str) -> dict | None:
+        import re as _re
+        pattern = rf"var\s+{var_name}\s*=\s*(\{{.*?\}});"
+        match = _re.search(pattern, html, _re.DOTALL)
+        if match:
+            try:
+                return _json.loads(match.group(1))
+            except (_json.JSONDecodeError, ValueError):
+                return None
+        return None
+
+    result = {"code": code}
+
+    # 목표주가 추이
+    chart2 = _extract_json_var("chartData2")
+    if chart2 and "target_price" in chart2:
+        targets = chart2["target_price"]
+        valid = [t for t in targets if t.get("y") is not None]
+        if valid:
+            result["target_price"] = valid[-1]["y"]
+        result["target_price_history"] = [
+            {"date": t["x"], "price": t["y"]} for t in valid[-6:]
+        ]
+
+    # 투자의견 분포
+    chart3 = _extract_json_var("chartData3")
+    if chart3:
+        today = chart3.get("today", [])
+        result["opinion"] = {
+            item["name"]: int(item["y"]) if item.get("y") else 0
+            for item in today
+        }
+        ago = chart3.get("a_month_ago", [])
+        result["opinion_1m_ago"] = {
+            item["name"]: int(item["y"]) if item.get("y") else 0
+            for item in ago
+        }
+
+    # 실적 추정치
+    res_data = _extract_json_var("res")
+    if res_data and "yymm" in res_data:
+        result["estimate_periods"] = res_data["yymm"]
+        # wisereport res.data 인덱스: 0=매출액, 1=영업이익, 2=영업이익률(%)
+        # 3번 이후는 페이지마다 다를 수 있어 안전한 것만 사용
+        labels = ["매출액", "영업이익", "영업이익률"]
+        estimates = {}
+        for i, row in enumerate(res_data.get("data", [])):
+            if i < len(labels):
+                vals = {}
+                for period_idx, period in enumerate(res_data["yymm"]):
+                    vals[period] = row.get(str(period_idx + 1))
+                estimates[labels[i]] = vals
+        result["estimates"] = estimates
+
+    return result
+
+
+# ---------------------------------------------------------------------------
+# 증권사 리포트
+# ---------------------------------------------------------------------------
+
+REPORT_LIST_URL = f"{BASE_URL}/research/company_list.naver"
+REPORT_READ_URL = f"{BASE_URL}/research/company_read.naver"
+
+
+@cached(ttl_market=600, ttl_closed=3600)  # 장중 10분, 장마감 1시간
+async def get_reports(code: str, count: int = 5) -> list[dict]:
+    """종목의 최근 증권사 리포트 목록을 가져옵니다."""
+    resp = await fetch(REPORT_LIST_URL, params={
+        "searchType": "itemCode",
+        "itemCode": code,
+        "page": "1",
+    })
+    soup = BeautifulSoup(resp.text, "lxml")
+
+    table = soup.select_one("table.type_1")
+    if not table:
+        return []
+
+    results = []
+    for row in table.select("tr"):
+        cells = row.select("td")
+        if len(cells) < 5:
+            continue
+
+        title_a = cells[1].find("a")
+        if not title_a:
+            continue
+
+        href = title_a.get("href", "")
+        nid_match = re.search(r"nid=(\d+)", href)
+        if not nid_match:
+            continue
+
+        results.append({
+            "nid": nid_match.group(1),
+            "stock": cells[0].get_text(strip=True),
+            "title": title_a.get_text(strip=True),
+            "broker": cells[2].get_text(strip=True),
+            "date": cells[4].get_text(strip=True),
+            "views": _parse_int(cells[5].get_text(strip=True)) if len(cells) > 5 else 0,
+        })
+        if len(results) >= count:
+            break
+
+    return results
+
+
+async def get_report_detail(nid: str) -> dict:
+    """증권사 리포트 상세 (본문 요약 + PDF 링크 + 목표가/투자의견)."""
+    resp = await fetch(REPORT_READ_URL, params={"nid": nid})
+    soup = BeautifulSoup(resp.text, "lxml")
+
+    result = {"nid": nid}
+
+    # 목표가 / 투자의견
+    for td in soup.select("td"):
+        text = " ".join(td.get_text(strip=True).split())
+        if "목표가" in text:
+            import re as _re
+            price_m = _re.search(r"목표가\s*([\d,]+)", text)
+            if price_m:
+                result["target_price"] = _parse_int(price_m.group(1))
+            opinion_m = _re.search(r"투자의견\s*(\w+)", text)
+            if opinion_m:
+                result["opinion"] = opinion_m.group(1)
+
+    # 본문 텍스트
+    content_td = soup.select_one("td.view_cnt")
+    if content_td:
+        text = content_td.get_text(strip=True)
+        if len(text) > 500:
+            text = text[:500] + "..."
+        result["summary"] = text
+
+    # PDF 링크
+    for a in soup.select("a"):
+        href = a.get("href", "")
+        if ".pdf" in href.lower():
+            result["pdf_url"] = href
+            break
+
+    return result
+
+
+# ---------------------------------------------------------------------------
+# 공시 목록
+# ---------------------------------------------------------------------------
+
+DISCLOSURE_URL = f"{BASE_URL}/item/news_notice.naver"
+
+
+@cached(ttl_market=300, ttl_closed=3600)  # 장중 5분, 장마감 1시간
+async def get_disclosure_list(code: str, page: int = 1) -> list[dict]:
+    """종목의 최근 공시 목록을 가져옵니다."""
+    resp = await fetch(DISCLOSURE_URL, params={"code": code, "page": page})
+    soup = BeautifulSoup(resp.text, "lxml")
+
+    results = []
+    for row in soup.select("table tr"):
+        cells = row.select("td")
+        if len(cells) < 3:
+            continue
+
+        title_a = cells[0].find("a")
+        if not title_a:
+            continue
+
+        title = title_a.get_text(strip=True)
+        if not title:
+            continue
+
+        results.append({
+            "title": title,
+            "source": cells[1].get_text(strip=True),
+            "date": cells[2].get_text(strip=True),
+            "link": title_a.get("href", ""),
+        })
+
+    return results
