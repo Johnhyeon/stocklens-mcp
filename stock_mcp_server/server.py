@@ -1477,8 +1477,21 @@ async def get_us_chart(
     if not rows:
         return f"티커 '{ticker}'의 차트 데이터를 가져올 수 없습니다."
 
+    # 토큰 한계 보호: 500행 초과 시 최근 500개로 자름
+    # (max·10y·일봉 = 2500+ 행, 5d·1분봉 = 1950+ 행 → 토큰 폭주 방지)
+    MAX_ROWS = 500
+    total = len(rows)
+    truncated = total > MAX_ROWS
+    if truncated:
+        rows = rows[-MAX_ROWS:]
+
+    header = f"**{ticker.upper()}** {period} {interval} OHLCV ({len(rows)} bars"
+    if truncated:
+        header += f" · 원본 {total}행 중 최근 {MAX_ROWS}행"
+    header += ")"
+
     lines = [
-        f"**{ticker.upper()}** {period} {interval} OHLCV ({len(rows)} bars)",
+        header,
         "",
         "날짜/시간 | 시가 | 고가 | 저가 | 종가 | 거래량",
         "---|---|---|---|---|---",
@@ -1490,6 +1503,9 @@ async def get_us_chart(
             f"{date_s} | {r.get('open', 0):,.2f} | {r.get('high', 0):,.2f} | "
             f"{r.get('low', 0):,.2f} | {r.get('close', 0):,.2f} | {int(r.get('volume') or 0):,}"
         )
+    if truncated:
+        lines.append("")
+        lines.append(f"💡 더 긴 기간이 필요하면 **interval을 크게** (예: 1wk, 1mo) 하세요.")
     return "\n".join(lines)
 
 

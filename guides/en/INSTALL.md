@@ -1,14 +1,18 @@
-# StockLens Installation Guide
-
-Detailed installation for both developers and non-developers.
+# StockLens Installation Guide (pip path)
 
 [🇰🇷 한국어](../ko/INSTALL.md) | [TOOLS](TOOLS.md) | [USAGE](USAGE.md)
+
+> 💡 **Easier alternative: `.mcpb` extension**
+>
+> For most users, the `.mcpb` Desktop Extension installs in a few clicks **without any Python setup**. See the [Quick Start in README](../../README.en.md#quick-start-mcpb-recommended).
+>
+> This guide is the **pip install path** for developers / power users who want full control.
 
 ---
 
 ## Prerequisites
 
-1. **Python 3.11+**
+1. **Python 3.11+** (not needed for `.mcpb`, only for this pip path)
 2. **Claude Desktop app**
 3. **Internet connection**
 
@@ -229,10 +233,10 @@ Likely Naver Finance connectivity issue:
 ### Update
 
 ```bash
-pip install --upgrade stocklens-mcp
+py -m pip install --upgrade stocklens-mcp
 ```
 
-Or run `update.bat` / `update.sh`.
+On macOS/Linux, use `python3` instead of `py`.
 
 ---
 

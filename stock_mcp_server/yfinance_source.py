@@ -779,44 +779,22 @@ async def get_etf_info(ticker: str) -> dict | None:
     return await _in_thread(_sync)
 
 
-@cached_us(ttl_market=60, ttl_closed=1800)
 async def get_multi_prices(tickers: list[str]) -> list[dict]:
-    """여러 티커 일괄 가격 스냅샷."""
-    norms = [normalize_ticker(t) for t in tickers]
+    """여러 티커 일괄 가격 스냅샷. 티커별 병렬 호출 (asyncio.gather).
 
-    def _sync():
+    get_price는 내부적으로 get_info_raw를 쓰므로 캐시 공유. 콜드 상태에서도
+    asyncio.to_thread가 ThreadPool로 동시 실행해 30 티커 ~1-2초 수준.
+    """
+    async def _one(sym: str) -> dict:
         try:
-            ts = yf.Tickers(" ".join(norms))
-        except Exception:
-            return []
-        out = []
-        for sym in norms:
-            try:
-                tk = ts.tickers.get(sym)
-                if tk is None:
-                    continue
-                info = tk.info or {}
-                if not info.get("symbol"):
-                    out.append({"ticker": sym, "error": "not found"})
-                    continue
-                price = info.get("currentPrice") or info.get("regularMarketPrice")
-                prev = info.get("regularMarketPreviousClose") or info.get("previousClose")
-                change = (price - prev) if (price is not None and prev) else None
-                change_pct = (change / prev * 100) if (change is not None and prev) else None
-                out.append({
-                    "ticker": info.get("symbol"),
-                    "name": info.get("longName") or info.get("shortName"),
-                    "price": _clean(price),
-                    "change": _clean(change),
-                    "change_percent": _clean(change_pct),
-                    "volume": _clean(info.get("regularMarketVolume")),
-                    "market_cap": _clean(info.get("marketCap")),
-                })
-            except Exception as e:
-                out.append({"ticker": sym, "error": str(e)[:60]})
-        return out
+            r = await get_price(sym)
+            if r is None:
+                return {"ticker": sym, "error": "not found"}
+            return r
+        except Exception as e:
+            return {"ticker": sym, "error": f"{type(e).__name__}: {str(e)[:60]}"}
 
-    return await _in_thread(_sync)
+    return await asyncio.gather(*(_one(t) for t in tickers))
 
 
 @cached_us(ttl_market=1800, ttl_closed=86400)

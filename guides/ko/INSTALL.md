@@ -1,14 +1,18 @@
-# StockLens 설치 가이드
-
-비개발자도 따라할 수 있게 상세히 정리했습니다.
+# StockLens 설치 가이드 (pip 사용자용)
 
 [🇺🇸 English](../en/INSTALL.md) | [TOOLS](TOOLS.md) | [USAGE](USAGE.md)
+
+> 💡 **더 간단한 방법: `.mcpb` 확장프로그램**
+>
+> 대부분의 사용자는 **Python 설치 없이** 클릭 몇 번이면 끝납니다. [README 빠른 시작](../../README.md#빠른-시작-mcpb-권장) 참고.
+>
+> 이 문서는 **pip으로 직접 설치**하려는 사용자(개발자·파워유저)용 상세 가이드입니다.
 
 ---
 
 ## 준비물
 
-1. **Python 3.11 이상**
+1. **Python 3.11 이상** (`.mcpb`는 불필요, pip 경로만 필요)
 2. **Claude Desktop 앱**
 3. **인터넷 연결**
 
@@ -231,10 +235,10 @@ python -m stock_mcp_server.setup_claude stocklens
 ### 업데이트 방법
 
 ```bash
-pip install --upgrade stocklens-mcp
+py -m pip install --upgrade stocklens-mcp
 ```
 
-또는 `update.bat` / `update.sh` 실행.
+macOS/Linux는 `py` 대신 `python3`.
 
 ---
 
