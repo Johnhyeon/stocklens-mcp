@@ -49,10 +49,13 @@ Install as a Claude Desktop extension in a few clicks — **Python and dependenc
 4. Pick the `.mcpb` → **Approve all**
 
 > 💡 **Response timing**
-> - **First call after install**: 1~5 minutes — Claude Desktop auto-downloads Python + dependencies. No progress indicator, so if it looks stuck, **retry the same query once**.
-> - **Subsequent calls**: 1~2 seconds for first request, instant on repeat (built-in cache).
+> - **Installation may take a few moments.**
+> - **Permissions**: For smoother use, set the extension to **Allow all** after installing.
+> - **First call after install**: may take 1~5 minutes — Claude Desktop auto-downloads Python + dependencies.
+    No progress indicator, so if it looks stuck, **retry the same query once**.
+> - **Subsequent calls**: 1~2 seconds for first request, instant on repeat (built-in cache)
 
-> ⚠️ **Do not register pip + `.mcpb` simultaneously** — they conflict and can stall responses. Existing pip users, see below.
+> ⚠️ **Do not register pip + `.mcpb` simultaneously** — they conflict and can stall responses. Existing pip users, see below
 
 ---
 

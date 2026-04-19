@@ -49,10 +49,13 @@ Claude Desktop 확장프로그램으로 클릭 몇 번이면 설치 완료 — *
 4. 받은 `.mcpb` 선택 → **모두 허용**
 
 > 💡 **응답 속도**
-> - **설치 직후 첫 호출**: 1~5분 걸립니다 — Claude Desktop이 Python·의존성을 자동 다운로드합니다. 진행 표시가 없으니 **타임아웃 같으면 동일 질문을 한 번 더** 시도하세요.
-> - **이후 호출**: 첫 요청 1~2초, 같은 종목 재조회는 즉시 (내부 캐시).
+> - **설치 시 시간이 좀 걸릴 수 있습니다**
+> - **권한 허용**: 사용 시 편의를 위해 설치 후 권한을 모두 허용으로 변경해주세요.
+> - **설치 직후 첫 호출**: 1~5분 걸릴 수 있습니다. — Claude Desktop이 Python·의존성을 자동 다운로드합니다. 
+    진행 표시가 없으니 **타임아웃 같으면 동일 질문을 한 번 더** 시도하세요.
+> - **이후 호출**: 첫 요청 1~2초, 같은 종목 재조회는 즉시 (내부 캐시)
 
-> ⚠️ **pip + `.mcpb` 동시 등록 금지** — 두 방식이 충돌해 응답 멈춤 현상이 발생합니다. 기존 pip 사용자는 아래 안내 참고.
+> ⚠️ **pip + `.mcpb` 동시 등록 금지** — 두 방식이 충돌해 응답 멈춤 현상이 발생합니다. 기존 pip 사용자는 아래 안내 참고
 
 ---
 
@@ -81,7 +84,9 @@ Claude에서:
 종목명, 현재가, 전일대비, 거래량이 나오면 설치 완료입니다.
 
 <!-- TODO: 스크린샷 — Claude 응답 예시 -->
-![Claude 응답 예시](assets/screenshots/04-claude-response.png)
+<img width="850" height="415" alt="image" src="https://github.com/user-attachments/assets/ac50dd95-85b8-4471-a79c-6aa196f62af4" />
+
+<img width="797" height="948" alt="image" src="https://github.com/user-attachments/assets/1daa0535-4ab5-480c-b70f-dcfdb5c5c864" />
 
 ## 설치 문제 진단 (pip 설치자 전용)
 
