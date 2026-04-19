@@ -241,12 +241,32 @@ async def get_financials(code: str) -> dict:
         result["name"] = name_tag.text.strip()
 
     # 투자정보 테이블 (PER, PBR, 배당수익률 등)
+    # 구조: thead[0]은 대분류(연간/분기 colspan), thead[1]은 실제 기간 라벨
     cop_info = soup.select("div.cop_analysis table")
     if cop_info:
         for table in cop_info:
-            headers = [th.text.strip() for th in table.select("th")]
-            rows = table.select("tr")
-            for row in rows:
+            thead_rows = table.select("thead tr")
+            annual_count, quarterly_count = 0, 0
+            periods_flat: list[str] = []
+            if len(thead_rows) >= 2:
+                for th in thead_rows[0].select("th"):
+                    label = th.text.strip()
+                    try:
+                        span = int(th.get("colspan", "1"))
+                    except ValueError:
+                        span = 1
+                    if "연간" in label:
+                        annual_count = span
+                    elif "분기" in label:
+                        quarterly_count = span
+                periods_flat = [th.text.strip() for th in thead_rows[1].select("th")]
+                if periods_flat and len(periods_flat) == annual_count + quarterly_count:
+                    result["_periods"] = {
+                        "annual": periods_flat[:annual_count],
+                        "quarterly": periods_flat[annual_count:],
+                    }
+
+            for row in table.select("tbody tr"):
                 th = row.select_one("th")
                 tds = row.select("td")
                 if th and tds:
@@ -261,8 +281,9 @@ async def get_financials(code: str) -> dict:
         th = tr.select_one("th")
         td = tr.select_one("td")
         if th and td:
-            label = th.text.strip()
-            value = td.text.strip()
+            label = th.get_text(strip=True)
+            # td 내부 탭/줄바꿈 제거 후 공백 한 칸으로 정리
+            value = " ".join(td.get_text(strip=True).split())
             if "시가총액" in label or "상장주식수" in label or "PER" in label or "PBR" in label:
                 result[label] = value
 
@@ -308,7 +329,11 @@ async def list_themes(page: int = 1) -> list[dict]:
         for leader_cell in cells[6:8]:
             leader_a = leader_cell.find("a")
             if leader_a:
-                leaders.append(leader_a.text.strip())
+                code_match = re.search(r"code=([A-Za-z0-9]{6})", leader_a.get("href", ""))
+                leaders.append({
+                    "name": leader_a.text.strip(),
+                    "code": code_match.group(1) if code_match else "",
+                })
 
         results.append({
             "name": name_tag.text.strip(),
@@ -1028,3 +1053,378 @@ async def get_market_index() -> list[dict]:
 
     results = await asyncio.gather(fetch_one("KOSPI"), fetch_one("KOSDAQ"))
     return list(results)
+
+
+# ---------------------------------------------------------------------------
+# ETF 데이터
+# ---------------------------------------------------------------------------
+
+ETF_LIST_API = f"{BASE_URL}/api/sise/etfItemList.nhn"
+ETF_WISEREPORT_URL = "https://navercomp.wisereport.co.kr/v2/ETF/index.aspx"
+
+# etfTabCode → 카테고리명 매핑
+_ETF_TAB_NAMES = {
+    1: "국내 시장지수",
+    2: "국내 업종/테마",
+    3: "국내 파생",
+    4: "해외 주식",
+    5: "원자재",
+    6: "채권/금리",
+    7: "단기자금",
+}
+
+
+@cached(ttl_market=300, ttl_closed=3600)  # 장중 5분, 장마감 1시간
+async def get_etf_list(
+    category: str | None = None,
+    sort_by: str = "marketSum",
+    limit: int = 20,
+) -> dict:
+    """ETF 전체 목록을 가져옵니다.
+
+    Args:
+        category: 필터 카테고리 (None=전체, "국내 시장지수", "해외 주식" 등)
+        sort_by: 정렬 기준 ("marketSum", "quant", "threeMonthEarnRate", "nav")
+        limit: 반환 개수 (기본 20, 최대 50)
+    """
+    resp = await fetch(ETF_LIST_API)
+    # 네이버 ETF API는 EUC-KR 인코딩
+    import json as _json
+    data = _json.loads(resp.content.decode("euc-kr"))
+    items = data.get("result", {}).get("etfItemList", [])
+    if not items:
+        return {"items": [], "total": 0, "categories": _ETF_TAB_NAMES}
+
+    # 카테고리 필터
+    if category:
+        tab_code = None
+        for code, name in _ETF_TAB_NAMES.items():
+            if category in name or name in category:
+                tab_code = code
+                break
+        if tab_code:
+            items = [i for i in items if i.get("etfTabCode") == tab_code]
+
+    # 정렬
+    reverse = True
+    if sort_by in ("threeMonthEarnRate",):
+        items = [i for i in items if i.get(sort_by) is not None]
+    items.sort(key=lambda x: abs(x.get(sort_by, 0) or 0), reverse=reverse)
+
+    limit = min(limit, 50)
+    result_items = []
+    for it in items[:limit]:
+        result_items.append({
+            "code": it["itemcode"],
+            "name": it["itemname"],
+            "category": _ETF_TAB_NAMES.get(it.get("etfTabCode"), "기타"),
+            "price": it.get("nowVal"),
+            "change_rate": it.get("changeRate"),
+            "nav": it.get("nav"),
+            "return_3m": it.get("threeMonthEarnRate"),
+            "volume": it.get("quant"),
+            "market_cap": it.get("marketSum"),  # 억원
+        })
+
+    return {
+        "items": result_items,
+        "total": len(items),
+        "categories": _ETF_TAB_NAMES,
+    }
+
+
+def _parse_float(text: str, default: float = 0.0) -> float:
+    """쉼표·공백 등을 제거하고 float로 변환."""
+    if not text:
+        return default
+    cleaned = text.strip().replace(",", "").replace("+", "")
+    if not cleaned or cleaned in ("-", "N/A"):
+        return default
+    try:
+        return float(cleaned)
+    except ValueError:
+        return default
+
+
+@cached(ttl_market=600, ttl_closed=86400)  # 장중 10분, 장마감 1일
+async def get_etf_detail(code: str) -> dict:
+    """ETF 상세 정보를 wisereport 페이지에서 가져옵니다.
+
+    Returns:
+        기초지수, 유형, 상장일, 보수율, 운용사, NAV, 수익률,
+        구성종목 TOP10 등을 포함하는 dict.
+    """
+    resp = await fetch(ETF_WISEREPORT_URL, params={"cmp_cd": code})
+    html = resp.text
+
+    result = {"code": code}
+
+    # wisereport 페이지에 임베딩된 JS 변수 파싱
+    import json as _json
+
+    def _extract_json_var(var_name: str) -> dict | None:
+        import re as _re
+        pattern = rf"var\s+{var_name}\s*=\s*(\{{.*?\}});"
+        match = _re.search(pattern, html, _re.DOTALL)
+        if match:
+            try:
+                return _json.loads(match.group(1))
+            except (_json.JSONDecodeError, ValueError):
+                return None
+        return None
+
+    summary = _extract_json_var("summary_data")
+    product = _extract_json_var("product_summary_data")
+    status = _extract_json_var("status_data")
+    cu_raw = _extract_json_var("CU_data")
+
+    if summary:
+        result["name"] = summary.get("CMP_KOR", "")
+        result["name_eng"] = summary.get("CMP_ENG", "")
+        result["base_index"] = summary.get("BASE_IDX_NM_KOR", "")
+        result["issuer"] = summary.get("ISSUE_NM_KOR", "")
+        result["etf_type"] = summary.get("ETF_TYP_SVC_NM", "")
+        result["total_fee"] = _parse_float(summary.get("TOT_PAY", ""))
+
+    if product:
+        result["listing_date"] = product.get("LIST_DT", "")
+        result["fund_type"] = product.get("FUND_TYP", "")
+        result["fiscal_period"] = product.get("FIN_PRD", "")
+        result["dividend_base"] = product.get("DIV_BASE_DT", "")
+        result["lp_list"] = product.get("LP_NM_KOR", "")
+        result["website"] = product.get("URL", "")
+
+    if status:
+        result["price"] = _parse_float(status.get("CLS_PRC", ""))
+        result["price_change"] = _parse_float(status.get("PRC_CHG", ""))
+        result["price_change_rate"] = _parse_float(status.get("ADJ_CHG", ""))
+        result["year_high"] = _parse_float(status.get("YR_HIGH", ""))
+        result["year_low"] = _parse_float(status.get("YR_LOW", ""))
+        result["market_cap"] = _parse_float(status.get("MKT_VAL", ""))  # 억원
+        result["nav"] = _parse_float(status.get("CLS_PRC", ""))  # fallback
+        result["beta"] = _parse_float(status.get("YR_BETA", ""))
+        result["foreign_rate"] = _parse_float(status.get("FRG_RT", ""))
+        result["return_1m"] = _parse_float(status.get("ERN1", ""))
+        result["return_3m"] = _parse_float(status.get("ERN3", ""))
+        result["return_6m"] = _parse_float(status.get("ERN6", ""))
+        result["return_1y"] = _parse_float(status.get("ERN12", ""))
+        result["volume_20d_avg"] = _parse_float(status.get("AVG_TRD_QTY20", ""))
+
+    # 구성종목
+    if cu_raw and "grid_data" in cu_raw:
+        holdings = []
+        for h in cu_raw["grid_data"]:
+            name = h.get("STK_NM_KOR", "")
+            if not name:
+                continue
+            holdings.append({
+                "name": name,
+                "shares": h.get("AGMT_STK_CNT") or 0,
+                "weight": h.get("ETF_WEIGHT") or 0,
+            })
+        # 비중 순 정렬, 비중 없으면 주식수 순
+        has_weight = any(h["weight"] > 0 for h in holdings)
+        sort_key = "weight" if has_weight else "shares"
+        holdings.sort(key=lambda x: x[sort_key], reverse=True)
+        result["holdings"] = holdings
+        result["holdings_count"] = len(holdings)
+        result["holdings_has_weight"] = has_weight
+
+    return result
+
+
+# ---------------------------------------------------------------------------
+# 컨센서스 / 목표가
+# ---------------------------------------------------------------------------
+
+WISEREPORT_CONSENSUS_URL = "https://navercomp.wisereport.co.kr/v2/company/c1010001.aspx"
+
+
+@cached(ttl_market=600, ttl_closed=86400)  # 장중 10분, 장마감 1일
+async def get_consensus(code: str) -> dict:
+    """종목의 컨센서스 (투자의견, 목표주가, 실적 추정치)를 가져옵니다."""
+    resp = await fetch(WISEREPORT_CONSENSUS_URL, params={"cmp_cd": code})
+    html = resp.text
+
+    import json as _json
+
+    def _extract_json_var(var_name: str) -> dict | None:
+        import re as _re
+        pattern = rf"var\s+{var_name}\s*=\s*(\{{.*?\}});"
+        match = _re.search(pattern, html, _re.DOTALL)
+        if match:
+            try:
+                return _json.loads(match.group(1))
+            except (_json.JSONDecodeError, ValueError):
+                return None
+        return None
+
+    result = {"code": code}
+
+    # 목표주가 추이
+    chart2 = _extract_json_var("chartData2")
+    if chart2 and "target_price" in chart2:
+        targets = chart2["target_price"]
+        valid = [t for t in targets if t.get("y") is not None]
+        if valid:
+            result["target_price"] = valid[-1]["y"]
+        result["target_price_history"] = [
+            {"date": t["x"], "price": t["y"]} for t in valid[-6:]
+        ]
+
+    # 투자의견 분포
+    chart3 = _extract_json_var("chartData3")
+    if chart3:
+        today = chart3.get("today", [])
+        result["opinion"] = {
+            item["name"]: int(item["y"]) if item.get("y") else 0
+            for item in today
+        }
+        ago = chart3.get("a_month_ago", [])
+        result["opinion_1m_ago"] = {
+            item["name"]: int(item["y"]) if item.get("y") else 0
+            for item in ago
+        }
+
+    # 실적 추정치
+    res_data = _extract_json_var("res")
+    if res_data and "yymm" in res_data:
+        result["estimate_periods"] = res_data["yymm"]
+        # wisereport res.data 인덱스: 0=매출액, 1=영업이익, 2=영업이익률(%)
+        # 3번 이후는 페이지마다 다를 수 있어 안전한 것만 사용
+        labels = ["매출액", "영업이익", "영업이익률"]
+        estimates = {}
+        for i, row in enumerate(res_data.get("data", [])):
+            if i < len(labels):
+                vals = {}
+                for period_idx, period in enumerate(res_data["yymm"]):
+                    vals[period] = row.get(str(period_idx + 1))
+                estimates[labels[i]] = vals
+        result["estimates"] = estimates
+
+    return result
+
+
+# ---------------------------------------------------------------------------
+# 증권사 리포트
+# ---------------------------------------------------------------------------
+
+REPORT_LIST_URL = f"{BASE_URL}/research/company_list.naver"
+REPORT_READ_URL = f"{BASE_URL}/research/company_read.naver"
+
+
+@cached(ttl_market=600, ttl_closed=3600)  # 장중 10분, 장마감 1시간
+async def get_reports(code: str, count: int = 5) -> list[dict]:
+    """종목의 최근 증권사 리포트 목록을 가져옵니다."""
+    resp = await fetch(REPORT_LIST_URL, params={
+        "searchType": "itemCode",
+        "itemCode": code,
+        "page": "1",
+    })
+    soup = BeautifulSoup(resp.text, "lxml")
+
+    table = soup.select_one("table.type_1")
+    if not table:
+        return []
+
+    results = []
+    for row in table.select("tr"):
+        cells = row.select("td")
+        if len(cells) < 5:
+            continue
+
+        title_a = cells[1].find("a")
+        if not title_a:
+            continue
+
+        href = title_a.get("href", "")
+        nid_match = re.search(r"nid=(\d+)", href)
+        if not nid_match:
+            continue
+
+        results.append({
+            "nid": nid_match.group(1),
+            "stock": cells[0].get_text(strip=True),
+            "title": title_a.get_text(strip=True),
+            "broker": cells[2].get_text(strip=True),
+            "date": cells[4].get_text(strip=True),
+            "views": _parse_int(cells[5].get_text(strip=True)) if len(cells) > 5 else 0,
+        })
+        if len(results) >= count:
+            break
+
+    return results
+
+
+async def get_report_detail(nid: str) -> dict:
+    """증권사 리포트 상세 (본문 요약 + PDF 링크 + 목표가/투자의견)."""
+    resp = await fetch(REPORT_READ_URL, params={"nid": nid})
+    soup = BeautifulSoup(resp.text, "lxml")
+
+    result = {"nid": nid}
+
+    # 목표가 / 투자의견
+    for td in soup.select("td"):
+        text = " ".join(td.get_text(strip=True).split())
+        if "목표가" in text:
+            import re as _re
+            price_m = _re.search(r"목표가\s*([\d,]+)", text)
+            if price_m:
+                result["target_price"] = _parse_int(price_m.group(1))
+            opinion_m = _re.search(r"투자의견\s*(\w+)", text)
+            if opinion_m:
+                result["opinion"] = opinion_m.group(1)
+
+    # 본문 텍스트
+    content_td = soup.select_one("td.view_cnt")
+    if content_td:
+        text = content_td.get_text(strip=True)
+        if len(text) > 500:
+            text = text[:500] + "..."
+        result["summary"] = text
+
+    # PDF 링크
+    for a in soup.select("a"):
+        href = a.get("href", "")
+        if ".pdf" in href.lower():
+            result["pdf_url"] = href
+            break
+
+    return result
+
+
+# ---------------------------------------------------------------------------
+# 공시 목록
+# ---------------------------------------------------------------------------
+
+DISCLOSURE_URL = f"{BASE_URL}/item/news_notice.naver"
+
+
+@cached(ttl_market=300, ttl_closed=3600)  # 장중 5분, 장마감 1시간
+async def get_disclosure_list(code: str, page: int = 1) -> list[dict]:
+    """종목의 최근 공시 목록을 가져옵니다."""
+    resp = await fetch(DISCLOSURE_URL, params={"code": code, "page": page})
+    soup = BeautifulSoup(resp.text, "lxml")
+
+    results = []
+    for row in soup.select("table tr"):
+        cells = row.select("td")
+        if len(cells) < 3:
+            continue
+
+        title_a = cells[0].find("a")
+        if not title_a:
+            continue
+
+        title = title_a.get_text(strip=True)
+        if not title:
+            continue
+
+        results.append({
+            "title": title,
+            "source": cells[1].get_text(strip=True),
+            "date": cells[2].get_text(strip=True),
+            "link": title_a.get("href", ""),
+        })
+
+    return results

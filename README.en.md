@@ -35,27 +35,44 @@ When you show AI a chart image, it **guesses the numbers and often gets them wro
 - 📁 **Excel snapshots** — Scan once, query instantly
 - 🤖 **Gemini/GPT compatible** — Export to Excel for use with other AIs
 
-## Quick Start
+## Quick Start (`.mcpb`, recommended)
 
-> 📌 **Python 3.11+ required.** Check with `py --version` or `python --version`. If older, install 3.12 from [python.org](https://www.python.org/downloads/) (check "Add to PATH").
+Install as a Claude Desktop extension in a few clicks — **Python and dependencies bundled, no prior setup needed**.
 
-### Install (3 commands)
+<!-- TODO: 30-second install demo GIF — download → settings → install extension → approve -->
+![Install demo](assets/setup.gif)
 
-Open your terminal (PowerShell / cmd / Terminal):
+**Steps**
+1. [Download Claude Desktop](https://claude.ai/download) → install → sign in
+2. Top-left menu → **Settings → Developer → Install Extension**
+3. Grab `stocklens-mcp-*.mcpb` from the [latest Releases page](https://github.com/Johnhyeon/stocklens-mcp/releases/latest)
+4. Pick the `.mcpb` → **Approve all**
 
+> 💡 **Response timing**
+> - **Installation may take a few moments.**
+> - **Permissions**: For smoother use, set the extension to **Allow all** after installing.
+> - **First call after install**: may take 1~5 minutes — Claude Desktop auto-downloads Python + dependencies.
+    No progress indicator, so if it looks stuck, **retry the same query once**.
+> - **Subsequent calls**: 1~2 seconds for first request, instant on repeat (built-in cache)
+
+> ⚠️ **Do not register pip + `.mcpb` simultaneously** — they conflict and can stall responses. Existing pip users, see below
+
+---
+
+### 🔄 Existing pip users
+
+**Switch to `.mcpb` (recommended)**:
 ```bash
-py -m pip install stocklens-mcp
-py -m stock_mcp_server.setup_claude
-py -m stock_mcp_server.doctor
+py -m pip uninstall stocklens-mcp
+```
+Then delete the `"stocklens"` entry in `%APPDATA%\Claude\claude_desktop_config.json` → follow the `.mcpb` flow above.
+
+**Stay on pip (upgrade only)**:
+```bash
+py -m pip install --upgrade stocklens-mcp
 ```
 
-1. Install → 2. Configure Claude Desktop → 3. Verify
-
-Then **fully quit and restart Claude Desktop** (tray icon → Quit).
-
-> 💡 On macOS/Linux, use `python3` if `py` isn't available. E.g., `python3 -m pip install stocklens-mcp`
-
-Then **fully quit and restart Claude Desktop**.
+> 📌 Full pip install / troubleshooting: [Install guide](guides/en/INSTALL.md)
 
 ## Verify Installation
 
@@ -66,9 +83,14 @@ Show me Samsung Electronics (005930) current price
 
 If you see the stock name, price, and volume, you're all set.
 
-## Installation Diagnosis
+<!-- TODO: screenshot — Claude response example -->
+<img width="850" height="415" alt="image" src="https://github.com/user-attachments/assets/ac50dd95-85b8-4471-a79c-6aa196f62af4" />
 
-If MCP does not appear in Claude Desktop:
+<img width="797" height="948" alt="image" src="https://github.com/user-attachments/assets/1daa0535-4ab5-480c-b70f-dcfdb5c5c864" />
+
+## Installation Diagnosis (pip users only)
+
+With `.mcpb`, Claude Desktop handles everything automatically. On the pip path, if MCP doesn't appear:
 
 ```bash
 stocklens-doctor
@@ -85,6 +107,8 @@ Auto-checks Python / package / command / config in 4 steps. Shows the exact fix 
 "Show today's strongest 3 themes and analyze the leader of each"
 ```
 
+> ✅ Only builds that pass full-tool QA and load tests ship to release. ([details](QUALITY.md))
+
 ## Learn More
 
 - [📘 **All 19 Tools** →](guides/en/TOOLS.md)
@@ -100,9 +124,12 @@ Auto-checks Python / package / command / config in 4 steps. Shows the exact fix 
 | Claude.ai (web) | ❌ Local MCP not supported |
 | ChatGPT / Gemini | Via Excel export workaround |
 
-## Important Note for International Users
+## Market Coverage
 
-StockLens is designed for **Korean stock market (KOSPI/KOSDAQ)** data from Naver Finance. Stock codes are 6-digit Korean tickers (e.g., `005930` for Samsung Electronics, `000660` for SK Hynix). US/global stock support is planned for a future version.
+- **Korean market (KOSPI/KOSDAQ)** via Naver Finance — 6-digit tickers (`005930` = Samsung Electronics, `000660` = SK Hynix)
+- **US market (NYSE/NASDAQ)** via Yahoo Finance — alphabet tickers (`AAPL`, `TSLA`, `BRK.B`)
+
+Tickers are auto-detected; mix freely in natural language (e.g., "compare 005930 and AAPL"). Full tool list in [TOOLS.md](guides/en/TOOLS.md).
 
 ## Contributing
 

@@ -202,3 +202,138 @@ Use Claude to collect data, then other AIs to analyze.
 Once: "Create snapshot of top 100"
 Repeat: "Filter by [condition]"
 ```
+
+---
+
+## 🆕 v0.3.0 New Features
+
+### Technical Indicators (`get_indicators`)
+
+```
+Give me RSI / MACD / Bollinger assessment for Samsung Electronics
+Check if SK Hynix has golden/dead cross on 20/60-day MAs
+Pick oversold stocks (RSI < 30) from the top-30 by market cap
+```
+
+### Sell-side Consensus & Reports
+
+```
+Show Samsung Electronics analyst price targets + recommendation distribution
+Summarize the 3 most recent broker reports for SK Hynix
+Analyze LG Energy's price target revisions over time
+```
+
+### DART Disclosures (KR)
+
+```
+Last 10 disclosures for Samsung Electronics (titles only)
+Filter Hyundai Motor disclosures related to earnings announcements
+```
+
+### Korean ETFs
+
+```
+Rank Korean ETFs by dividend yield (top 10)
+TIGER 200 detail — underlying index, TER, top 10 holdings
+Top 5 semiconductor ETFs by 1-year return
+```
+
+---
+
+## 🇺🇸 US Stocks (new in v0.3.0)
+
+### Basics
+
+```
+AAPL current price + 52-week range + beta
+What's Apple's ticker? (use `get_us_search`)
+Price snapshot for AAPL MSFT NVDA GOOGL at once
+S&P 500 / Nasdaq / Dow index levels
+```
+
+### Earnings & Analysts
+
+```
+Next earnings date for NVDA + recent EPS surprises
+Apple analyst price target + recent upgrades/downgrades
+Tesla EPS estimate revisions in the last 30 days
+Microsoft analyst recommendation distribution (buy/hold/sell)
+```
+
+### Dividends
+
+```
+Coca-Cola (KO) dividend history and yield
+SCHD ETF holdings and distributions
+JNJ — 5-year avg yield + next ex-dividend date
+```
+
+### Options
+
+```
+AAPL weekly options chain with IV
+TSLA calls/puts near spot (±10 strikes)
+SPY next month expiry option chain
+```
+
+### Insiders & Institutions
+
+```
+Apple insider transactions (Form 4) over the last 6 months
+NVDA top 10 institutional holders (13F)
+Tesla insider net buy vs sell summary
+```
+
+### Financial Statements
+
+```
+AAPL 5-year annual income statement + cash flow statement
+NVDA quarterly balance sheet (Total Assets, Debt, Equity)
+Apple Free Cash Flow trend + buyback spending
+```
+
+### Market Discovery
+
+```
+Today's top-10 US Day Gainers
+Run the "undervalued growth stocks" screener
+Technology sector — top 20 companies + market weight
+```
+
+### Short Interest & SEC
+
+```
+GME short interest % of float + days to cover
+Latest 5 SEC filings for Apple (10-K, 10-Q, 8-K)
+TSLA latest 10-Q link
+```
+
+### ETF Detail
+
+```
+SPY top 10 holdings + sector allocation
+QQQ expense ratio + YTD return
+Compare VOO vs SPY
+```
+
+### Combined Analysis
+
+```
+Combine AAPL chart + financials + analyst opinions + options IV —
+is there a meaningful buy signal right now?
+
+Compare NVDA vs AAPL over 30 days — return, PER, PEG, analyst
+price-target upside. Put it in a table.
+```
+
+---
+
+## 📌 Mixed KR + US Queries
+
+```
+Compare 60-day price action — Samsung Electronics (KRW) vs Apple (USD)
+SK Hynix vs Micron (MU) — financials + flows
+SCHD vs KODEX High Dividend ETF — return + distribution
+```
+
+Tickers are auto-detected (6-digit = KR, alphabet = US), so you can mix freely in natural language.

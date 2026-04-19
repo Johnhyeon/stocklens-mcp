@@ -45,3 +45,10 @@ test_v2.py
 docs/
 plays/
 assets/logo_preview.html
+tests/preview_output/
+
+# MCPB 빌드 산출물 (릴리즈 자산으로만 배포)
+*.mcpb
+
+# Claude Desktop scheduled tasks junk
+.claude/

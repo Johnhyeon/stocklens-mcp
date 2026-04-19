@@ -65,12 +65,11 @@ jobs:
             dist/*.tar.gz
           generate_release_notes: true
           body: |
-            ## 설치
-            ```bash
-            pip install --upgrade stocklens-mcp
-            stocklens-setup
-            ```
+            ## 📥 설치 / 업그레이드
+            - **신규 사용자** (.mcpb 권장): [README 빠른 시작](https://github.com/Johnhyeon/stocklens-mcp#빠른-시작-mcpb-권장)
+            - **기존 pip 사용자**: `py -m pip install --upgrade stocklens-mcp`
 
-            또는 `install.bat` (Windows) / `install.sh` (macOS/Linux) 다운로드 후 실행.
-
-            자세한 설치 가이드: [guides/ko/INSTALL.md](https://github.com/Johnhyeon/stocklens-mcp/blob/main/guides/ko/INSTALL.md)
+            ## 📚 링크
+            - [전체 도구 목록](https://github.com/Johnhyeon/stocklens-mcp/blob/main/guides/ko/TOOLS.md)
+            - [프롬프트 예시](https://github.com/Johnhyeon/stocklens-mcp/blob/main/guides/ko/USAGE.md)
+            - [품질 검증 내역](https://github.com/Johnhyeon/stocklens-mcp/blob/main/QUALITY.md)

@@ -1,0 +1,54 @@
+# Build artifacts
+dist/
+build/
+*.egg-info/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Virtual envs
+venv/
+.venv/
+env/
+
+# VCS
+.git/
+.gitignore
+.gitattributes
+
+# Docs (not needed inside the bundle)
+docs/
+guides/
+plays/
+README.en.md
+CLAUDE.md
+LICENSE
+QUALITY.md
+
+# README.md 포함 — pyproject.toml의 readme = "README.md" 참조라 hatchling 빌드가 필요함
+# assets 중 아이콘 PNG만 포함 (manifest.json icons 필드 참조), 나머지 SVG/HTML은 제외
+assets/*.svg
+assets/*.html
+
+# Scripts (pip-based install, not relevant for .mcpb users)
+install.bat
+install.sh
+
+# Tests
+test_*.py
+*_test.py
+tests/
+
+# Generated bundles (avoid recursion)
+*.mcpb
+
+# CI / tooling
+.github/
+.vscode/
+.idea/
+
+# OS junk
+.DS_Store
+Thumbs.db

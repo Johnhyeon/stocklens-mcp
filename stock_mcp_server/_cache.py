@@ -23,6 +23,10 @@ _KST = ZoneInfo("Asia/Seoul")
 _MARKET_OPEN = dtime(9, 0)
 _MARKET_CLOSE = dtime(15, 30)
 
+_NY = ZoneInfo("America/New_York")
+_US_MARKET_OPEN = dtime(9, 30)
+_US_MARKET_CLOSE = dtime(16, 0)
+
 _cache: dict[str, tuple[float, Any]] = {}
 _lock = asyncio.Lock()
 
@@ -37,6 +41,19 @@ def is_market_open(now: datetime | None = None) -> bool:
     return _MARKET_OPEN <= t <= _MARKET_CLOSE
 
 
+def is_us_market_open(now: datetime | None = None) -> bool:
+    """현재 NYSE/NASDAQ이 정규장에 있는지 (09:30-16:00 ET, 평일).
+
+    미국 공휴일은 여기서 체크하지 않는다 (yfinance가 데이터 없으면 빈 응답).
+    정규장만 반영하고 pre/post market은 '닫힘'으로 간주한다 (긴 TTL 목적).
+    """
+    now = now or datetime.now(tz=_NY)
+    if now.weekday() >= 5:
+        return False
+    t = now.time()
+    return _US_MARKET_OPEN <= t <= _US_MARKET_CLOSE
+
+
 def _make_key(func_name: str, args: tuple, kwargs: dict) -> str:
     parts = [func_name]
     parts.extend(repr(a) for a in args)
@@ -44,16 +61,12 @@ def _make_key(func_name: str, args: tuple, kwargs: dict) -> str:
     return "|".join(parts)
 
 
-def cached(
+def _make_cached(
     ttl_market: int,
-    ttl_closed: int | None = None,
+    ttl_closed: int | None,
+    is_open: Callable[[], bool],
 ):
-    """async 함수 결과를 TTL 동안 캐싱.
-
-    Args:
-        ttl_market: 장 열려 있을 때 TTL (초)
-        ttl_closed: 장 마감 후 TTL (초). None이면 ttl_market의 60배.
-    """
+    """`cached` / `cached_us` 공통 구현."""
     if ttl_closed is None:
         ttl_closed = ttl_market * 60
 
@@ -68,13 +81,11 @@ def cached(
                     expiry, value = entry
                     if time.time() < expiry:
                         return value
-                    # 만료된 엔트리는 제거
                     del _cache[key]
 
-            # 캐시 미스: 실제 함수 실행
             result = await func(*args, **kwargs)
 
-            ttl = ttl_market if is_market_open() else ttl_closed
+            ttl = ttl_market if is_open() else ttl_closed
             async with _lock:
                 _cache[key] = (time.time() + ttl, result)
 
@@ -83,6 +94,16 @@ def cached(
         return wrapper
 
     return decorator
+
+
+def cached(ttl_market: int, ttl_closed: int | None = None):
+    """async 함수 결과를 KR 시장 시간 기준 TTL로 캐싱."""
+    return _make_cached(ttl_market, ttl_closed, is_market_open)
+
+
+def cached_us(ttl_market: int, ttl_closed: int | None = None):
+    """async 함수 결과를 US 시장 시간 기준 TTL로 캐싱."""
+    return _make_cached(ttl_market, ttl_closed, is_us_market_open)
 
 
 def clear_cache() -> None:
