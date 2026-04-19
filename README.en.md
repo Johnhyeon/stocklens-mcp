@@ -40,7 +40,7 @@ When you show AI a chart image, it **guesses the numbers and often gets them wro
 Install as a Claude Desktop extension in a few clicks — **Python and dependencies bundled, no prior setup needed**.
 
 <!-- TODO: 30-second install demo GIF — download → settings → install extension → approve -->
-![Install demo](assets/screenshots/install-demo.gif)
+![Install demo](assets/setup.gif)
 
 **Steps**
 1. [Download Claude Desktop](https://claude.ai/download) → install → sign in
@@ -81,7 +81,9 @@ Show me Samsung Electronics (005930) current price
 If you see the stock name, price, and volume, you're all set.
 
 <!-- TODO: screenshot — Claude response example -->
-![Claude response example](assets/screenshots/04-claude-response.png)
+<img width="850" height="415" alt="image" src="https://github.com/user-attachments/assets/ac50dd95-85b8-4471-a79c-6aa196f62af4" />
+
+<img width="797" height="948" alt="image" src="https://github.com/user-attachments/assets/1daa0535-4ab5-480c-b70f-dcfdb5c5c864" />
 
 ## Installation Diagnosis (pip users only)
 
