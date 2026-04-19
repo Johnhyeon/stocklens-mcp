@@ -124,9 +124,12 @@ Auto-checks Python / package / command / config in 4 steps. Shows the exact fix 
 | Claude.ai (web) | ❌ Local MCP not supported |
 | ChatGPT / Gemini | Via Excel export workaround |
 
-## Important Note for International Users
+## Market Coverage
 
-StockLens is designed for **Korean stock market (KOSPI/KOSDAQ)** data from Naver Finance. Stock codes are 6-digit Korean tickers (e.g., `005930` for Samsung Electronics, `000660` for SK Hynix). US/global stock support is planned for a future version.
+- **Korean market (KOSPI/KOSDAQ)** via Naver Finance — 6-digit tickers (`005930` = Samsung Electronics, `000660` = SK Hynix)
+- **US market (NYSE/NASDAQ)** via Yahoo Finance — alphabet tickers (`AAPL`, `TSLA`, `BRK.B`)
+
+Tickers are auto-detected; mix freely in natural language (e.g., "compare 005930 and AAPL"). Full tool list in [TOOLS.md](guides/en/TOOLS.md).
 
 ## Contributing
 
