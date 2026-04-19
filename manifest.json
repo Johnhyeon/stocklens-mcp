@@ -2,7 +2,7 @@
   "manifest_version": "0.4",
   "name": "stocklens-mcp",
   "display_name": "StockLens",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "한국(네이버)·미국(Yahoo) 주식 + ETF MCP 서버. 차트·수급·재무·실적·배당·스크리닝·Excel 스냅샷으로 Claude에서 바로 분석.",
   "author": {
     "name": "Johnhyeon"

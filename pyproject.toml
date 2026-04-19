@@ -1,6 +1,6 @@
 [project]
 name = "stocklens-mcp"
-version = "0.3.0"
+version = "0.3.1"
 description = "StockLens — AI가 진짜 데이터로 분석합니다. 한국(네이버)·미국(Yahoo) 주식 + ETF MCP 서버 (차트, 수급, 재무, 실적, 배당, 스크리닝, Excel)"
 readme = "README.md"
 license = { text = "MIT" }

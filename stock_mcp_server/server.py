@@ -1461,6 +1461,7 @@ async def get_us_chart(
     period: str = "3mo",
     interval: str = "1d",
     prepost: bool = False,
+    limit: int = 500,
 ) -> str:
     """US stock chart OHLCV — 미국 주식 시계열 캔들 데이터 (US historical price data).
     "AAPL 차트", "Tesla 1년 주가", "NVDA history", "월봉" 같은 질문에 사용합니다.
@@ -1472,22 +1473,23 @@ async def get_us_chart(
         period: "1d","5d","1mo","3mo","6mo","1y","2y","5y","10y","ytd","max" (기본 3mo)
         interval: "1m","5m","15m","30m","1h","1d","1wk","1mo" (기본 1d)
         prepost: 프리/포스트 마켓 포함 (intraday interval에서만 유효)
+        limit: 반환 최대 행수 (기본 500, 최대 5000). 토큰 소비 보호용 상한.
+               10년 일봉(2,515행) · 백테스트 용도엔 2000~5000으로 올려 사용.
+               더 큰 데이터는 export_us_to_excel로 파일 저장 권장 (토큰 0).
     """
+    limit = max(10, min(limit, 5000))  # 10~5000 범위로 클램프
     rows = await us.get_history(ticker, period=period, interval=interval, prepost=prepost)
     if not rows:
         return f"티커 '{ticker}'의 차트 데이터를 가져올 수 없습니다."
 
-    # 토큰 한계 보호: 500행 초과 시 최근 500개로 자름
-    # (max·10y·일봉 = 2500+ 행, 5d·1분봉 = 1950+ 행 → 토큰 폭주 방지)
-    MAX_ROWS = 500
     total = len(rows)
-    truncated = total > MAX_ROWS
+    truncated = total > limit
     if truncated:
-        rows = rows[-MAX_ROWS:]
+        rows = rows[-limit:]  # 최근 구간 유지
 
     header = f"**{ticker.upper()}** {period} {interval} OHLCV ({len(rows)} bars"
     if truncated:
-        header += f" · 원본 {total}행 중 최근 {MAX_ROWS}행"
+        header += f" · 원본 {total}행 중 최근 {limit}행"
     header += ")"
 
     lines = [
@@ -1505,7 +1507,10 @@ async def get_us_chart(
         )
     if truncated:
         lines.append("")
-        lines.append(f"💡 더 긴 기간이 필요하면 **interval을 크게** (예: 1wk, 1mo) 하세요.")
+        lines.append(
+            f"💡 더 필요하면 `limit={min(total, 5000)}`로 재호출하세요. "
+            f"백테스트·CSV 저장 용도면 **export_us_to_excel** 로 파일 저장 (토큰 0)."
+        )
     return "\n".join(lines)
 
 
@@ -2547,7 +2552,14 @@ async def get_us_etf_info(ticker: str) -> str:
     th = data.get("top_holdings") or []
     if th:
         lines.append("")
-        lines.append(f"## 🏆 Top Holdings ({len(th)})")
+        lines.append(f"## 🏆 Top Holdings ({len(th)}개)")
+        lines.append("")
+        lines.append(
+            f"> ℹ️ **Yahoo Finance는 상위 {len(th)}개 보유 종목만 공개합니다.** "
+            "ETF 전체 구성종목(예: SPY 500종목)은 발행사 공식 페이지에서 확인 가능합니다 "
+            "(예: SPY → ssga.com, QQQ → invesco.com, SCHD → schwabassetmanagement.com)."
+        )
+        lines.append("")
         lines.append("종목 | 비중")
         lines.append("---|---")
         for h in th:
@@ -2605,6 +2617,61 @@ async def get_us_multi_price(tickers: list[str]) -> str:
         lines.append(f"**{r['ticker']}** | {name} | {price_s} | {ch_s} | {chp_s} | {vol_s} | {mcap_s}")
 
     return "\n".join(lines)
+
+
+@mcp.tool()
+@safe_us_tool
+@track_metrics("export_us_to_excel")
+async def export_us_to_excel(
+    ticker: str,
+    period: str = "10y",
+    interval: str = "1d",
+    filename: str = "",
+) -> str:
+    """US Excel export — 미국 주식 장기 데이터를 Excel 파일로 저장 (토큰 소비 없음).
+    "AAPL 10년치 CSV 저장", "TSLA 5년 일봉 엑셀", "S&P 장기 데이터 파일로" 같은 질문에 사용합니다.
+
+    ⭐ `get_us_chart`는 기본 500행 상한이라 10년치 장기 데이터 조회 시 잘립니다.
+    **백테스트·CSV 분석·다른 AI 업로드용**이면 이 도구로 파일에 저장하세요. 행 수 무제한.
+
+    저장 위치: `~/Downloads/kstock/` (Windows: `%USERPROFILE%\\Downloads\\kstock\\`)
+
+    Args:
+        ticker: US 티커 (예: "AAPL", "SPY", "BRK.B")
+        period: "1d","5d","1mo","3mo","6mo","1y","2y","5y","10y","ytd","max" (기본 10y)
+        interval: "1d","1wk","1mo" (기본 1d). 분봉은 기간 짧아서 파일 저장 의미 약함
+        filename: 파일명 (비우면 자동)
+    """
+    rows = await us.get_history(ticker, period=period, interval=interval, prepost=False)
+    if not rows:
+        return f"티커 '{ticker}'의 데이터를 가져올 수 없습니다."
+
+    df = pd.DataFrame(rows)
+    prefix = f"us_chart_{ticker.upper().replace('.', '-')}_{period}_{interval}"
+    fname = filename or generate_filename(prefix)
+    if not fname.endswith(".xlsx"):
+        fname += ".xlsx"
+    file_path = get_snapshot_dir() / fname
+    saved = save_dataframe_to_excel(
+        df,
+        file_path,
+        sheet_name="OHLCV",
+        source="Yahoo Finance (yfinance)",
+        metadata={
+            "ticker": ticker.upper(),
+            "period": period,
+            "interval": interval,
+        },
+    )
+
+    return (
+        f"✓ US Excel 저장 완료\n"
+        f"티커: {ticker.upper()} · 기간: {period} · 간격: {interval}\n"
+        f"경로: {saved}\n"
+        f"행 수: {len(df)}\n"
+        f"컬럼: {', '.join(df.columns)}\n\n"
+        f"💡 이 파일을 엑셀·Gemini·ChatGPT 등에서 바로 분석 가능. Claude 토큰 소비 없음."
+    )
 
 
 def main():

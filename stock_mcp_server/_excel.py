@@ -37,6 +37,7 @@ def save_dataframe_to_excel(
     file_path: Path | str,
     sheet_name: str = "Data",
     metadata: dict | None = None,
+    source: str = "네이버 증권",
 ) -> str:
     """DataFrame을 Excel로 저장. 메타데이터 시트도 함께 기록.
 
@@ -48,6 +49,7 @@ def save_dataframe_to_excel(
         file_path: 저장 경로
         sheet_name: 메인 시트 이름
         metadata: 추가 정보 (수집 시간, 소스 등)
+        source: 데이터 소스 이름 (KR: "네이버 증권", US: "Yahoo Finance" 등)
 
     Returns:
         저장된 파일의 절대 경로 (문자열)
@@ -66,8 +68,8 @@ def save_dataframe_to_excel(
         # 메타데이터 시트
         meta_rows = [
             {"key": "수집 시간", "value": datetime.now().strftime("%Y-%m-%d %H:%M:%S")},
-            {"key": "소스", "value": "네이버 증권"},
-            {"key": "종목 수", "value": len(df)},
+            {"key": "소스", "value": source},
+            {"key": "행 수", "value": len(df)},
             {"key": "컬럼 수", "value": len(df.columns)},
         ]
         if metadata:
