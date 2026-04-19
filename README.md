@@ -29,8 +29,8 @@ AI에게 차트 이미지를 보여주면 **숫자를 추측해서 틀린 분석
 
 ## 주요 기능
 
-- 📊 **19개 도구** — 현재가, 차트, 수급, 재무, 스크리닝, Excel 출력
-- 🔑 **API 키 불필요** — 네이버 증권 공개 데이터
+- 📊 **47개 도구** — 현재가, 차트, 수급, 재무, 실적, 배당, 스크리닝, Excel 출력
+- 🔑 **API 키 불필요** — 네이버 증권 + Yahoo Finance 공개 데이터
 - 🚀 **빠른 응답** — TTL 캐시 + Semaphore 최적화
 - 📁 **Excel 스냅샷** — 한 번 스캔 → 반복 쿼리 즉시
 - 🤖 **Gemini/GPT 연동** — Excel 내보내기로 다른 AI에서도 활용
@@ -111,7 +111,7 @@ Python·패키지·명령·config 4단계 자동 점검. 문제 원인과 고치
 
 ## 더 알아보기
 
-- [📘 **도구 19개 상세** →](guides/ko/TOOLS.md)
+- [📘 **도구 47개 상세** →](guides/ko/TOOLS.md)
 - [💡 **프롬프트 예시 50개** →](guides/ko/USAGE.md)
 - [🔧 **설치/트러블슈팅** →](guides/ko/INSTALL.md)
 
@@ -123,6 +123,13 @@ Python·패키지·명령·config 4단계 자동 점검. 문제 원인과 고치
 | Claude Code (CLI) | ✅ |
 | Claude.ai (웹) | ❌ 로컬 MCP 미지원 |
 | ChatGPT / Gemini | Excel 내보내기로 우회 가능 |
+
+## 지원 시장
+
+- **한국 (KOSPI/KOSDAQ)** — 네이버 증권, 6자리 종목코드 (`005930` = 삼성전자, `000660` = SK하이닉스)
+- **미국 (NYSE/NASDAQ)** — Yahoo Finance, 알파벳 티커 (`AAPL`, `TSLA`, `BRK.B`)
+
+티커 형식으로 자동 판별. 자연어로 섞어 써도 됩니다 (예: `"005930이랑 AAPL 비교"`). 전체 도구 목록은 [TOOLS.md](guides/ko/TOOLS.md).
 
 ## 기여
 
