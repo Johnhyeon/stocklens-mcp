@@ -44,6 +44,18 @@ jobs:
           python -m pip install --upgrade twine
           twine check dist/*
 
+      - name: Setup Node.js (for mcpb CLI)
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Build .mcpb bundle
+        run: |
+          npm install -g @anthropic-ai/mcpb
+          VERSION="${GITHUB_REF_NAME#v}"
+          mcpb pack . "stocklens-mcp-${VERSION}.mcpb"
+          ls -la stocklens-mcp-*.mcpb
+
       # Option A: Trusted Publishing (OIDC) — 토큰 불필요, PyPI 설정 필요
       # https://docs.pypi.org/trusted-publishers/
       # - name: Publish to PyPI (Trusted Publishing)
@@ -59,8 +71,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            install.bat
-            install.sh
+            stocklens-mcp-*.mcpb
             dist/*.whl
             dist/*.tar.gz
           generate_release_notes: true
