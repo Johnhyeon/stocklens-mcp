@@ -22,9 +22,10 @@
    pip install -e . && stocklens --help
    ```
 6. **세션 간 공유 허브 확인:**
-   - `D:\project\_shared\STATUS.md` — 비즈/콘텐츠 세션 현황
+   - `D:\project\_shared\STATUS.md` — 비즈/콘텐츠/집필 세션 현황
    - `D:\project\_shared\inbox\dev.md` — 다른 세션이 개발에게 남긴 메시지 처리
    - 처리한 inbox 메시지는 `_shared\inbox\archive\`로 이동
+   - 다른 세션 inbox: `biz.md` (비즈) / `content.md` (콘텐츠) / `ebook.md` (집필)
 
 ---
 

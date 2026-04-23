@@ -156,6 +156,44 @@ mcp = FastMCP(
 )
 
 
+def _normalize_date(raw, is_intraday: bool) -> str:
+    """네이버 YYYYMMDD, yfinance ISO 등 이종 포맷을 YYYY-MM-DD(·HH:MM)로 통일."""
+    s = str(raw or "")
+    if len(s) == 8 and s.isdigit():  # 네이버 KR: "20260407"
+        return f"{s[:4]}-{s[4:6]}-{s[6:8]}"
+    return s[:16] if is_intraday else s[:10]
+
+
+def _format_ohlcv_rows(
+    rows: list[dict],
+    *,
+    is_intraday: bool,
+    decimals: int,
+) -> list[str]:
+    """OHLCV 시계열을 markdown table 행으로 포맷.
+
+    토큰 절감 포맷: 파이프 주변 공백 제거, 시간부 생략(일봉+), KR 날짜 대시화,
+    거래량 쉼표 제거(정밀도 100% 보존). 첫 줄(header)은 호출자가 앞뒤로 붙이는 것을 가정.
+    """
+    price_fmt = f"{{:.{decimals}f}}"
+
+    def _fmt(r: dict) -> tuple[str, str, str, str, str, str]:
+        date = _normalize_date(r.get("date") or r.get("datetime"), is_intraday)
+        o = price_fmt.format(float(r.get("open") or 0))
+        h = price_fmt.format(float(r.get("high") or 0))
+        lo = price_fmt.format(float(r.get("low") or 0))
+        c = price_fmt.format(float(r.get("close") or 0))
+        v = str(int(r.get("volume") or 0))
+        return (date, o, h, lo, c, v)
+
+    out = [
+        "날짜|시가|고가|저가|종가|거래량",
+        "---|---|---|---|---|---",
+    ]
+    out.extend("|".join(_fmt(r)) for r in rows)
+    return out
+
+
 async def _search_impl(query: str) -> str:
     """공통 구현 — search와 search_stock 도구에서 공유."""
     results = await naver_search_stock(query)
@@ -213,7 +251,11 @@ async def search_stock(query: str) -> str:
 @mcp.tool()
 @safe_tool
 @track_metrics("get_chart")
-async def get_chart(code: str, timeframe: str = "day", count: int = 120) -> str:
+async def get_chart(
+    code: str,
+    timeframe: str = "day",
+    count: int = 120,
+) -> str:
     """캔들차트 OHLCV — 종목의 시계열 캔들 데이터(시가/고가/저가/종가/거래량, candlestick OHLCV).
     "삼성전자 일봉", "차트 보여줘", "3개월 주봉", "월봉 데이터", "캔들 시각화",
     "candlestick chart", "price history" 같은 질문에 사용합니다.
@@ -237,14 +279,9 @@ async def get_chart(code: str, timeframe: str = "day", count: int = 120) -> str:
         return f"종목코드 {code}의 차트 데이터를 가져올 수 없습니다."
 
     tf_name = {"day": "일봉", "week": "주봉", "month": "월봉"}.get(timeframe, timeframe)
-    lines = [f"종목 {code} {tf_name} 데이터 ({len(data)}개):", ""]
-    lines.append("날짜 | 시가 | 고가 | 저가 | 종가 | 거래량")
-    lines.append("---|---|---|---|---|---")
-    for row in data:
-        lines.append(
-            f"{row['date']} | {row['open']:,} | {row['high']:,} | "
-            f"{row['low']:,} | {row['close']:,} | {row['volume']:,}"
-        )
+    header = f"종목 {code} {tf_name} OHLCV ({len(data)}개 봉)"
+    lines = [header, ""]
+    lines.extend(_format_ohlcv_rows(data, is_intraday=False, decimals=0))
     return "\n".join(lines)
 
 
@@ -847,7 +884,7 @@ async def get_indicators(
         "days": days,
         "indicators": result,
     }
-    return json.dumps(payload, ensure_ascii=False, indent=2)
+    return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
 
 
 @mcp.tool()
@@ -904,7 +941,7 @@ async def get_indicators_bulk(
         "count": len(results),
         "results": {code: data for code, data in results},
     }
-    return json.dumps(payload, ensure_ascii=False, indent=2)
+    return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
 
 
 @mcp.tool()
@@ -1487,24 +1524,15 @@ async def get_us_chart(
     if truncated:
         rows = rows[-limit:]  # 최근 구간 유지
 
+    is_intraday = interval in ("1m", "5m", "15m", "30m", "1h")
+
     header = f"**{ticker.upper()}** {period} {interval} OHLCV ({len(rows)} bars"
     if truncated:
         header += f" · 원본 {total}행 중 최근 {limit}행"
     header += ")"
 
-    lines = [
-        header,
-        "",
-        "날짜/시간 | 시가 | 고가 | 저가 | 종가 | 거래량",
-        "---|---|---|---|---|---",
-    ]
-    for r in rows:
-        date = r.get("date") or r.get("datetime") or ""
-        date_s = str(date)[:19]  # 초단위 절삭
-        lines.append(
-            f"{date_s} | {r.get('open', 0):,.2f} | {r.get('high', 0):,.2f} | "
-            f"{r.get('low', 0):,.2f} | {r.get('close', 0):,.2f} | {int(r.get('volume') or 0):,}"
-        )
+    lines = [header, ""]
+    lines.extend(_format_ohlcv_rows(rows, is_intraday=is_intraday, decimals=2))
     if truncated:
         lines.append("")
         lines.append(
