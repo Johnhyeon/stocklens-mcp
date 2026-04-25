@@ -3,7 +3,7 @@ name: Release
 # 태그 푸시(v*) 시 자동:
 # 1. Python 빌드 (wheel + sdist)
 # 2. PyPI 업로드
-# 3. GitHub Release 생성 + install.bat/sh 자산 첨부
+# 3. GitHub Release 생성 + dist 자산 첨부
 
 on:
   push:
@@ -44,18 +44,6 @@ jobs:
           python -m pip install --upgrade twine
           twine check dist/*
 
-      - name: Setup Node.js (for mcpb CLI)
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: Build .mcpb bundle
-        run: |
-          npm install -g @anthropic-ai/mcpb
-          VERSION="${GITHUB_REF_NAME#v}"
-          mcpb pack . "stocklens-mcp-${VERSION}.mcpb"
-          ls -la stocklens-mcp-*.mcpb
-
       # Option A: Trusted Publishing (OIDC) — 토큰 불필요, PyPI 설정 필요
       # https://docs.pypi.org/trusted-publishers/
       # - name: Publish to PyPI (Trusted Publishing)
@@ -71,7 +59,6 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            stocklens-mcp-*.mcpb
             dist/*.whl
             dist/*.tar.gz
           generate_release_notes: true
@@ -81,9 +68,19 @@ jobs:
 
             ---
 
-            ## 📥 설치 / 업그레이드
-            - **신규 사용자** (.mcpb 권장): [README 빠른 시작](https://github.com/Johnhyeon/stocklens-mcp#빠른-시작-mcpb-권장)
-            - **기존 pip 사용자**: `py -m pip install --upgrade stocklens-mcp`
+            ## 📥 설치 / 업그레이드 (PowerShell 한 줄)
+
+            **신규 설치 (Windows)**
+            ```powershell
+            powershell -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/Johnhyeon/stocklens-mcp/main/install.ps1 | iex"
+            ```
+
+            **신규 설치 (macOS / Linux)**
+            ```bash
+            curl -LsSf https://raw.githubusercontent.com/Johnhyeon/stocklens-mcp/main/install.sh | sh
+            ```
+
+            **업데이트**: `uv tool upgrade stocklens-mcp`
 
             ## 📚 링크
             - [전체 도구 목록](https://github.com/Johnhyeon/stocklens-mcp/blob/main/guides/ko/TOOLS.md)
