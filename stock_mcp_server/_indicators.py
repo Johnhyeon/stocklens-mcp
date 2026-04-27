@@ -149,10 +149,13 @@ def compute_rsi(df: pd.DataFrame, period: int = 14) -> dict:
     if _HAS_PANDAS_TA:
         rsi = ta.rsi(df["close"], length=period)
     else:
+        # Wilder's smoothing (alpha = 1/period). 네이버를 포함한 표준 차트와 일치.
         delta = df["close"].diff()
-        gain = delta.clip(lower=0).rolling(period).mean()
-        loss = -delta.clip(upper=0).rolling(period).mean()
-        rs = gain / loss
+        gain = delta.clip(lower=0)
+        loss = -delta.clip(upper=0)
+        avg_gain = gain.ewm(alpha=1 / period, adjust=False, min_periods=period).mean()
+        avg_loss = loss.ewm(alpha=1 / period, adjust=False, min_periods=period).mean()
+        rs = avg_gain / avg_loss
         rsi = 100 - (100 / (1 + rs))
 
     v = rsi.iloc[-1]
@@ -241,16 +244,29 @@ def compute_bollinger(df: pd.DataFrame, period: int = 20, std: float = 2.0) -> d
     }
 
 
-def compute_stochastic(df: pd.DataFrame, k_period: int = 14, d_period: int = 3) -> dict:
-    if len(df) < k_period + d_period:
+def compute_stochastic(
+    df: pd.DataFrame,
+    k_period: int = 12,
+    slow_k_period: int = 5,
+    d_period: int = 3,
+) -> dict:
+    """Slow Stochastic — 네이버 증권 기본값 (12, 5, 3).
+
+    raw_K = 100 * (close - low_n) / (high_n - low_n)   # n=k_period
+    slow_K = SMA(raw_K, slow_k_period)
+    slow_D = SMA(slow_K, d_period)
+    """
+    need = k_period + slow_k_period + d_period
+    if len(df) < need:
         return {"k": None, "d": None, "state": None}
 
     low_min = df["low"].rolling(k_period).min()
     high_max = df["high"].rolling(k_period).max()
-    k = 100 * (df["close"] - low_min) / (high_max - low_min)
-    d = k.rolling(d_period).mean()
+    raw_k = 100 * (df["close"] - low_min) / (high_max - low_min)
+    slow_k = raw_k.rolling(slow_k_period).mean()
+    slow_d = slow_k.rolling(d_period).mean()
 
-    kv, dv = k.iloc[-1], d.iloc[-1]
+    kv, dv = slow_k.iloc[-1], slow_d.iloc[-1]
     if pd.isna(kv) or pd.isna(dv):
         return {"k": None, "d": None, "state": None}
 
@@ -259,6 +275,7 @@ def compute_stochastic(df: pd.DataFrame, k_period: int = 14, d_period: int = 3) 
         "k": round(float(kv), 2),
         "d": round(float(dv), 2),
         "state": state,
+        "params": {"k": k_period, "slow_k": slow_k_period, "d": d_period},
     }
 
 
