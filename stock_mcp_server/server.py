@@ -823,6 +823,7 @@ async def get_indicators(
     days: int = 260,
     include: list[str] | None = None,
     timeframe: str = "day",
+    params: dict | None = None,
 ) -> str:
     """기술지표 — 단일 종목의 이평선·RSI·MACD·볼린저·스토캐스틱 등 종합 판정.
 
@@ -832,6 +833,7 @@ async def get_indicators(
     **숫자 비교가 필요할 때만** 호출하세요.
 
     OHLCV 원본 대신 계산·판정 결과만 JSON으로 반환해 토큰을 절약합니다.
+    가격 출력은 KRX 호가단위로 라운딩됩니다.
 
     Args:
         code: 종목코드 (예: "005930")
@@ -842,6 +844,20 @@ async def get_indicators(
             구조 분석: support_resistance / volume_profile / price_channel
             (구조 분석은 days=500~750 등 긴 lookback 권장)
         timeframe: "day"(일봉) / "week"(주봉) / "month"(월봉). 분봉은 현재 미지원.
+        params: 지표별 파라미터 오버라이드 dict. **사용자가 명시적으로 비표준 설정값을
+            요청할 때만** 사용. 미지정 시 표준 default 사용.
+            형식: {"<지표키>": {"<파라미터명>": <값>}}
+            예시:
+              {"rsi": {"period": 21}}                          # RSI 21일
+              {"bollinger": {"period": 20, "std": 2.5}}        # BB(20, 2.5)
+              {"stochastic": {"k_period": 5, "slow_k_period": 3, "d_period": 3}}  # Fast(5,3,3)
+              {"macd": {"fast": 5, "slow": 35, "signal": 5}}   # MACD 커스텀
+
+    기본 default (대다수 차트 표준):
+      - rsi: period=14 (Wilder's smoothing)
+      - bollinger: period=20, std=2.0 (population std)
+      - stochastic: k=12, slow_k=5, d=3 (네이버 Slow 기본)
+      - macd: fast=12, slow=26, signal=9
 
     ma_phase 값:
         0 완전역배열 / 1 단기상승꼬임 / 2 꼬임 / 3 단기하락꼬임 / 4 완전정배열
@@ -877,7 +893,7 @@ async def get_indicators(
     if not ohlcv:
         return f"차트 데이터를 가져올 수 없습니다: {code}"
 
-    result = compute_indicators(ohlcv, include)
+    result = compute_indicators(ohlcv, include, params=params)
     payload = {
         "code": code,
         "timeframe": timeframe,
@@ -895,6 +911,7 @@ async def get_indicators_bulk(
     days: int = 260,
     include: list[str] | None = None,
     timeframe: str = "day",
+    params: dict | None = None,
 ) -> str:
     """기술지표벌크 — 여러 종목의 지표를 병렬 계산. 스크리닝 핵심 도구.
 
@@ -908,6 +925,7 @@ async def get_indicators_bulk(
         days: 조회 일수 (기본 260)
         include: 지표 키 리스트 (기본 ["ma_phase", "volume"]). get_indicators 참조.
         timeframe: "day" / "week" / "month"
+        params: 지표별 파라미터 오버라이드 (전 종목 공통 적용). get_indicators 참조.
 
     반환: 코드별 지표 결과 JSON.
     """
@@ -929,7 +947,7 @@ async def get_indicators_bulk(
             ohlcv = await get_ohlcv(code, timeframe=timeframe, count=days)
             if not ohlcv:
                 return code, {"error": "OHLCV 없음"}
-            return code, compute_indicators(ohlcv, include)
+            return code, compute_indicators(ohlcv, include, params=params)
         except Exception as e:
             return code, {"error": f"{type(e).__name__}: {e}"}
 

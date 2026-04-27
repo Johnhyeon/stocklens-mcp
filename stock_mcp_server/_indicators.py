@@ -27,6 +27,32 @@ def _to_df(ohlcv: list[dict]) -> pd.DataFrame:
     return df
 
 
+def round_to_tick(price) -> int | None:
+    """KRX 호가가격단위로 라운딩 (2023.1.25 시행 기준).
+
+    이평선·BB·매물대 등 계산 결과를 실거래 가능 가격으로 표시.
+    None/NaN 입력은 None 반환.
+    """
+    if price is None or (isinstance(price, float) and pd.isna(price)):
+        return None
+    p = float(price)
+    if p < 2000:
+        tick = 1
+    elif p < 5000:
+        tick = 5
+    elif p < 20000:
+        tick = 10
+    elif p < 50000:
+        tick = 50
+    elif p < 200000:
+        tick = 100
+    elif p < 500000:
+        tick = 500
+    else:
+        tick = 1000
+    return int(round(p / tick) * tick)
+
+
 # ─────────────────────────────────────────────────────────────
 # 이동평균 & Phase
 # ─────────────────────────────────────────────────────────────
@@ -50,11 +76,11 @@ _CROSS_LABELS = {
 
 
 def compute_ma(df: pd.DataFrame, periods: tuple[int, ...] = _MA_PERIODS) -> dict:
-    """각 기간의 이동평균 최신값."""
+    """각 기간의 이동평균 최신값 (호가단위 라운딩)."""
     result = {}
     for p in periods:
         if len(df) >= p:
-            result[f"ma{p}"] = round(float(df["close"].rolling(p).mean().iloc[-1]), 2)
+            result[f"ma{p}"] = round_to_tick(df["close"].rolling(p).mean().iloc[-1])
         else:
             result[f"ma{p}"] = None
     return result
@@ -206,11 +232,12 @@ def compute_macd(df: pd.DataFrame, fast: int = 12, slow: int = 26, signal: int =
 
 
 def compute_bollinger(df: pd.DataFrame, period: int = 20, std: float = 2.0) -> dict:
+    """볼린저 밴드. population std (ddof=0) 사용 — 네이버/대다수 차트와 일치."""
     if len(df) < period:
         return {"upper": None, "middle": None, "lower": None, "percent_b": None, "bandwidth": None}
 
     mid = df["close"].rolling(period).mean()
-    sd = df["close"].rolling(period).std()
+    sd = df["close"].rolling(period).std(ddof=0)
     upper = mid + std * sd
     lower = mid - std * sd
 
@@ -234,13 +261,14 @@ def compute_bollinger(df: pd.DataFrame, period: int = 20, std: float = 2.0) -> d
         position = "하단 이탈"
 
     return {
-        "upper": round(float(u), 2),
-        "middle": round(float(m), 2),
-        "lower": round(float(l), 2),
+        "upper": round_to_tick(u),
+        "middle": round_to_tick(m),
+        "lower": round_to_tick(l),
         "percent_b": round(float(percent_b), 3),
         "bandwidth": round(float(bandwidth), 2),
         "position": position,
         "period": period,
+        "std": std,
     }
 
 
@@ -445,8 +473,8 @@ def compute_support_resistance(
         strength = "strong" if touches >= 4 else "medium" if touches >= 3 else "weak"
         return {
             "kind": kind,
-            "price_range": [int(price_low), int(price_high)],
-            "avg_price": int(avg_price),
+            "price_range": [round_to_tick(price_low), round_to_tick(price_high)],
+            "avg_price": round_to_tick(avg_price),
             "touches": touches,
             "touch_dates": dates,
             "avg_volume_at_touch": int(sum(volumes) / len(volumes)),
@@ -464,7 +492,7 @@ def compute_support_resistance(
     return {
         "support_levels": supports,
         "resistance_levels": resistances,
-        "current_price": int(current_price),
+        "current_price": round_to_tick(current_price),
         "lookback_candles": len(df),
         "params": {
             "window": window,
@@ -501,7 +529,7 @@ def compute_volume_profile(df: pd.DataFrame, bins: int = 20) -> dict:
             mask = (prices >= bin_low) & (prices < bin_high)
         vol_sum = float(volumes[mask].sum())
         profile.append({
-            "price_range": [int(bin_low), int(bin_high)],
+            "price_range": [round_to_tick(bin_low), round_to_tick(bin_high)],
             "volume": int(vol_sum),
         })
 
@@ -531,11 +559,11 @@ def compute_volume_profile(df: pd.DataFrame, bins: int = 20) -> dict:
             "volume_pct": poc["volume_pct"],
         },
         "value_area": {
-            "low": int(va_low),
-            "high": int(va_high),
+            "low": round_to_tick(va_low),
+            "high": round_to_tick(va_high),
             "coverage_pct": round(cumsum, 1),
         },
-        "current_price": int(current),
+        "current_price": round_to_tick(current),
         "current_in_value_area": va_low <= current <= va_high,
         "total_volume": int(total),
         "lookback_candles": len(df),
@@ -579,10 +607,10 @@ def compute_price_channel(df: pd.DataFrame, period: int = 20) -> dict:
     lower_date = str(df.loc[lower_idx, "date"]) if "date" in df.columns else None
 
     return {
-        "upper": int(upper),
-        "lower": int(lower),
-        "midline": int(midline),
-        "current": int(current),
+        "upper": round_to_tick(upper),
+        "lower": round_to_tick(lower),
+        "midline": round_to_tick(midline),
+        "current": round_to_tick(current),
         "position_pct": round(position * 100, 1),
         "width_pct": round(width_pct, 2),
         "state": state,
@@ -626,49 +654,67 @@ def compute_candle(df: pd.DataFrame) -> dict:
 # 메인 엔트리
 # ─────────────────────────────────────────────────────────────
 
+# 각 lambda는 **kwargs를 받아 compute_* 함수의 파라미터를 그대로 노출.
+# ma_slope/ma_cross 같은 합성 지표는 kwargs 무시 (내부 고정값 사용).
 _INDICATOR_MAP = {
-    "ma": lambda df: compute_ma(df),
-    "ma_phase": lambda df: compute_ma_phase(df),
-    "ma_slope": lambda df: {
+    "ma": lambda df, **kw: compute_ma(df, **kw),
+    "ma_phase": lambda df, **kw: compute_ma_phase(df, **kw),
+    "ma_slope": lambda df, **kw: {
         "ma20_slope_pct": compute_ma_slope(df, 20, 10),
         "ma60_slope_pct": compute_ma_slope(df, 60, 20),
         "ma120_slope_pct": compute_ma_slope(df, 120, 20),
     },
-    "ma_cross": lambda df: {
+    "ma_cross": lambda df, **kw: {
         "ma20_60": compute_ma_cross(df, 20, 60, 30),
         "ma60_120": compute_ma_cross(df, 60, 120, 60),
     },
-    "rsi": lambda df: compute_rsi(df),
-    "macd": lambda df: compute_macd(df),
-    "bollinger": lambda df: compute_bollinger(df),
-    "stochastic": lambda df: compute_stochastic(df),
-    "obv": lambda df: compute_obv(df),
-    "volume": lambda df: compute_volume(df),
-    "position": lambda df: compute_position(df),
-    "candle": lambda df: compute_candle(df),
-    "support_resistance": lambda df: compute_support_resistance(df),
-    "volume_profile": lambda df: compute_volume_profile(df),
-    "price_channel": lambda df: compute_price_channel(df),
+    "rsi": lambda df, **kw: compute_rsi(df, **kw),
+    "macd": lambda df, **kw: compute_macd(df, **kw),
+    "bollinger": lambda df, **kw: compute_bollinger(df, **kw),
+    "stochastic": lambda df, **kw: compute_stochastic(df, **kw),
+    "obv": lambda df, **kw: compute_obv(df, **kw),
+    "volume": lambda df, **kw: compute_volume(df, **kw),
+    "position": lambda df, **kw: compute_position(df, **kw),
+    "candle": lambda df, **kw: compute_candle(df, **kw),
+    "support_resistance": lambda df, **kw: compute_support_resistance(df, **kw),
+    "volume_profile": lambda df, **kw: compute_volume_profile(df, **kw),
+    "price_channel": lambda df, **kw: compute_price_channel(df, **kw),
 }
 
 
 AVAILABLE_INDICATORS = list(_INDICATOR_MAP.keys())
 
 
-def compute_indicators(ohlcv: list[dict], include: list[str]) -> dict:
-    """OHLCV와 요청 지표 키 리스트로 종합 지표 dict 생성."""
+def compute_indicators(
+    ohlcv: list[dict],
+    include: list[str],
+    params: dict | None = None,
+) -> dict:
+    """OHLCV와 요청 지표 키 리스트로 종합 지표 dict 생성.
+
+    Args:
+        ohlcv: OHLCV dict 리스트.
+        include: 계산할 지표 키 리스트.
+        params: 지표별 파라미터 오버라이드 dict. 예:
+            {"rsi": {"period": 21}, "bollinger": {"std": 2.5}}
+            지표 키별 dict가 그대로 compute_* 함수 kwargs로 전달됨.
+    """
     df = _to_df(ohlcv)
     if df.empty:
         return {"error": "OHLCV 데이터가 비어 있습니다"}
 
+    params = params or {}
     result = {}
     for key in include:
         fn = _INDICATOR_MAP.get(key)
         if fn is None:
             result[key] = {"error": f"지원하지 않는 지표: {key}"}
             continue
+        kwargs = params.get(key) or {}
         try:
-            result[key] = fn(df)
+            result[key] = fn(df, **kwargs)
+        except TypeError as e:
+            result[key] = {"error": f"잘못된 파라미터: {e}"}
         except Exception as e:
             result[key] = {"error": f"{type(e).__name__}: {e}"}
 
