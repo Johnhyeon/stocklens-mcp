@@ -29,7 +29,7 @@ When you show AI a chart image, it **guesses the numbers and often gets them wro
 
 ## Features
 
-- 📊 **19 tools** — Prices, charts, investor flows, financials, screening, Excel export
+- 📊 **48 tools** — Market calendar, prices, charts, investor flows, financials, screening, Excel export
 - 🔑 **No API key required** — Uses public Naver Finance data
 - 🚀 **Fast responses** — TTL cache + Semaphore optimization
 - 📁 **Excel snapshots** — Scan once, query instantly
@@ -115,7 +115,7 @@ Auto-checks uv / package / command / config in 4 steps. Shows the exact fix comm
 
 ## Learn More
 
-- [📘 **All 19 Tools** →](guides/en/TOOLS.md)
+- [📘 **All 48 Tools** →](guides/en/TOOLS.md)
 - [💡 **50 Prompt Examples** →](guides/en/USAGE.md)
 - [🔧 **Installation & Troubleshooting** →](guides/en/INSTALL.md)
 

@@ -54,6 +54,7 @@ from stock_mcp_server._indicators import (
     AVAILABLE_INDICATORS,
 )
 from stock_mcp_server._chart_html import render_chart_html, render_multi_chart_html
+from stock_mcp_server.market_clock import format_market_clock, get_market_clock as build_market_clock
 from stock_mcp_server import yfinance_source as us
 import asyncio
 import json
@@ -154,6 +155,17 @@ mcp = FastMCP(
 프리/포스트 마켓은 `get_us_chart(prepost=True)` 사용.
 """,
 )
+
+@mcp.tool()
+@safe_tool
+@track_metrics("get_market_clock")
+async def get_market_clock() -> str:
+    """한국장/미국장 현재 상태, 휴장 여부, 최근/다음 거래일을 한 번에 조회합니다.
+
+    종목 분석 전 데이터 기준시각을 확인할 때 사용합니다. KRX와 NYSE/NASDAQ의
+    주말, 정규 휴장일, 장전/정규장/시간외/장마감 상태를 함께 반환합니다.
+    """
+    return format_market_clock(build_market_clock())
 
 
 def _normalize_date(raw, is_intraday: bool) -> str:

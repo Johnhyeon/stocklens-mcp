@@ -1,6 +1,6 @@
 # StockLens Tool Reference
 
-**47 tools total** — Korean 27 + US 20. As of v0.3.0.
+**48 tools total** — Market calendar 1 + Korean 27 + US 20.
 
 [🇰🇷 한국어](../ko/TOOLS.md) | [USAGE](USAGE.md) | [INSTALL](INSTALL.md)
 
@@ -10,7 +10,15 @@
 
 Data source: Naver Finance (public data, no API key).
 
-### Basic Lookup (6)
+### Basic Lookup (7)
+
+#### `get_market_clock`
+Returns KRX and US market status, weekend/holiday state, last trading day, and next open day in one call.
+- No parameters
+- Use before stock analysis to anchor price, chart, and flow data to the correct market session
+- Includes KRX and NYSE/NASDAQ pre-market, regular, after-hours, and closed states
+
+⚠️ Call this before interpreting current prices, charts, or investor flow when date freshness matters.
 
 #### `search` / `search_stock`
 Find stocks by name or code (same tool, two names).
