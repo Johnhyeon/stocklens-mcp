@@ -55,6 +55,7 @@ from stock_mcp_server._indicators import (
 )
 from stock_mcp_server._chart_html import render_chart_html, render_multi_chart_html
 from stock_mcp_server.market_clock import format_market_clock, get_market_clock as build_market_clock
+from stock_mcp_server.event_reaction import build_event_reaction, format_event_reaction
 from stock_mcp_server import yfinance_source as us
 import asyncio
 import json
@@ -105,6 +106,8 @@ mcp = FastMCP(
 - `get_chart`: **OHLCV 시계열 데이터** (수치 분석·요약���, count 최소 120)
 - `get_indicators`: **기술지표 판정값** (RSI/MACD/Phase 등 숫자+라벨)
 - `get_price`: **현재가 스냅샷** (단일 시점, 시계열 아님)
+- `get_event_reaction`: **event_date 기준 주가·수급 반응**. DartLens 공시 접수일을
+  event_date로 넘겨 공시 전후 거래일 반응을 확인할 때 사용
 
 ## ETF 도구
 - `get_etf_list`: ETF 목록 조회 + 카테고리 필터 + 정렬
@@ -115,6 +118,8 @@ mcp = FastMCP(
 - `get_consensus`: 컨센서스 — 증권사 투자의견, 목표주가, 실적 추정치
 - `get_reports`: 증권사 리포트 — 목록 + 본문 요약 + PDF 링크
 - `get_disclosure`: 공시 목록 — DART 전자공시 제목/날짜
+- DartLens가 함께 설치되어 있으면: StockLens 주가·수급 이상 구간 → DartLens 해당 기간 공시 확인,
+  DartLens 실적/공시 결과 → StockLens `get_event_reaction(code, event_date=공시일)` 순서로 이어가기
 
 ## 🇺🇸 US 주식 도구 (NYSE / NASDAQ · yfinance)
 
@@ -426,6 +431,56 @@ async def get_flow(code: str, days: int = 20) -> str:
     return "\n".join(lines)
 
 
+
+_CODE_RE = re.compile(r"^[A-Za-z0-9]{6}$")
+
+
+@mcp.tool()
+@safe_tool
+@track_metrics("get_event_reaction")
+async def get_event_reaction(
+    code: str,
+    event_date: str,
+    before: int = 5,
+    after: int = 20,
+) -> str:
+    """이벤트반응 — 특정 날짜(event_date) 기준 전후 주가·거래량·수급 반응을 정렬합니다.
+
+    DartLens의 `scan_earnings_season` 또는 `list_disclosures` 결과에 나온
+    **공시 접수일**을 그대로 event_date로 넘기면 됩니다. event_date가 휴장일이면
+    다음 거래일을 기준 거래일로 삼습니다.
+
+    이 도구는 원인 단정이나 매수/매도 판단이 아니라, "공시 → 주가/수급" 또는
+    "주가/수급 이상 → 해당 기간 공시 확인" 흐름에서 시간축을 맞추기 위한 도구입니다.
+
+    Args:
+        code: 종목코드 6자리 (예: "005930")
+        event_date: 기준 날짜 YYYY-MM-DD 또는 YYYYMMDD. DartLens 공시 접수일 권장
+        before: event_date 전 몇 거래일을 비교할지 (기본 5, 최대 60)
+        after: event_date 후 몇 거래일을 비교할지 (기본 20, 최대 60)
+    """
+    if not _CODE_RE.match(code or ""):
+        return "종목코드는 6자리 영숫자여야 합니다. 종목명이라면 먼저 search 도구로 코드를 확정하세요."
+
+    before = max(0, min(int(before), 60))
+    after = max(0, min(int(after), 60))
+
+    ohlcv = await get_ohlcv(code, "day", 500)
+    if not ohlcv:
+        return f"종목코드 {code}의 차트 데이터를 가져올 수 없습니다."
+
+    flow_days = max(20, min(before + after + 10, 60))
+    flows = await get_investor_flow(code, flow_days)
+
+    reaction = build_event_reaction(
+        code=code,
+        event_date=event_date,
+        ohlcv=ohlcv,
+        flows=flows,
+        before=before,
+        after=after,
+    )
+    return format_event_reaction(reaction)
 @mcp.tool()
 @safe_tool
 @track_metrics("get_financial")
