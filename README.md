@@ -6,15 +6,19 @@
 
 **AI가 진짜 데이터로 분석합니다**
 
-[![PyPI](https://img.shields.io/pypi/v/stocklens-mcp.svg)](https://pypi.org/project/stocklens-mcp/)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 🇰🇷 **한국어** | [🇺🇸 English](README.en.md)
 
 </div>
 
 ---
+
+## 배포 상태
+
+StockLens의 공개 설치 안내는 2026-06-01 기준으로 종료했습니다.
+
+현재 신규 설치는 구매자 안내문을 통해 제공되는 설치 명령어와 가이드를 기준으로 진행합니다. 이미 설치한 기존 사용자는 보유한 공개 버전을 계속 사용할 수 있지만, 신규 배포·설치 지원·활용 템플릿은 구매자 패키지 기준으로 정리합니다.
 
 ## 왜 필요한가
 
@@ -35,50 +39,16 @@ AI에게 차트 이미지를 보여주면 **숫자를 추측해서 틀린 분석
 - 📁 **Excel 스냅샷** — 한 번 스캔 → 반복 쿼리 즉시
 - 🤖 **Gemini/GPT 연동** — Excel 내보내기로 다른 AI에서도 활용
 
-## 빠른 시작 (3줄, Python 사전 설치 불필요)
+## 설치 안내
 
-[`uv`](https://docs.astral.sh/uv/)가 Python 런타임까지 자동으로 설치합니다. 터미널에 한 줄 복붙.
+구매자에게 제공되는 안내문에는 다음 과정이 포함됩니다.
 
-### Windows (PowerShell)
+1. `uv` 확인 및 설치
+2. StockLens MCP 설치
+3. Claude Desktop 또는 Claude Code MCP 설정 자동 등록
+4. 설치 진단과 첫 실행 확인
 
-```powershell
-powershell -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/Johnhyeon/stocklens-mcp/main/install.ps1 | iex"
-```
-
-### macOS / Linux (터미널)
-
-```bash
-curl -LsSf https://raw.githubusercontent.com/Johnhyeon/stocklens-mcp/main/install.sh | sh
-```
-
-스크립트가 ① uv 설치 → ② `uv tool install stocklens-mcp` → ③ Claude Desktop config 자동 등록 → ④ 검증까지 처리합니다. 끝나면 **Claude Desktop을 완전히 종료(트레이 → Quit)** 후 재시작하세요.
-
-> 💡 **응답 속도**
-> - **첫 실행**: PyPI에서 패키지 + 의존성 다운로드 (10~30초)
-> - **이후 호출**: 1~2초, 같은 종목 재조회는 즉시 (내부 캐시)
-
-### 업데이트
-
-```bash
-uv tool upgrade stocklens-mcp
-```
-
-또는 위 install 명령을 다시 실행하면 됩니다.
-
----
-
-### 🔄 기존 pip 사용자
-
-기존 pip 설치를 정리하고 uv로 전환하면 환경이 격리되어 충돌이 사라집니다.
-
-```bash
-py -m pip uninstall stocklens-mcp        # 기존 pip 제거 (Windows)
-python3 -m pip uninstall stocklens-mcp   # 기존 pip 제거 (mac/Linux)
-```
-
-그 후 위 install 명령 한 줄 실행. setup_claude가 Claude config의 기존 entry를 새 절대경로로 자동 갱신합니다.
-
-> 📌 수동 설치 / 트러블슈팅 상세: [설치 가이드](guides/ko/INSTALL.md)
+공개 README에는 더 이상 직접 설치 명령어를 게시하지 않습니다.
 
 ## 동작 확인
 
@@ -117,7 +87,6 @@ uv·패키지·명령·config 4단계 자동 점검. 문제 원인과 고치는 
 
 - [📘 **도구 48개 상세** →](guides/ko/TOOLS.md)
 - [💡 **프롬프트 예시 50개** →](guides/ko/USAGE.md)
-- [🔧 **설치/트러블슈팅** →](guides/ko/INSTALL.md)
 
 ## 지원 환경
 
@@ -135,9 +104,9 @@ uv·패키지·명령·config 4단계 자동 점검. 문제 원인과 고치는 
 
 티커 형식으로 자동 판별. 자연어로 섞어 써도 됩니다 (예: `"005930이랑 AAPL 비교"`). 전체 도구 목록은 [TOOLS.md](guides/ko/TOOLS.md).
 
-## 기여
+## 운영 원칙
 
-이슈, PR 모두 환영합니다. 버그 제보나 기능 요청은 [Issues](https://github.com/Johnhyeon/stocklens-mcp/issues)에 남겨주세요.
+StockLens는 투자 추천·매수/매도 신호·자동매매 기능을 제공하지 않습니다. 공개 데이터를 Claude가 읽을 수 있는 형태로 연결하는 데이터 도구입니다.
 
 ## 라이선스
 

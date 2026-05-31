@@ -4,50 +4,18 @@
 
 ---
 
-## 한 줄 설치 (권장)
+## 배포 상태
 
-[`uv`](https://docs.astral.sh/uv/)가 Python 런타임까지 자동으로 설치합니다. 별도 Python 설치 불필요.
+StockLens의 공개 설치 안내는 2026-06-01 기준으로 종료했습니다.
 
-### Windows (PowerShell)
+현재 신규 설치는 구매자 안내문을 통해 제공되는 설치 명령어와 가이드를 기준으로 진행합니다.
 
-PowerShell을 열고 (시작 메뉴 → "PowerShell" 검색):
-
-```powershell
-powershell -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/Johnhyeon/stocklens-mcp/main/install.ps1 | iex"
-```
-
-### macOS / Linux (터미널)
-
-```bash
-curl -LsSf https://raw.githubusercontent.com/Johnhyeon/stocklens-mcp/main/install.sh | sh
-```
-
-### 설치 스크립트가 하는 일
+## 설치 스크립트가 하는 일
 
 1. **uv 확인·설치** — 없으면 [astral.sh](https://astral.sh/uv/) 공식 인스톨러 자동 실행 (Python 런타임 포함)
-2. **stocklens-mcp 설치** — `uv tool install` (격리 환경, 시스템 Python 오염 없음)
+2. **StockLens MCP 설치** — 격리 환경에 설치해 시스템 Python 오염을 줄임
 3. **Claude Desktop config 등록** — `claude_desktop_config.json`에 절대경로로 entry 추가 (PATH 의존 없음)
 4. **검증** — `stocklens-doctor` 실행, 문제 발견 시 종료
-
----
-
-## 수동 설치 (3 단계)
-
-자동 스크립트를 쓰고 싶지 않으면 직접 입력:
-
-```bash
-# 1) uv 설치
-# Windows
-powershell -ExecutionPolicy Bypass -c "irm https://astral.sh/uv/install.ps1 | iex"
-# macOS/Linux
-curl -LsSf https://astral.sh/uv/install.sh | sh
-
-# 2) stocklens-mcp 설치
-uv tool install stocklens-mcp
-
-# 3) Claude Desktop config 등록
-stocklens-setup
-```
 
 ---
 
@@ -78,11 +46,7 @@ Claude에서:
 
 ## 업데이트
 
-```bash
-uv tool upgrade stocklens-mcp
-```
-
-또는 위 install 한 줄을 다시 실행해도 됩니다 (`--force`로 재설치).
+업데이트는 구매자 안내문 기준으로 진행합니다.
 
 ---
 
@@ -183,14 +147,13 @@ py -m pip uninstall naver-stock-mcp stocklens-mcp -y
 python3 -m pip uninstall naver-stock-mcp stocklens-mcp -y
 ```
 
-그 후 위 한 줄 설치 실행. `stocklens-setup`이 Claude config 기존 entry를 새 절대경로로 자동 갱신합니다.
+그 후 구매자 안내문에 있는 설치 절차를 실행합니다. `stocklens-setup`이 Claude config 기존 entry를 새 절대경로로 자동 갱신합니다.
 
 ---
 
 ## 그래도 안 되면
 
-GitHub Issues에 남겨주세요:
-https://github.com/Johnhyeon/stocklens-mcp/issues
+구매자 안내문에 포함된 지원 채널로 문의해 주세요.
 
 작성 시 포함할 것:
 - 운영체제 (Windows/macOS/Linux + 버전)

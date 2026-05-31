@@ -4,50 +4,18 @@
 
 ---
 
-## One-line install (recommended)
+## Distribution Status
 
-[`uv`](https://docs.astral.sh/uv/) installs the Python runtime for you. No separate Python install needed.
+Public installation instructions for StockLens ended on 2026-06-01.
 
-### Windows (PowerShell)
+New installations now follow the buyer guide and installer command provided after purchase.
 
-Open PowerShell (Start menu → search "PowerShell") and paste:
-
-```powershell
-powershell -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/Johnhyeon/stocklens-mcp/main/install.ps1 | iex"
-```
-
-### macOS / Linux (terminal)
-
-```bash
-curl -LsSf https://raw.githubusercontent.com/Johnhyeon/stocklens-mcp/main/install.sh | sh
-```
-
-### What the install script does
+## What the install script does
 
 1. **Check / install uv** — runs the official [astral.sh](https://astral.sh/uv/) installer if missing (Python runtime included)
-2. **Install stocklens-mcp** — `uv tool install` (isolated env, no system Python pollution)
+2. **Install StockLens MCP** — installs into an isolated environment to avoid polluting system Python
 3. **Register Claude Desktop config** — adds an absolute-path entry to `claude_desktop_config.json` (no PATH dependency)
 4. **Verify** — runs `stocklens-doctor`, exits non-zero on critical issues
-
----
-
-## Manual install (3 steps)
-
-If you prefer not to pipe a script:
-
-```bash
-# 1) Install uv
-# Windows
-powershell -ExecutionPolicy Bypass -c "irm https://astral.sh/uv/install.ps1 | iex"
-# macOS/Linux
-curl -LsSf https://astral.sh/uv/install.sh | sh
-
-# 2) Install stocklens-mcp
-uv tool install stocklens-mcp
-
-# 3) Register Claude Desktop config
-stocklens-setup
-```
 
 ---
 
@@ -78,11 +46,7 @@ If you see the stock name, price, and volume, you're done.
 
 ## Update
 
-```bash
-uv tool upgrade stocklens-mcp
-```
-
-Or just re-run the install one-liner (it `--force`-reinstalls).
+Updates follow the buyer guide.
 
 ---
 
@@ -182,14 +146,13 @@ py -m pip uninstall naver-stock-mcp stocklens-mcp -y
 python3 -m pip uninstall naver-stock-mcp stocklens-mcp -y
 ```
 
-Then run the one-liner above. `stocklens-setup` updates the existing Claude config entry to the new absolute path.
+Then follow the buyer installation guide. `stocklens-setup` updates the existing Claude config entry to the new absolute path.
 
 ---
 
 ## Still stuck?
 
-Open an issue:
-https://github.com/Johnhyeon/stocklens-mcp/issues
+Use the support channel included in the buyer guide.
 
 Please include:
 - OS (Windows/macOS/Linux + version)

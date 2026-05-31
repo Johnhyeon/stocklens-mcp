@@ -6,15 +6,19 @@
 
 **AI-powered Korean stock analysis with real data**
 
-[![PyPI](https://img.shields.io/pypi/v/stocklens-mcp.svg)](https://pypi.org/project/stocklens-mcp/)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 [🇰🇷 한국어](README.md) | 🇺🇸 **English**
 
 </div>
 
 ---
+
+## Distribution Status
+
+Public installation instructions for StockLens ended on 2026-06-01.
+
+New installations now follow the buyer guide and installer command provided after purchase. Existing users who already installed the public build may continue using the version they have, while new distribution, setup support, and usage templates are organized under the paid package.
 
 ## Why StockLens
 
@@ -35,50 +39,16 @@ When you show AI a chart image, it **guesses the numbers and often gets them wro
 - 📁 **Excel snapshots** — Scan once, query instantly
 - 🤖 **Gemini/GPT compatible** — Export to Excel for use with other AIs
 
-## Quick Start (one line, no Python required)
+## Installation
 
-[`uv`](https://docs.astral.sh/uv/) installs the Python runtime for you. Paste one line into your terminal.
+The buyer guide covers:
 
-### Windows (PowerShell)
+1. Checking or installing `uv`
+2. Installing the StockLens MCP package
+3. Registering it with Claude Desktop or Claude Code
+4. Running diagnostics and the first verification query
 
-```powershell
-powershell -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/Johnhyeon/stocklens-mcp/main/install.ps1 | iex"
-```
-
-### macOS / Linux (terminal)
-
-```bash
-curl -LsSf https://raw.githubusercontent.com/Johnhyeon/stocklens-mcp/main/install.sh | sh
-```
-
-The script handles ① uv install → ② `uv tool install stocklens-mcp` → ③ Claude Desktop config registration → ④ verification. After it finishes, **fully quit Claude Desktop (tray → Quit)** and relaunch.
-
-> 💡 **Response timing**
-> - **First run**: downloads package + dependencies from PyPI (10~30s)
-> - **Subsequent calls**: 1~2 seconds; instant on cache hit
-
-### Update
-
-```bash
-uv tool upgrade stocklens-mcp
-```
-
-Or simply re-run the install one-liner.
-
----
-
-### 🔄 Existing pip users
-
-Removing the old pip install and switching to uv gives you an isolated environment — no more conflicts.
-
-```bash
-py -m pip uninstall stocklens-mcp        # Windows
-python3 -m pip uninstall stocklens-mcp   # macOS/Linux
-```
-
-Then run the install one-liner above. `setup_claude` auto-updates the existing Claude config entry to the new absolute path.
-
-> 📌 Manual install / troubleshooting: [Install guide](guides/en/INSTALL.md)
+Direct public installer commands are no longer published in this README.
 
 ## Verify Installation
 
@@ -117,7 +87,6 @@ Auto-checks uv / package / command / config in 4 steps. Shows the exact fix comm
 
 - [📘 **All 48 Tools** →](guides/en/TOOLS.md)
 - [💡 **50 Prompt Examples** →](guides/en/USAGE.md)
-- [🔧 **Installation & Troubleshooting** →](guides/en/INSTALL.md)
 
 ## Supported Environments
 
@@ -135,9 +104,9 @@ Auto-checks uv / package / command / config in 4 steps. Shows the exact fix comm
 
 Tickers are auto-detected; mix freely in natural language (e.g., "compare 005930 and AAPL"). Full tool list in [TOOLS.md](guides/en/TOOLS.md).
 
-## Contributing
+## Operating Principle
 
-Issues and PRs are welcome. Please open an [Issue](https://github.com/Johnhyeon/stocklens-mcp/issues) for bugs or feature requests.
+StockLens does not provide investment recommendations, buy/sell signals, automated trading, or return guarantees. It is a data connection tool that helps Claude read public market data.
 
 ## License
 

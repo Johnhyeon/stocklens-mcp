@@ -2,8 +2,8 @@ name: Release
 
 # 태그 푸시(v*) 시 자동:
 # 1. Python 빌드 (wheel + sdist)
-# 2. PyPI 업로드
-# 3. GitHub Release 생성 + dist 자산 첨부
+# 2. GitHub Release 생성 + dist 자산 첨부
+# 3. PyPI 업로드는 유료 배포 전환으로 중단
 
 on:
   push:
@@ -44,16 +44,9 @@ jobs:
           python -m pip install --upgrade twine
           twine check dist/*
 
-      # Option A: Trusted Publishing (OIDC) — 토큰 불필요, PyPI 설정 필요
-      # https://docs.pypi.org/trusted-publishers/
-      # - name: Publish to PyPI (Trusted Publishing)
-      #   uses: pypa/gh-action-pypi-publish@release/v1
-
-      # Option B: API 토큰 (현재 활성) — 간단, 토큰 관리 필요
-      - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          password: ${{ secrets.PYPI_API_TOKEN }}
+      - name: Skip PyPI publish
+        run: |
+          echo "PyPI publishing is disabled after the paid distribution transition."
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -68,19 +61,9 @@ jobs:
 
             ---
 
-            ## 📥 설치 / 업그레이드 (PowerShell 한 줄)
+            ## 📥 설치 / 업그레이드
 
-            **신규 설치 (Windows)**
-            ```powershell
-            powershell -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/Johnhyeon/stocklens-mcp/main/install.ps1 | iex"
-            ```
-
-            **신규 설치 (macOS / Linux)**
-            ```bash
-            curl -LsSf https://raw.githubusercontent.com/Johnhyeon/stocklens-mcp/main/install.sh | sh
-            ```
-
-            **업데이트**: `uv tool upgrade stocklens-mcp`
+            신규 설치와 업데이트는 구매자 안내문 기준으로 진행합니다.
 
             ## 📚 링크
             - [전체 도구 목록](https://github.com/Johnhyeon/stocklens-mcp/blob/main/guides/ko/TOOLS.md)
