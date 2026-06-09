@@ -24,7 +24,7 @@ Write-Host ""
 $LocalBin = Join-Path $env:USERPROFILE ".local\bin"
 
 # ── [1/3] uv ─────────────────────────────────────────────
-Info "[1/3] Checking uv..."
+Info "[1/4] Checking uv..."
 $uvCmd = Get-Command uv -ErrorAction SilentlyContinue
 if (-not $uvCmd) {
     Info "      uv not found. Installing from astral.sh..."
@@ -52,7 +52,7 @@ if (-not $uvCmd) {
 Write-Host ""
 
 # ── [2/3] stocklens-mcp ──────────────────────────────────
-Info "[2/3] Installing stocklens-mcp..."
+Info "[2/4] Installing stocklens-mcp..."
 
 # Idempotent install: --force re-creates the tool environment if it already exists,
 # so re-running the script reliably upgrades to the latest PyPI version.
@@ -76,7 +76,7 @@ if (Test-Path $LocalBin -PathType Container) {
 # $env:STOCKLENS_TARGET 으로 등록 대상 지정: claude-desktop / claude-code / both / auto
 if (-not $env:STOCKLENS_TARGET) { $env:STOCKLENS_TARGET = "auto" }
 
-Info "[3/3] Configuring MCP (target=$($env:STOCKLENS_TARGET))..."
+Info "[3/4] Configuring MCP (target=$($env:STOCKLENS_TARGET))..."
 $setupExe = Join-Path $LocalBin "stocklens-setup.exe"
 if (Test-Path $setupExe) {
     & $setupExe stocklens
@@ -86,6 +86,25 @@ if (Test-Path $setupExe) {
 if ($LASTEXITCODE -ne 0) {
     Err "      [FAIL] MCP configuration failed."
     exit 1
+}
+Write-Host ""
+
+# ── [4/4] License activation ─────────────────────────────
+Info "[4/4] License activation..."
+Write-Host "      Enter the license key sent to your email after purchase."
+$activateExe = Join-Path $LocalBin "stocklens-activate.exe"
+$licKey = (Read-Host "      License key").Trim()
+if ($licKey) {
+    if (Test-Path $activateExe) {
+        & $activateExe $licKey
+    } else {
+        & uv tool run --from stocklens-mcp stocklens-activate $licKey
+    }
+    if ($LASTEXITCODE -ne 0) {
+        Warn "      Activation failed. Check the key and retry: stocklens-activate <LICENSE-KEY>"
+    }
+} else {
+    Warn "      Skipped. Activate later: stocklens-activate <LICENSE-KEY>"
 }
 Write-Host ""
 
@@ -113,6 +132,7 @@ Write-Host "  1. FULLY quit Claude Desktop (tray icon -> Quit)"
 Write-Host "  2. Restart Claude Desktop"
 Write-Host "  3. Try: '삼성전자 현재가'"
 Write-Host ""
+Write-Host "Activate:      stocklens-activate <LICENSE-KEY>"
 Write-Host "Update later:  uv tool upgrade stocklens-mcp"
 Write-Host "Diagnose:      stocklens-doctor"
 Write-Host ""

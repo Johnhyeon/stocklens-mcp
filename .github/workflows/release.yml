@@ -2,8 +2,8 @@ name: Release
 
 # 태그 푸시(v*) 시 자동:
 # 1. Python 빌드 (wheel + sdist)
-# 2. GitHub Release 생성 + dist 자산 첨부
-# 3. PyPI 업로드는 유료 배포 전환으로 중단
+# 2. PyPI 업로드
+# 3. GitHub Release 생성 + dist 자산 첨부
 
 on:
   push:
@@ -44,9 +44,16 @@ jobs:
           python -m pip install --upgrade twine
           twine check dist/*
 
-      - name: Skip PyPI publish
-        run: |
-          echo "PyPI publishing is disabled after the paid distribution transition."
+      # Option A: Trusted Publishing (OIDC) — 토큰 불필요, PyPI 설정 필요
+      # https://docs.pypi.org/trusted-publishers/
+      # - name: Publish to PyPI (Trusted Publishing)
+      #   uses: pypa/gh-action-pypi-publish@release/v1
+
+      # Option B: API 토큰 (현재 활성) — 간단, 토큰 관리 필요
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          password: ${{ secrets.PYPI_API_TOKEN }}
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -61,7 +68,7 @@ jobs:
 
             ---
 
-            ## 📥 설치 / 업그레이드
+            ## 📥 설치 / 업그레이드 (PowerShell 한 줄)
 
             신규 설치와 업데이트는 구매자 안내문 기준으로 진행합니다.
 

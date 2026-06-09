@@ -1,21 +1,35 @@
-MIT License
+StockLens 독점 라이선스 (Proprietary License)
+Copyright (c) 2026 Johnhyeon. All rights reserved.
 
-Copyright (c) 2026 Johnhyeon
+본 소프트웨어(StockLens, 이하 "소프트웨어")는 저작권자 Johnhyeon의 독점
+저작물입니다. 오픈소스가 아니며, 유효한 라이선스 키를 구매한 사용자에게만
+아래 조건으로 사용 권한이 부여됩니다.
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+1. 사용 허가
+   - 정당하게 발급된 유효한 라이선스 키를 보유한 사용자는, 본인의 기기에서
+     소프트웨어를 설치·실행할 수 있습니다.
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+2. 금지 사항
+   - 소프트웨어의 전부 또는 일부를 재배포, 재판매, 대여, 양도, 공개 게시하는 행위.
+   - 라이선스 검증 메커니즘을 우회·제거·변조하는 행위.
+   - 라이선스 키를 제3자와 공유하거나 유출하는 행위.
+   - 소프트웨어를 기반으로 한 2차적 저작물을 제작·배포하는 행위.
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+3. 권리 유보
+   - 본 라이선스에 명시적으로 부여되지 않은 모든 권리는 저작권자에게 유보됩니다.
+
+4. 보증 부인 및 책임 제한
+   - 소프트웨어는 "있는 그대로(AS IS)" 제공되며, 명시적이든 묵시적이든 어떠한
+     보증도 하지 않습니다.
+   - 본 소프트웨어는 공개 데이터를 수집·정리해 AI가 분석에 활용하도록 돕는 데이터
+     연결 도구이며, 투자 추천·매수/매도 신호·자동매매·수익 보장을 제공하지
+     않습니다. 최종 투자 판단과 책임은 사용자 본인에게 있습니다.
+   - 저작권자는 소프트웨어의 사용 또는 사용 불능으로 인한 어떠한 손해에 대해서도
+     책임지지 않습니다.
+
+5. 종전 버전에 관한 경과 규정
+   - 2026-06-02 이전에 MIT 라이선스로 배포된 버전은, 해당 버전에 한해 종전 MIT
+     라이선스 조건이 그대로 유지됩니다. 본 독점 라이선스는 2026-06-02 이후 배포
+     버전부터 적용됩니다.
+
+문의: 저작권자(Johnhyeon)

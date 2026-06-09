@@ -1,18 +1,18 @@
 [project]
 name = "stocklens-mcp"
-version = "0.4.0"
-description = "StockLens — AI가 진짜 데이터로 분석합니다. 한국(네이버)·미국(Yahoo) 주식 + ETF MCP 서버 (차트, 수급, 재무, 실적, 배당, 스크리닝, Excel)"
+version = "0.5.0"
+description = "StockLens — AI가 진짜 데이터로 분석합니다. 한국·미국 주식 + ETF MCP 서버 (차트, 수급, 재무, 실적, 배당, 스크리닝, Excel)"
 readme = "README.md"
-license = { text = "MIT" }
+license = { text = "Proprietary" }
 authors = [
     { name = "Johnhyeon" }
 ]
-keywords = ["mcp", "claude", "stock", "stocklens", "naver", "korea", "finance", "investment", "ai"]
+keywords = ["mcp", "claude", "stock", "stocklens", "korea", "finance", "investment", "ai"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
     "Intended Audience :: Financial and Insurance Industry",
-    "License :: OSI Approved :: MIT License",
+    "License :: Other/Proprietary License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
@@ -30,6 +30,7 @@ dependencies = [
     "tiktoken>=0.7.0",
     "numpy>=1.26.0",
     "yfinance>=0.2.40",
+    "cryptography>=42.0.0",
 ]
 
 [project.urls]
@@ -42,6 +43,7 @@ Issues = "https://github.com/Johnhyeon/stocklens-mcp/issues"
 stocklens = "stock_mcp_server.server:main"
 stocklens-setup = "stock_mcp_server.setup_claude:main"
 stocklens-doctor = "stock_mcp_server.doctor:main"
+stocklens-activate = "stock_mcp_server.licensing:activate_cli"
 # 하위 호환 (기존 naver-stock-mcp 사용자)
 stock-mcp-server = "stock_mcp_server.server:main"
 stock-mcp-setup = "stock_mcp_server.setup_claude:main"

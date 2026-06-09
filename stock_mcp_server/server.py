@@ -57,16 +57,23 @@ from stock_mcp_server._chart_html import render_chart_html, render_multi_chart_h
 from stock_mcp_server.market_clock import format_market_clock, get_market_clock as build_market_clock
 from stock_mcp_server.event_reaction import build_event_reaction, format_event_reaction
 from stock_mcp_server import yfinance_source as us
+from stock_mcp_server.licensing import is_licensed, LOCKED_MESSAGE
 import asyncio
 import json
 import pandas as pd
 
 
 def safe_tool(func):
-    """MCP 도구 함수의 예외를 사용자 친화적 메시지로 변환합니다."""
+    """MCP 도구 함수의 예외를 사용자 친화적 메시지로 변환합니다.
+
+    아울러 라이선스 게이트를 적용한다 — 모든 도구가 이 래퍼를 거치므로,
+    활성화되지 않은 경우 데이터 조회 없이 안내 메시지를 반환한다.
+    """
 
     @functools.wraps(func)
     async def wrapper(*args, **kwargs):
+        if not is_licensed():
+            return LOCKED_MESSAGE
         try:
             result = await func(*args, **kwargs)
         except httpx.TimeoutException:
@@ -431,7 +438,6 @@ async def get_flow(code: str, days: int = 20) -> str:
     return "\n".join(lines)
 
 
-
 _CODE_RE = re.compile(r"^[A-Za-z0-9]{6}$")
 
 
@@ -481,6 +487,223 @@ async def get_event_reaction(
         after=after,
     )
     return format_event_reaction(reaction)
+
+# ETF/ETN 식별용 운용사 브랜드 — 거래량 랭킹 결과에서 종목명으로 빠르게 거름.
+_ETF_NAME_PREFIXES = (
+    "KODEX", "TIGER", "KBSTAR", "ARIRANG", "HANARO", "ACE", "RISE", "PLUS",
+    "SOL", "KOSEF", "TIMEFOLIO", "TRUE", "WOORI", "1Q", "HK ", "마이다스",
+)
+
+
+def _looks_like_etf(name: str) -> bool:
+    if not name:
+        return False
+    upper = name.upper()
+    if "ETF" in upper or "ETN" in upper:
+        return True
+    return any(upper.startswith(p) for p in _ETF_NAME_PREFIXES)
+
+
+@mcp.tool()
+@safe_tool
+@track_metrics("get_flow_batch")
+async def get_flow_batch(codes: list[str], days: int = 5) -> str:
+    """수급벌크 — 여러 종목의 투자자 수급(기관·외국인 순매매)을 한 번에 병렬 조회.
+
+    개별 get_flow를 N번 부르는 것보다 훨씬 빠릅니다 (서버 내부 asyncio.gather).
+    "이 종목들 외국인 매수 같이 들어왔나", "관심종목 수급 비교" 같은 질문에 사용.
+
+    Args:
+        codes: 종목코드 리스트 (최대 30개)
+        days: 종목당 조회 일수 (기본 5, 최대 20). 토큰 절감 위해 단일 도구보다 짧음
+    """
+    if not codes:
+        return "종목코드 리스트가 비어 있습니다."
+
+    valid: list[str] = []
+    invalid: list[str] = []
+    for c in codes:
+        if _CODE_RE.match(c or ""):
+            valid.append(c)
+        else:
+            invalid.append(c)
+
+    if not valid:
+        return "유효한 종목코드가 없습니다 (6자리 영숫자)."
+
+    valid = valid[:30]
+    days = max(1, min(days, 20))
+
+    async def fetch_one(code: str) -> tuple[str, list[dict] | None]:
+        try:
+            data = await get_investor_flow(code, days)
+            return code, data
+        except Exception:
+            return code, None
+
+    results = await asyncio.gather(*[fetch_one(c) for c in valid])
+
+    # 종목명은 한 번에 모아서 표시 (토큰 절감, 병렬 호출)
+    name_map: dict[str, str] = {}
+    try:
+        basic = await naver_get_multi_stocks(valid)
+        name_map = {b["code"]: b.get("name", "") for b in basic}
+    except Exception:
+        pass
+
+    lines = [
+        f"수급 배치 ({len(valid)}종목, 최근 {days}일):",
+        "각 행: 날짜 | 기관 순매매(주) | 외국인 순매매(주)  ※ 양수=순매수",
+        "",
+    ]
+
+    failed: list[str] = list(invalid)
+    matched_count = 0
+    for code, data in results:
+        name = name_map.get(code, "")
+        header = f"[{code}] {name}".rstrip()
+        if not data:
+            failed.append(code)
+            continue
+
+        matched_count += 1
+        lines.append(header)
+        for row in data:
+            lines.append(
+                f"  {row['date']}  {row['institutional']:+,}  {row['foreign']:+,}"
+            )
+        total_inst = sum(r["institutional"] for r in data)
+        total_frgn = sum(r["foreign"] for r in data)
+        lines.append(f"  합계({len(data)}일)  {total_inst:+,}  {total_frgn:+,}")
+        lines.append("")
+
+    if matched_count == 0:
+        msg = "조회 가능한 종목이 없습니다."
+        if failed:
+            msg += f" (실패: {', '.join(failed)})"
+        return msg
+
+    if failed:
+        lines.append(f"※ 조회 실패: {', '.join(failed)}")
+
+    return "\n".join(lines)
+
+
+@mcp.tool()
+@safe_tool
+@track_metrics("screen_by_flow")
+async def screen_by_flow(
+    top_n: int = 100,
+    market: str = "ALL",
+    foreign_days: int = 2,
+    inst_days: int = 2,
+    exclude_etf: bool = True,
+    sort_by: str = "trade_value",
+) -> str:
+    """수급스크리닝 — 거래대금/거래량 상위 N개 중 외국인·기관이 최근 며칠 연속 순매수한 종목만 추립니다.
+
+    "오늘 거래대금 상위 중 외국인·기관 동반 매수 종목", "이틀 연속 수급 들어온 종목"
+    같은 스크리닝 질문 전용. 거래량 랭킹 + 수급 매트릭스를 서버에서 join해서
+    매치된 종목만 반환 → 토큰·시간 모두 절감.
+
+    Args:
+        top_n: 거래대금/거래량 상위 후보 수 (기본 100, 최대 500). 클수록 정확하지만 느림
+            — 500 기준 약 20~50초 소요 (Semaphore(15) 동시성 + 캐시 적용)
+        market: "KOSPI" / "KOSDAQ" / "ALL" (기본 ALL)
+        foreign_days: 최근 N일 모두 외국인 순매수여야 매치 (0=조건 미적용)
+        inst_days: 최근 N일 모두 기관 순매수여야 매치 (0=조건 미적용)
+        exclude_etf: ETF/ETN 제외 (기본 True). 종목명 기반 휴리스틱
+        sort_by: 후보 정렬 기준 "trade_value"(거래대금, 기본) / "volume"(거래량 주수)
+    """
+    top_n = max(1, min(top_n, 500))
+    foreign_days = max(0, min(foreign_days, 10))
+    inst_days = max(0, min(inst_days, 10))
+    needed_days = max(foreign_days, inst_days, 1)
+
+    ranks = await naver_get_volume_ranking(market=market, count=top_n, sort_by=sort_by)
+    if not ranks:
+        return f"{market} 거래량 순위를 가져올 수 없습니다."
+
+    # 코드 단위 dedup — 네이버 페이지 경계나 시장 합산에서 같은 종목이
+    # 두 번 등장하는 케이스 방지 (먼저 등장한 항목 우선, rank 보존)
+    seen_codes: set[str] = set()
+    candidates = []
+    for r in ranks:
+        code = r.get("code")
+        if code and code not in seen_codes:
+            seen_codes.add(code)
+            candidates.append(r)
+
+    excluded_etf: list[str] = []
+    if exclude_etf:
+        kept = []
+        for r in candidates:
+            if _looks_like_etf(r.get("name", "")):
+                excluded_etf.append(f"{r['code']} {r['name']}")
+            else:
+                kept.append(r)
+        candidates = kept
+
+    async def fetch_flow(item: dict) -> tuple[dict, list[dict] | None]:
+        try:
+            data = await get_investor_flow(item["code"], needed_days)
+            return item, data
+        except Exception:
+            return item, None
+
+    flow_results = await asyncio.gather(*[fetch_flow(c) for c in candidates])
+
+    matched: list[tuple[dict, list[dict]]] = []
+    for item, data in flow_results:
+        if not data or len(data) < needed_days:
+            continue
+        head = data[:needed_days]  # 최신 N일 (네이버는 최신순)
+        ok_frgn = foreign_days == 0 or all(
+            r["foreign"] > 0 for r in head[:foreign_days]
+        )
+        ok_inst = inst_days == 0 or all(
+            r["institutional"] > 0 for r in head[:inst_days]
+        )
+        if ok_frgn and ok_inst:
+            matched.append((item, data))
+
+    sort_label = "거래대금" if sort_by == "trade_value" else "거래량"
+    cond_parts = []
+    if foreign_days > 0:
+        cond_parts.append(f"외국인 {foreign_days}일 연속 순매수")
+    if inst_days > 0:
+        cond_parts.append(f"기관 {inst_days}일 연속 순매수")
+    cond_label = " + ".join(cond_parts) if cond_parts else "조건 없음"
+
+    lines = [
+        f"수급 스크리닝 — {sort_label} 상위 {top_n} ({market}) 중 {cond_label}",
+        f"후보 {len(candidates)}개 → 매치 {len(matched)}개"
+        + (f" (ETF/ETN 제외: {len(excluded_etf)})" if exclude_etf else ""),
+        "",
+    ]
+
+    if not matched:
+        lines.append("⚠️ 조건을 만족하는 종목이 없습니다.")
+        lines.append("")
+        lines.append("💡 조건 완화 예: foreign_days=1 또는 inst_days=0 (외국인만 검사)")
+        if exclude_etf and excluded_etf:
+            lines.append(f"제외된 ETF/ETN ({len(excluded_etf)}개): {', '.join(excluded_etf[:5])}{' …' if len(excluded_etf) > 5 else ''}")
+        return "\n".join(lines)
+
+    lines.append("매치 종목 (각 행: 날짜 | 기관 순매매 | 외국인 순매매, 양수=순매수):")
+    lines.append("")
+    for item, data in matched:
+        head = data[:needed_days]
+        lines.append(f"[{item['code']}] {item['name']}  현재가 {item['price']:,} ({item.get('change_rate', '')})")
+        for row in head:
+            lines.append(
+                f"  {row['date']}  기관 {row['institutional']:+,}  외국인 {row['foreign']:+,}"
+            )
+        lines.append("")
+
+    return "\n".join(lines)
+
+
 @mcp.tool()
 @safe_tool
 @track_metrics("get_financial")
@@ -1449,10 +1672,12 @@ async def get_etf_info(code: str) -> str:
 # ========================================
 
 def safe_us_tool(func):
-    """US tool 전용 에러 래퍼 — yfinance·Yahoo Finance 컨텍스트 메시지."""
+    """US tool 전용 에러 래퍼 — yfinance 컨텍스트 메시지. 라이선스 게이트 포함."""
 
     @functools.wraps(func)
     async def wrapper(*args, **kwargs):
+        if not is_licensed():
+            return LOCKED_MESSAGE
         try:
             return await func(*args, **kwargs)
         except httpx.TimeoutException:
