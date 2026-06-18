@@ -121,7 +121,7 @@ mcp = FastMCP(
 3. 데이터에 없는 해석·전망을 학습지식으로 채우지 마라. 반환에 담긴 판정 라벨·수치 안에서만 말한다.
 
 ## 도구 역할 구분
-- `get_chart`: **OHLCV 시계열 데이터** (수치 분석·요약���, count 최소 120)
+- `get_chart`: **OHLCV 시계열 데이터** (수치 분석·요약용, count 최소 120)
 - `get_indicators`: **기술지표 판정값** (RSI/MACD/Phase 등 숫자+라벨)
 - `get_price`: **현재가 스냅샷** (단일 시점, 시계열 아님)
 - `get_event_reaction`: **event_date 기준 주가·수급 반응**. DartLens 공시 접수일을
@@ -292,21 +292,14 @@ async def get_chart(
     count: int = 120,
 ) -> str:
     """캔들차트 OHLCV — 종목의 시계열 캔들 데이터(시가/고가/저가/종가/거래량, candlestick OHLCV).
-    "삼성전자 일봉", "차트 보여줘", "3개월 주봉", "월봉 데이터", "캔들 시각화",
-    "candlestick chart", "price history" 같은 질문에 사용합니다.
+    "삼성전자 일봉", "3개월 주봉", "월봉 데이터", "price history" 같은 질문에 사용. 시계열 진입점(US는 get_us_chart).
 
-    ⭐ **차트 시각화의 유일한 진입점.** 아티팩트/플롯으로 차트를 그릴 땐 이 도구만 사용하고,
-    **캔들 + 거래량만 렌더링**하세요. 지지·저항은 캔들 위에서 눈으로 판단합니다.
-    이평선·RSI·MACD·볼린저 등 보조지표는 **사용자가 명시적으로 요청할 때만** 추가하고,
-    그때도 get_indicators로 숫자만 받아 텍스트로 요약 — 한 차트에 여러 지표를 선으로
-    얹어 "덕지덕지" 만들지 말 것.
-
-    **기본값 120일 (약 6개월 거래일)**.
+    보조지표(이평선·RSI·MACD 등)는 사용자가 명시 요청할 때만 get_indicators로 숫자만 받아 요약.
 
     Args:
         code: 종목코드 6자리 (예: "005930")
         timeframe: "day"(일봉), "week"(주봉), "month"(월봉)
-        count: 가져올 봉 개수 (기본 120, 최대 500)
+        count: 가져올 봉 개수 (기본 120 ≈ 6개월, 최대 500)
     """
     count = min(count, 500)
     data = await get_ohlcv(code, timeframe, count)
@@ -463,18 +456,15 @@ async def get_event_reaction(
 ) -> str:
     """이벤트반응 — 특정 날짜(event_date) 기준 전후 주가·거래량·수급 반응을 정렬합니다.
 
-    DartLens의 `scan_earnings_season` 또는 `list_disclosures` 결과에 나온
-    **공시 접수일**을 그대로 event_date로 넘기면 됩니다. event_date가 휴장일이면
-    다음 거래일을 기준 거래일로 삼습니다.
-
-    이 도구는 원인 단정이나 매수/매도 판단이 아니라, "공시 → 주가/수급" 또는
-    "주가/수급 이상 → 해당 기간 공시 확인" 흐름에서 시간축을 맞추기 위한 도구입니다.
+    DartLens의 scan_earnings_season·list_disclosures에 나온 **공시 접수일**을 event_date로 넘김
+    (휴장일이면 다음 거래일 기준). "공시→주가/수급" 또는 "주가/수급 이상→해당 기간 공시 확인"
+    시간축 정렬용 — 원인 단정·매수/매도 판단 아님.
 
     Args:
         code: 종목코드 6자리 (예: "005930")
         event_date: 기준 날짜 YYYY-MM-DD 또는 YYYYMMDD. DartLens 공시 접수일 권장
-        before: event_date 전 몇 거래일을 비교할지 (기본 5, 최대 60)
-        after: event_date 후 몇 거래일을 비교할지 (기본 20, 최대 60)
+        before: event_date 전 비교 거래일 수 (기본 5, 최대 60)
+        after: event_date 후 비교 거래일 수 (기본 20, 최대 60)
     """
     if not _CODE_RE.match(code or ""):
         return "종목코드는 6자리 영숫자여야 합니다. 종목명이라면 먼저 search 도구로 코드를 확정하세요."
@@ -613,18 +603,16 @@ async def screen_by_flow(
 ) -> str:
     """수급스크리닝 — 거래대금/거래량 상위 N개 중 외국인·기관이 최근 며칠 연속 순매수한 종목만 추립니다.
 
-    "오늘 거래대금 상위 중 외국인·기관 동반 매수 종목", "이틀 연속 수급 들어온 종목"
-    같은 스크리닝 질문 전용. 거래량 랭킹 + 수급 매트릭스를 서버에서 join해서
-    매치된 종목만 반환 → 토큰·시간 모두 절감.
+    "거래대금 상위 중 외국인·기관 동반 매수", "이틀 연속 수급 들어온 종목" 같은 스크리닝 전용.
+    랭킹+수급을 서버에서 join해 매치 종목만 반환 → 토큰·시간 절감.
 
     Args:
-        top_n: 거래대금/거래량 상위 후보 수 (기본 100, 최대 500). 클수록 정확하지만 느림
-            — 500 기준 약 20~50초 소요 (Semaphore(15) 동시성 + 캐시 적용)
-        market: "KOSPI" / "KOSDAQ" / "ALL" (기본 ALL)
-        foreign_days: 최근 N일 모두 외국인 순매수여야 매치 (0=조건 미적용)
-        inst_days: 최근 N일 모두 기관 순매수여야 매치 (0=조건 미적용)
-        exclude_etf: ETF/ETN 제외 (기본 True). 종목명 기반 휴리스틱
-        sort_by: 후보 정렬 기준 "trade_value"(거래대금, 기본) / "volume"(거래량 주수)
+        top_n: 상위 후보 수 (기본 100, 최대 500). 클수록 정확하나 느림(500≈20~50초)
+        market: "KOSPI"/"KOSDAQ"/"ALL" (기본 ALL)
+        foreign_days: 최근 N일 모두 외국인 순매수여야 매치 (0=미적용)
+        inst_days: 최근 N일 모두 기관 순매수여야 매치 (0=미적용)
+        exclude_etf: ETF/ETN 제외 (기본 True)
+        sort_by: "trade_value"(거래대금, 기본)/"volume"(거래량)
     """
     top_n = max(1, min(top_n, 500))
     foreign_days = max(0, min(foreign_days, 10))
@@ -1061,26 +1049,10 @@ async def get_multi_stocks(codes: list[str]) -> str:
 @safe_tool
 @track_metrics("get_multi_chart_stats")
 async def get_multi_chart_stats(codes: list[str], days: int = 260) -> str:
-    """차트통계벌크 — 여러 종목의 **집계 통계**(최고가/최저가/현재가/낙폭)를 한 번에 병렬 조회.
+    """차트통계벌크 — 여러 종목의 기간 **집계 통계**(현재가/최고가/최저가/낙폭/기간수익률)를 한 번에 병렬 조회.
 
-    ⚠️ **시계열 도구 아님.** 기간 내 요약값(집계)만 반환. 캔들 차트·시계열 시각화는
-    get_chart 별도 호출 필수. 이름에 "차트"가 들어 있지만 시계열 OHLCV를 주지 않음.
-
-    ⭐ 스크리닝 필수 도구. 개별 get_chart 를 N번 호출하지 말고 이것 한 번으로 해결.
-
-    각 종목의 지정 기간 내 (모두 집계값):
-      - high/high_date: 최고가 + 그날 날짜
-      - low/low_date: 최저가 + 그날 날짜
-      - current_price: 현재가 (오늘 종가)
-      - drawdown_pct: 현재가가 최고가 대비 얼마나 내렸는지 (음수)
-      - recovery_pct: 현재가가 최저가에서 얼마나 올랐는지 (양수)
-      - period_return_pct: 기간 시작 대비 수익률
-      - avg_volume: 평균 거래량
-
-    활용 예시:
-      - "52주 고점 대비 30% 이상 하락한 종목 찾기" → days=260, drawdown_pct < -30 필터
-      - "52주 신고가 근접 종목" → days=260, drawdown_pct > -5 필터
-      - "가격 박스권 횡보 종목" → drawdown_pct와 recovery_pct 모두 작은 종목
+    ⚠️ 시계열 아님 — 집계값만 반환(캔들·OHLCV는 get_chart). 개별 get_chart N번 대신 이걸로.
+    ⭐ 스크리닝 필수: "52주 고점 대비 -30% 종목" 등 drawdown_pct·period_return_pct 필터에 사용.
 
     Args:
         codes: 종목코드 리스트 (최대 100개)
@@ -1110,8 +1082,8 @@ async def get_multi_chart_stats(codes: list[str], days: int = 260) -> str:
         )
     lines.append("")
     lines.append(
-        "※ 기간 **집계값**만 반환. 시계열 OHLCV 아님. "
-        "**캔들 차트·시계열 시각화는 get_chart 별도 호출** 필수."
+        "※ 기간 **집계값**만 반환(시계열 OHLCV 아님). "
+        "봉별 시계열이 필요하면 get_chart를 별도 호출."
     )
     return "\n".join(lines)
 
@@ -1126,57 +1098,20 @@ async def get_indicators(
     timeframe: str = "day",
     params: dict | None = None,
 ) -> str:
-    """기술지표 — 단일 종목의 이평선·RSI·MACD·볼린저·스토캐스틱 등 종합 판정.
+    """기술지표 — 이평선·RSI·MACD·볼린저·스토캐스틱 등 종합 판정 (JSON).
 
-    ⚠️ **스크리닝·판정 전용 도구. 차트 시각화용 아님.**
-    시각화(아티팩트/플롯)는 `get_chart`로 캔들+거래량만 그리고, 지지·저항은
-    캔들 위에서 눈으로 판단하면 됩니다. 이 도구는 플레이북 조건 필터·상태 판정처럼
-    **숫자 비교가 필요할 때만** 호출하세요.
-
-    OHLCV 원본 대신 계산·판정 결과만 JSON으로 반환해 토큰을 절약합니다.
-    가격 출력은 KRX 호가단위로 라운딩됩니다.
+    스크리닝·조건 필터·상태 판정 등 **숫자 비교가 필요할 때만** 호출.
+    차트 시각화용 아님(시각화는 `get_chart`). OHLCV 대신 판정 결과만 반환해 토큰 절약.
+    반환값의 라벨 필드(`phase_label`, `type_label`, `position` 등)는 그대로 인용할 것.
 
     Args:
         code: 종목코드 (예: "005930")
-        days: 조회 일수 (기본 260, 최소 30, 최대 500)
-        include: 계산할 지표 키 리스트. 기본 ["ma", "ma_phase", "volume", "candle"].
-            스냅샷 지표: ma / ma_phase / ma_slope / ma_cross / rsi / macd / bollinger /
-                       stochastic / obv / volume / position / candle
-            구조 분석: support_resistance / volume_profile / price_channel
-            (구조 분석은 days=500~750 등 긴 lookback 권장)
-        timeframe: "day"(일봉) / "week"(주봉) / "month"(월봉). 분봉은 현재 미지원.
-        params: 지표별 파라미터 오버라이드 dict. **사용자가 명시적으로 비표준 설정값을
-            요청할 때만** 사용. 미지정 시 표준 default 사용.
-            형식: {"<지표키>": {"<파라미터명>": <값>}}
-            예시:
-              {"rsi": {"period": 21}}                          # RSI 21일
-              {"bollinger": {"period": 20, "std": 2.5}}        # BB(20, 2.5)
-              {"stochastic": {"k_period": 5, "slow_k_period": 3, "d_period": 3}}  # Fast(5,3,3)
-              {"macd": {"fast": 5, "slow": 35, "signal": 5}}   # MACD 커스텀
-
-    기본 default (대다수 차트 표준):
-      - rsi: period=14 (Wilder's smoothing)
-      - bollinger: period=20, std=2.0 (population std)
-      - stochastic: k=12, slow_k=5, d=3 (네이버 Slow 기본)
-      - macd: fast=12, slow=26, signal=9
-
-    ma_phase 값:
-        0 완전역배열 / 1 단기상승꼬임 / 2 꼬임 / 3 단기하락꼬임 / 4 완전정배열
-        ⚠️ 반환값의 `phase_label` 필드를 **그대로** 사용. 직접 "꼬임"을 타이핑하지 말 것 (토크나이저 오류 위험).
-        ma_cross/macd.cross도 `type_label` 필드(골든크로스/데드크로스) 그대로 사용.
-        bollinger는 `position` 필드 (상단 돌파/상단 근접/밴드 내/하단 근접/하단 이탈)
-
-    support_resistance 반환:
-        피벗 자동 추출 + 클러스터링 + 터치 횟수·일자·강도(weak/medium/strong).
-        2~3년치 일봉 권장. 근거 없는 S/R 추정 제거 목적.
-
-    volume_profile 반환:
-        가격대별 누적 거래량, POC(최대 매물 집중), Value Area(70% 구간).
-
-    price_channel 반환:
-        Donchian 채널. Upper=N봉 고가, Lower=N봉 저가, 현재 위치 %.
-
-    반환: JSON 문자열.
+        days: 조회 일수 (기본 260, 30~500). 구조 분석 지표는 500+ 권장.
+        include: 지표 키. 기본 ["ma", "ma_phase", "volume", "candle"].
+            스냅샷: ma ma_phase ma_slope ma_cross rsi macd bollinger stochastic obv volume position candle
+            구조: support_resistance volume_profile price_channel
+        timeframe: "day"/"week"/"month" (분봉 미지원)
+        params: 비표준 파라미터 오버라이드(사용자 명시 요청 시만). 예: {"rsi":{"period":21}}
     """
     if not code:
         return "종목코드가 필요합니다."
@@ -1214,21 +1149,16 @@ async def get_indicators_bulk(
     timeframe: str = "day",
     params: dict | None = None,
 ) -> str:
-    """기술지표벌크 — 여러 종목의 지표를 병렬 계산. 스크리닝 핵심 도구.
+    """기술지표벌크 — 여러 종목(최대 100개)의 지표를 병렬 판정. 스크리닝 핵심.
 
-    ⚠️ **시계열/캔들 차트 아님.** 집계 판정값만 반환. 캔들 시각화는 get_chart 사용.
-
-    최대 100개 종목의 이평선 Phase·RSI·MACD 등을 한 번에 판정합니다.
-    get_indicators를 N번 부르지 말고 이걸로 일괄 처리.
+    ⚠️ 시계열·캔들 아님 — 집계 판정값만(시각화는 get_chart). get_indicators N번 대신 이걸로.
 
     Args:
         codes: 종목코드 리스트 (최대 100개)
         days: 조회 일수 (기본 260)
-        include: 지표 키 리스트 (기본 ["ma_phase", "volume"]). get_indicators 참조.
-        timeframe: "day" / "week" / "month"
-        params: 지표별 파라미터 오버라이드 (전 종목 공통 적용). get_indicators 참조.
-
-    반환: 코드별 지표 결과 JSON.
+        include: 지표 키 (기본 ["ma_phase","volume"]). get_indicators 참조.
+        timeframe: "day"/"week"/"month"
+        params: 지표 파라미터 오버라이드(전 종목 공통). get_indicators 참조.
     """
     if not codes:
         return "종목코드 리스트가 비어 있습니다."
@@ -1344,22 +1274,13 @@ async def scan_to_excel(
 ) -> str:
     """시장스캔 — 여러 종목의 기본정보+차트통계+재무지표를 한 번에 수집해 Excel로 저장.
 
-    ⭐ 로컬 캐시 패턴: 한 번 스캔해두면 이후 query_excel로 즉시 반복 조회 가능.
-    DB 없이도 HTS 같은 빠른 분석 경험을 제공합니다.
-
-    사용 흐름:
-      1. scan_to_excel(KOSPI 시총 100개 코드) → 파일 저장 (한 번)
-      2. query_excel(파일경로, 조건) → 즉시 필터링 (반복)
-      3. query_excel(파일경로, 다른 조건) → 즉시
+    로컬 캐시 패턴: 한 번 스캔 → 이후 query_excel(파일경로, 조건)로 즉시 반복 필터링.
 
     Args:
         codes: 종목코드 리스트 (최대 500개)
         days: 차트 통계 과거 일수 (기본 260 = 52주)
         include_financial: 재무지표(PER/PBR) 포함 여부
         filename: 파일명 (비우면 자동 생성)
-
-    Returns:
-        저장된 파일 경로 + 컬럼 목록
     """
     if not codes:
         return "종목코드 리스트가 비어 있습니다."
@@ -1404,12 +1325,9 @@ async def query_excel(
     descending: bool = True,
     limit: int = 30,
 ) -> str:
-    """엑셀쿼리 — 저장된 Excel 스냅샷에서 조건에 맞는 종목을 즉시 필터링.
+    """엑셀쿼리 — 저장된 Excel 스냅샷(scan_to_excel 산출)에서 조건에 맞는 종목을 로컬 필터링. HTTP 없이 빠름.
 
-    scan_to_excel로 만든 파일을 조회할 때 사용. HTTP 호출 없이 로컬 파일에서
-    필터링하므로 매우 빠릅니다. 같은 파일에 여러 조건을 번갈아 쿼리 가능.
-
-    필터 형식 (두 가지 다 지원):
+    필터 형식(둘 다 지원):
         간단: {"per_max": 10, "pbr_max": 1.5, "drawdown_pct_max": -30}
         상세: {"per": {"max": 10, "min": 0}, "drawdown_pct": {"max": -30}}
 
@@ -1417,11 +1335,8 @@ async def query_excel(
         file_path: scan_to_excel로 만든 파일 경로
         filters: 필터 조건 (컬럼명_max / 컬럼명_min 형식)
         sort_by: 정렬 기준 컬럼 (예: "market_cap", "drawdown_pct")
-        descending: 내림차순 여부 (기본 True)
+        descending: 내림차순 (기본 True)
         limit: 반환 최대 개수 (기본 30)
-
-    Returns:
-        필터링된 종목 리스트 (마크다운 테이블)
     """
     try:
         df = load_excel(file_path, sheet_name="Snapshot")
@@ -1557,8 +1472,8 @@ async def get_etf_list(
     """ETF목록 — ETF 전체 목록 조회 및 카테고리별 필터링.
 
     category: 카테고리 필터 (빈 문자열=전체). 가능한 값:
-      "국내 ���장지수", "국내 업종/테마", "국내 파생",
-      "해외 주식", "원자��", "채권/금리", "단기자금"
+      "국내 시장지수", "국내 업종/테마", "국내 파생",
+      "해외 주식", "원자재", "채권/금리", "단기자금"
     sort_by: 정렬 기준 — "marketSum"(시가총액), "quant"(거래량),
       "threeMonthEarnRate"(3개월수익률)
     limit: 반환 개수 (기본 20, 최대 50)
@@ -1617,7 +1532,7 @@ async def get_etf_info(code: str) -> str:
     data = await naver_get_etf_detail(code)
 
     if not data.get("name"):
-        return f"ETF코드 {code}의 정보를 가져올 수 없습니다. 코드를 확인해��세요."
+        return f"ETF코드 {code}의 정보를 가져올 수 없습니다. 코드를 확인해주세요."
 
     lines = [
         f"# {data['name']} ({code})",
@@ -1642,7 +1557,7 @@ async def get_etf_info(code: str) -> str:
     chg_rate = data.get("price_change_rate", 0)
     chg_sign = "+" if chg > 0 else ""
     lines.append(f"- 전일대비: {chg_sign}{chg:,.0f}원 ({chg_sign}{chg_rate:.2f}%)")
-    lines.append(f"- 시가���액: {data.get('market_cap', 0):,.0f}억원")
+    lines.append(f"- 시가총액: {data.get('market_cap', 0):,.0f}억원")
     lines.append(f"- 52주 최고/최저: {data.get('year_high', 0):,.0f} / {data.get('year_low', 0):,.0f}")
     lines.append(f"- 베타: {data.get('beta', 0):.2f}")
     lines.append(f"- 외국인 비율: {data.get('foreign_rate', 0):.2f}%")
@@ -1822,18 +1737,14 @@ async def get_us_chart(
     limit: int = 500,
 ) -> str:
     """US stock chart OHLCV — 미국 주식 시계열 캔들 데이터 (US historical price data).
-    "AAPL 차트", "Tesla 1년 주가", "NVDA history", "월봉" 같은 질문에 사용합니다.
-
-    ⭐ US 주식의 시계열/차트 진입점. 한국 주식은 get_chart 사용.
+    "AAPL 차트", "Tesla 1년 주가", "NVDA history" 같은 질문에 사용. US 시계열 진입점(한국은 get_chart).
 
     Args:
         ticker: US 티커 (예: "AAPL")
         period: "1d","5d","1mo","3mo","6mo","1y","2y","5y","10y","ytd","max" (기본 3mo)
         interval: "1m","5m","15m","30m","1h","1d","1wk","1mo" (기본 1d)
-        prepost: 프리/포스트 마켓 포함 (intraday interval에서만 유효)
-        limit: 반환 최대 행수 (기본 500, 최대 5000). 토큰 소비 보호용 상한.
-               10년 일봉(2,515행) · 백테스트 용도엔 2000~5000으로 올려 사용.
-               더 큰 데이터는 export_us_to_excel로 파일 저장 권장 (토큰 0).
+        prepost: 프리/포스트 마켓 포함 (intraday에서만 유효)
+        limit: 최대 행수 (기본 500, 최대 5000). 큰 데이터는 export_us_to_excel 권장(토큰 0).
     """
     limit = max(10, min(limit, 5000))  # 10~5000 범위로 클램프
     rows = await us.get_history(ticker, period=period, interval=interval, prepost=prepost)
@@ -2485,7 +2396,7 @@ async def get_us_news(ticker: str, limit: int = 10) -> str:
 async def get_consensus(code: str) -> str:
     """컨센서스 — 증권사 투자의견, 목표주가, 실적 추정치 (매출액/영업이익 컨센서스).
 
-    "목표가 얼마야", "컨센서스", "증권사 의견", "��정가", "실적 전망" 같은 질문에 사용합니다.
+    "목표가 얼마야", "컨센서스", "증권사 의견", "적정가", "실적 전망" 같은 질문에 사용합니다.
 
     Args:
         code: 종목코드 6자리 (예: "005930")
@@ -2542,7 +2453,7 @@ async def get_consensus(code: str) -> str:
                     cells.append("-")
             lines.append(f"{label} | " + " | ".join(cells))
 
-        # 영업이익��
+        # 영업이익률
         opr = estimates.get("영업이익률", {})
         if opr:
             cells = []
@@ -2981,17 +2892,13 @@ async def export_us_to_excel(
     filename: str = "",
 ) -> str:
     """US Excel export — 미국 주식 장기 데이터를 Excel 파일로 저장 (토큰 소비 없음).
-    "AAPL 10년치 CSV 저장", "TSLA 5년 일봉 엑셀", "S&P 장기 데이터 파일로" 같은 질문에 사용합니다.
-
-    ⭐ `get_us_chart`는 기본 500행 상한이라 10년치 장기 데이터 조회 시 잘립니다.
-    **백테스트·CSV 분석·다른 AI 업로드용**이면 이 도구로 파일에 저장하세요. 행 수 무제한.
-
-    저장 위치: `~/Downloads/kstock/` (Windows: `%USERPROFILE%\\Downloads\\kstock\\`)
+    "AAPL 10년치 CSV 저장", "TSLA 5년 일봉 엑셀" 같은 질문에 사용. get_us_chart는 500행 상한이라
+    장기 데이터는 잘림 — 백테스트·CSV·다른 AI 업로드용이면 이 도구로(행 수 무제한).
 
     Args:
         ticker: US 티커 (예: "AAPL", "SPY", "BRK.B")
         period: "1d","5d","1mo","3mo","6mo","1y","2y","5y","10y","ytd","max" (기본 10y)
-        interval: "1d","1wk","1mo" (기본 1d). 분봉은 기간 짧아서 파일 저장 의미 약함
+        interval: "1d","1wk","1mo" (기본 1d)
         filename: 파일명 (비우면 자동)
     """
     rows = await us.get_history(ticker, period=period, interval=interval, prepost=False)
