@@ -109,6 +109,17 @@ mcp = FastMCP(
 
 이 규칙을 어기면 잘못된 종목 분석으로 사용자를 오도할 수 있다.
 
+## 답변 형태 (출력 규칙)
+
+도구가 돌려준 표·숫자는 **이미 사용자에게 보여줄 최종 형태**다. 그대로 인용하라.
+
+1. **표/수치 재서술 금지.** 반환된 markdown 표를 산문으로 다시 풀어 설명하지 마라.
+   ("RSI 72로, 보통 70 이상은 과매수를 뜻하며…" 식 X). 핵심 1~3줄 코멘트 + 표 인용으로 끝낸다.
+2. **차트·SVG를 직접 그리지 마라.** OHLCV(`get_chart`)를 받아 손으로 SVG·ASCII·그래프를
+   생성하는 것은 토큰 낭비이자 부정확하다. 수치는 반환된 표로 충분하다. 사용자가 굳이
+   시각 차트를 원하면 임의로 그리지 말고 어떤 형태를 원하는지 먼저 확인하라.
+3. 데이터에 없는 해석·전망을 학습지식으로 채우지 마라. 반환에 담긴 판정 라벨·수치 안에서만 말한다.
+
 ## 도구 역할 구분
 - `get_chart`: **OHLCV 시계열 데이터** (수치 분석·요약���, count 최소 120)
 - `get_indicators`: **기술지표 판정값** (RSI/MACD/Phase 등 숫자+라벨)
@@ -2542,6 +2553,7 @@ async def get_consensus(code: str) -> str:
 
     lines.append("")
     lines.append("※ 단위: 억원, 에프앤가이드 컨센서스 기준")
+    lines.append("※ 목표주가·투자의견·추정치는 증권사 전망치이며 미래 수익을 보장하지 않습니다.")
 
     return "\n".join(lines)
 
@@ -2594,6 +2606,8 @@ async def get_reports(code: str, count: int = 5) -> str:
             lines.append(f"[PDF 원문]({pdf})")
 
         lines.append("")
+
+    lines.append("※ 목표가·투자의견은 각 증권사 분석 의견이며 미래 수익을 보장하지 않습니다.")
 
     return "\n".join(lines)
 
