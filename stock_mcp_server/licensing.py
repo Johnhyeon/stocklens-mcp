@@ -29,7 +29,7 @@ _ENV_KEY = "STOCKLENS_LICENSE_KEY"
 
 # 구매(상품) 페이지 링크 — 확정되면 이 한 줄만 채우면 모든 안내에 자동 노출된다.
 # 예: PURCHASE_URL = "https://litt.ly/stocklens"
-PURCHASE_URL = ""
+PURCHASE_URL = "https://litt.ly/leetkey_lab/sale/hzGHnRY"
 
 
 def _purchase_line(prefix: str = "· 구매: ") -> str:
