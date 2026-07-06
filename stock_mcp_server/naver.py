@@ -111,9 +111,52 @@ async def get_ohlcv(
     return rows
 
 
+def _parse_rate_info(scope) -> dict:
+    """rate_info 블록(KRX 또는 NXT) 하나에서 현재가/전일대비/시가/고가/저가/거래량을 추출합니다."""
+    info: dict = {}
+
+    price_tag = scope.select_one("p.no_today span.blind")
+    if price_tag:
+        info["price"] = _parse_int(price_tag.text)
+
+    diff_tag = scope.select_one("p.no_exday em span.blind")
+    if diff_tag:
+        diff_text = diff_tag.text.replace(",", "")
+        icon = scope.select_one("p.no_exday em.no_up, p.no_exday em.no_down")
+        if icon and "no_down" in icon.get("class", []):
+            diff_text = "-" + diff_text
+        info["change"] = _parse_int(diff_text)
+
+    # 네이버 no_info 테이블 구조: td마다 span.sptxt(라벨) + em > span.blind(값)
+    for td in scope.select("table.no_info td"):
+        label_tag = td.select_one("span.sptxt")
+        value_tag = td.select_one("em > span.blind")
+        if not label_tag or not value_tag:
+            continue
+
+        label = label_tag.text.strip()
+        value = _parse_int(value_tag.text)
+
+        if "거래량" in label:
+            info["volume"] = value
+        elif "시가" in label:
+            info["open"] = value
+        elif "고가" in label and "상한" not in label:
+            info["high"] = value
+        elif "저가" in label and "하한" not in label:
+            info["low"] = value
+
+    return info
+
+
 @cached(ttl_market=30, ttl_closed=3600)  # 장중 30초, 장마감 1시간
 async def get_current_price(code: str) -> dict:
-    """종목의 현재가 정보를 가져옵니다."""
+    """종목의 현재가 정보를 가져옵니다.
+
+    코스피200/코스닥150 등 NXT 대상 종목은 네이버가 KRX/NXT 탭으로 시세를 나눠 보여주며,
+    두 table.no_info가 한 페이지에 동시에 존재한다. KRX를 기본값으로 쓰고 NXT는
+    nxt_ 접두사 필드로 별도 반환해 두 시장 수치가 섞이지 않게 한다.
+    """
     url = f"{BASE_URL}/item/main.naver?code={code}"
     resp = await fetch(url)
     soup = BeautifulSoup(resp.text, "lxml")
@@ -125,40 +168,14 @@ async def get_current_price(code: str) -> dict:
     if name_tag:
         result["name"] = name_tag.text.strip()
 
-    # 현재가
-    price_tag = soup.select_one("p.no_today span.blind")
-    if price_tag:
-        result["price"] = int(price_tag.text.replace(",", ""))
+    # KRX 블록이 없는(NXT 비대상) 종목은 페이지 전체를 그대로 스코프로 사용
+    krx_scope = soup.select_one("#rate_info_krx") or soup
+    result.update(_parse_rate_info(krx_scope))
 
-    # 전일대비
-    diff_tag = soup.select_one("p.no_exday em span.blind")
-    if diff_tag:
-        diff_text = diff_tag.text.replace(",", "")
-        # 상승/하락 판단
-        icon = soup.select_one("p.no_exday em.no_up, p.no_exday em.no_down")
-        if icon and "no_down" in icon.get("class", []):
-            diff_text = "-" + diff_text
-        result["change"] = int(diff_text)
-
-    # 시세 정보 (전일/고가/저가/시가/거래량/거래대금)
-    # 네이버 no_info 테이블 구조: td마다 span.sptxt(라벨) + em > span.blind(값)
-    for td in soup.select("table.no_info td"):
-        label_tag = td.select_one("span.sptxt")
-        value_tag = td.select_one("em > span.blind")
-        if not label_tag or not value_tag:
-            continue
-
-        label = label_tag.text.strip()
-        value = _parse_int(value_tag.text)
-
-        if "거래량" in label:
-            result["volume"] = value
-        elif "시가" in label:
-            result["open"] = value
-        elif "고가" in label and "상한" not in label:
-            result["high"] = value
-        elif "저가" in label and "하한" not in label:
-            result["low"] = value
+    nxt_scope = soup.select_one("#rate_info_nxt")
+    if nxt_scope:
+        for key, value in _parse_rate_info(nxt_scope).items():
+            result[f"nxt_{key}"] = value
 
     return result
 

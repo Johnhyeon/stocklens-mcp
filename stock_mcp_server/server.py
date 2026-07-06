@@ -60,7 +60,33 @@ from stock_mcp_server import yfinance_source as us
 from stock_mcp_server.licensing import is_licensed, LOCKED_MESSAGE
 import asyncio
 import json
+import sys
 import pandas as pd
+
+
+def _support_hint() -> str:
+    """safe_tool 의 '예상 못한 오류' 버킷에서만 붙이는 자가진단 안내.
+
+    이미 원인이 명확한 예외(라이선스/타임아웃/연결오류 등)엔 안 붙인다 — 사소한 것까지
+    문의로 유도하면 노이즈만 늘어난다. sys.platform 은 이 프로세스가 실제 도는 OS라
+    Mac/Win 명령을 헷갈릴 일 없이 바로 골라 보여줄 수 있다.
+    """
+    if sys.platform == "darwin":
+        log_cmd = "cd ~/Library/Logs/Claude && zip -r ~/Desktop/claude_logs.zip . && open ~/Desktop"
+    elif sys.platform == "win32":
+        log_cmd = (
+            'powershell -c "Compress-Archive $env:APPDATA\\Claude\\logs\\* '
+            '$env:USERPROFILE\\Desktop\\claude_logs.zip -Force; explorer $env:USERPROFILE\\Desktop"'
+        )
+    else:
+        log_cmd = None
+    hint = "\n\n계속되면:\n1) Claude 완전 종료 후 재시작 → 다시 시도"
+    if log_cmd:
+        hint += (
+            "\n2) 그래도 안 되면 아래 명령으로 로그를 모아서 osy980315@gmail.com 으로 "
+            f"보내주세요\n   {log_cmd}"
+        )
+    return hint
 
 
 def safe_tool(func):
@@ -86,6 +112,7 @@ def safe_tool(func):
             return (
                 f"⚠️ 데이터 처리 중 오류가 발생했습니다: {type(e).__name__}\n"
                 f"종목코드가 올바른지, 상장된 종목인지 확인해주세요."
+                + _support_hint()
             )
         return result
 
@@ -375,6 +402,8 @@ async def get_price(code: str) -> str:
     "삼성전자 지금 얼마", "현재가", "오늘 시세", "주가 알려줘" 같은 질문에 사용합니다.
 
     ⚠️ **단일 시점 스냅샷**. 과거 시계열 아님. 차트/히스토리 필요 시 get_chart 사용.
+    코스피200/코스닥150 등 NXT 대상 종목은 KRX 정규장을 기본값으로 보여주고,
+    NXT(대체거래소) 시세는 별도 블록으로 덧붙입니다(두 시장 수치를 섞지 않음).
 
     Args:
         code: 종목코드 6자리 (예: "005930")
@@ -383,9 +412,12 @@ async def get_price(code: str) -> str:
     if not data or "price" not in data:
         return f"종목코드 {code}의 현재가를 가져올 수 없습니다."
 
+    has_nxt = "nxt_price" in data
+    price_label = "현재가 (KRX 정규장)" if has_nxt else "현재가"
+
     lines = [
         f"종목: {data.get('name', code)} ({code})",
-        f"현재가: {data['price']:,}원",
+        f"{price_label}: {data['price']:,}원",
     ]
     if "change" in data:
         sign = "+" if data["change"] > 0 else ""
@@ -398,6 +430,18 @@ async def get_price(code: str) -> str:
         lines.append(f"저가: {data['low']:,}원")
     if "volume" in data:
         lines.append(f"거래량: {data['volume']:,}")
+
+    if has_nxt:
+        lines.append("")
+        lines.append("─ NXT(대체거래소) ─")
+        lines.append(f"현재가: {data['nxt_price']:,}원")
+        if "nxt_change" in data:
+            sign = "+" if data["nxt_change"] > 0 else ""
+            lines.append(f"전일대비: {sign}{data['nxt_change']:,}원")
+        if "nxt_volume" in data:
+            lines.append(f"거래량: {data['nxt_volume']:,}")
+        lines.append("※ NXT는 KRX와 별도 체결 시장으로, 위 정규장 수치에 포함되지 않습니다")
+
     return "\n".join(lines)
 
 
@@ -1614,6 +1658,7 @@ def safe_us_tool(func):
             return (
                 f"⚠️ 미국 주식 데이터 처리 중 오류: {type(e).__name__}\n"
                 f"티커가 올바른지 확인해주세요 (예: AAPL, MSFT, BRK.B)."
+                + _support_hint()
             )
 
     return wrapper
