@@ -1,6 +1,6 @@
 [project]
 name = "stocklens-mcp"
-version = "0.5.1"
+version = "0.5.3"
 description = "StockLens — AI가 진짜 데이터로 분석합니다. 한국·미국 주식 + ETF MCP 서버 (차트, 수급, 재무, 실적, 배당, 스크리닝, Excel)"
 readme = "README.md"
 license = { text = "Proprietary" }
@@ -47,6 +47,11 @@ stocklens-activate = "stock_mcp_server.licensing:activate_cli"
 # 하위 호환 (기존 naver-stock-mcp 사용자)
 stock-mcp-server = "stock_mcp_server.server:main"
 stock-mcp-setup = "stock_mcp_server.setup_claude:main"
+
+[tool.pytest.ini_options]
+# tests/ 밖에 떨어지는 개발용 스크립트(예: 루트의 수동 점검용 asyncio 스크립트)가
+# 실수로 수집되지 않도록 범위를 못박는다.
+testpaths = ["tests"]
 
 [build-system]
 requires = ["hatchling"]

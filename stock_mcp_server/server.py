@@ -54,10 +54,12 @@ from stock_mcp_server._indicators import (
     AVAILABLE_INDICATORS,
 )
 from stock_mcp_server._chart_html import render_chart_html, render_multi_chart_html
-from stock_mcp_server.market_clock import format_market_clock, get_market_clock as build_market_clock
+from stock_mcp_server.market_clock import format_market_clock, get_market_clock as build_market_clock, KST
 from stock_mcp_server.event_reaction import build_event_reaction, format_event_reaction
+from stock_mcp_server.status import build_status, format_status
 from stock_mcp_server import yfinance_source as us
 from stock_mcp_server.licensing import is_licensed, LOCKED_MESSAGE
+from stock_mcp_server._update_check import get_update_notice
 import asyncio
 import json
 import sys
@@ -114,7 +116,11 @@ def safe_tool(func):
                 f"종목코드가 올바른지, 상장된 종목인지 확인해주세요."
                 + _support_hint()
             )
-        return result
+        try:
+            notice = await get_update_notice()
+        except Exception:
+            notice = ""
+        return result + notice if notice else result
 
     return wrapper
 
@@ -216,6 +222,23 @@ async def get_market_clock() -> str:
     주말, 정규 휴장일, 장전/정규장/시간외/장마감 상태를 함께 반환합니다.
     """
     return format_market_clock(build_market_clock())
+
+
+@mcp.tool()
+@track_metrics("stocklens_status")
+async def stocklens_status() -> str:
+    """상태요약 — 버전/라이선스/국내·미국 시장 상태/최근 성공·실패/캐시 쓰기 가능 여부를 한 번에.
+
+    문제가 있는지 대화 중 가볍게 확인할 때 사용합니다. 이미 기록된 최근 호출 로그와
+    업데이트 확인 캐시만 읽으므로 네트워크를 새로 호출하지 않습니다(빠름).
+    라이선스 미활성 상태에서도 원인 파악용으로 동작해야 하므로 다른 도구와 달리
+    라이선스 게이트를 걸지 않습니다. 더 깊은 진단(오프라인 재현 등)은 터미널의
+    stocklens-doctor 커맨드를 안내하세요.
+    """
+    try:
+        return format_status(build_status())
+    except Exception as e:
+        return f"⚠️ 상태 조회 중 오류: {type(e).__name__}. 터미널에서 stocklens-doctor로 더 자세히 진단해보세요."
 
 
 def _normalize_date(raw, is_intraday: bool) -> str:
@@ -331,13 +354,21 @@ async def get_chart(
     count = min(count, 500)
     data = await get_ohlcv(code, timeframe, count)
     if not data:
-        return f"종목코드 {code}의 차트 데이터를 가져올 수 없습니다."
+        meta = _result_meta(data_completeness="none", warnings=["차트 데이터를 가져오지 못했습니다."])
+        return _append_result_meta(f"종목코드 {code}의 차트 데이터를 가져올 수 없습니다.", meta)
 
     tf_name = {"day": "일봉", "week": "주봉", "month": "월봉"}.get(timeframe, timeframe)
     header = f"종목 {code} {tf_name} OHLCV ({len(data)}개 봉)"
     lines = [header, ""]
     lines.extend(_format_ohlcv_rows(data, is_intraday=False, decimals=0))
-    return "\n".join(lines)
+
+    warnings = _kr_market_note()
+    completeness = "complete"
+    if len(data) < count:
+        completeness = "partial"
+        warnings = warnings + [f"요청한 {count}개 중 {len(data)}개만 조회됨(상장일 등으로 이력이 짧을 수 있음)."]
+    meta = _result_meta(data_completeness=completeness, warnings=warnings)
+    return _append_result_meta("\n".join(lines), meta)
 
 
 # --- get_chart_html 비활성화 (v0.2.5~) ---
@@ -394,6 +425,44 @@ async def get_chart(
 #     )
 
 
+def _result_meta(
+    *,
+    market: str = "KR",
+    is_delayed: bool = False,
+    data_completeness: str = "complete",
+    warnings: list[str] | None = None,
+) -> dict:
+    """가격·차트·스크리닝 핵심 도구 공통 메타 봉투. as_of는 조회 시각(KST) 기준."""
+    return {
+        "as_of": datetime.now(KST).isoformat(timespec="seconds"),
+        "market": market,
+        "is_delayed": is_delayed,
+        "data_completeness": data_completeness,
+        "warnings": warnings or [],
+    }
+
+
+def _append_result_meta(text: str, meta: dict) -> str:
+    return (
+        text
+        + "\n\nRESULT_META_JSON_START\n"
+        + json.dumps(meta, ensure_ascii=False, sort_keys=True)
+        + "\nRESULT_META_JSON_END"
+    )
+
+
+def _kr_market_note() -> list[str]:
+    """KRX가 지금 닫혀 있으면, 보여주는 값이 실시간이 아니라 최근 종가 기준임을 명시.
+
+    Naver 소스는 공식적으로 지연을 공지하지 않으므로(US Yahoo와 달리) is_delayed는
+    건드리지 않고, '휴장 중 최근 종가' 사실만 warning으로 남긴다.
+    """
+    krx = build_market_clock()["krx"]
+    if krx["is_open"]:
+        return []
+    return [f"KRX 장마감 상태 — 표시된 값은 최근 거래일({krx['last_trading_day']}) 기준입니다."]
+
+
 @mcp.tool()
 @safe_tool
 @track_metrics("get_price")
@@ -410,7 +479,8 @@ async def get_price(code: str) -> str:
     """
     data = await get_current_price(code)
     if not data or "price" not in data:
-        return f"종목코드 {code}의 현재가를 가져올 수 없습니다."
+        meta = _result_meta(data_completeness="none", warnings=["현재가 데이터를 가져오지 못했습니다."])
+        return _append_result_meta(f"종목코드 {code}의 현재가를 가져올 수 없습니다.", meta)
 
     has_nxt = "nxt_price" in data
     price_label = "현재가 (KRX 정규장)" if has_nxt else "현재가"
@@ -442,7 +512,9 @@ async def get_price(code: str) -> str:
             lines.append(f"거래량: {data['nxt_volume']:,}")
         lines.append("※ NXT는 KRX와 별도 체결 시장으로, 위 정규장 수치에 포함되지 않습니다")
 
-    return "\n".join(lines)
+    completeness = "complete" if all(k in data for k in ("price", "open", "high", "low", "volume")) else "partial"
+    meta = _result_meta(data_completeness=completeness, warnings=_kr_market_note())
+    return _append_result_meta("\n".join(lines), meta)
 
 
 @mcp.tool()
@@ -665,7 +737,8 @@ async def screen_by_flow(
 
     ranks = await naver_get_volume_ranking(market=market, count=top_n, sort_by=sort_by)
     if not ranks:
-        return f"{market} 거래량 순위를 가져올 수 없습니다."
+        meta = _result_meta(data_completeness="none", warnings=[f"{market} 거래량 순위를 가져오지 못했습니다."])
+        return _append_result_meta(f"{market} 거래량 순위를 가져올 수 없습니다.", meta)
 
     # 코드 단위 dedup — 네이버 페이지 경계나 시장 합산에서 같은 종목이
     # 두 번 등장하는 케이스 방지 (먼저 등장한 항목 우선, rank 보존)
@@ -695,6 +768,7 @@ async def screen_by_flow(
             return item, None
 
     flow_results = await asyncio.gather(*[fetch_flow(c) for c in candidates])
+    failed_fetch = sum(1 for _, data in flow_results if data is None)
 
     matched: list[tuple[dict, list[dict]]] = []
     for item, data in flow_results:
@@ -725,13 +799,19 @@ async def screen_by_flow(
         "",
     ]
 
+    warnings = _kr_market_note()
+    if failed_fetch:
+        warnings = warnings + [f"수급 조회 실패 종목 {failed_fetch}개 — 스크리닝 후보에서 제외됨."]
+    completeness = "partial" if failed_fetch else "complete"
+
     if not matched:
         lines.append("⚠️ 조건을 만족하는 종목이 없습니다.")
         lines.append("")
         lines.append("💡 조건 완화 예: foreign_days=1 또는 inst_days=0 (외국인만 검사)")
         if exclude_etf and excluded_etf:
             lines.append(f"제외된 ETF/ETN ({len(excluded_etf)}개): {', '.join(excluded_etf[:5])}{' …' if len(excluded_etf) > 5 else ''}")
-        return "\n".join(lines)
+        meta = _result_meta(data_completeness=completeness, warnings=warnings)
+        return _append_result_meta("\n".join(lines), meta)
 
     lines.append("매치 종목 (각 행: 날짜 | 기관 순매매 | 외국인 순매매, 양수=순매수):")
     lines.append("")
@@ -744,7 +824,8 @@ async def screen_by_flow(
             )
         lines.append("")
 
-    return "\n".join(lines)
+    meta = _result_meta(data_completeness=completeness, warnings=warnings)
+    return _append_result_meta("\n".join(lines), meta)
 
 
 @mcp.tool()

@@ -19,29 +19,53 @@
 from __future__ import annotations
 
 import json
+import socket
 import time
 from datetime import datetime
 from functools import wraps
 from pathlib import Path
 from typing import Any, Callable, Awaitable
 
-# tiktoken은 선택적 의존성
-try:
-    import tiktoken
-    _encoder = tiktoken.get_encoding("cl100k_base")
+# tiktoken은 선택적 의존성이자 최초 사용 시 인코딩 파일을 인터넷에서 내려받는다.
+# import 시점에 바로 불러오면 네트워크가 없는/제한된 PC에서 서버 자체가
+# 뜨지 못하므로, 실제로 토큰을 세는 시점까지 로딩을 미루고 실패하면 즉시
+# 문자 수 기반 근사로 전환한다. 인코더 로딩은 프로세스당 최대 1회만 시도한다.
+_encoder = None
+_encoder_load_attempted = False
+_ENCODER_LOAD_TIMEOUT = 2.0  # 초. 제한된 네트워크에서 다운로드가 멈춰 있어도 빨리 포기.
 
-    def estimate_tokens(text: str) -> int:
+
+def _load_encoder():
+    global _encoder, _encoder_load_attempted
+    if _encoder is not None or _encoder_load_attempted:
+        return _encoder
+    _encoder_load_attempted = True
+    old_timeout = socket.getdefaulttimeout()
+    try:
+        import tiktoken
+        socket.setdefaulttimeout(_ENCODER_LOAD_TIMEOUT)
+        _encoder = tiktoken.get_encoding("cl100k_base")
+    except Exception:
+        _encoder = None
+    finally:
+        socket.setdefaulttimeout(old_timeout)
+    return _encoder
+
+
+def estimate_tokens(text: str) -> int:
+    """텍스트의 토큰 수를 추정한다.
+
+    tiktoken 인코더 로딩(최초 1회)에 성공하면 정확한 카운트, 실패하면
+    (미설치/오프라인/네트워크 제한) 한국어·영어·숫자 혼합 기준 문자당
+    약 0.35 토큰으로 근사한다.
+    """
+    encoder = _load_encoder()
+    if encoder is not None:
         try:
-            return len(_encoder.encode(text))
+            return len(encoder.encode(text))
         except Exception:
-            return len(text) // 3
-except ImportError:
-    def estimate_tokens(text: str) -> int:
-        """tiktoken 없을 때 근사값.
-
-        한국어/영어/숫자 혼합 기준 문자당 약 0.35 토큰.
-        """
-        return len(text) // 3
+            pass
+    return len(text) // 3
 
 
 def get_metrics_dir() -> Path:

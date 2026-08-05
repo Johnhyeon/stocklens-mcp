@@ -280,6 +280,31 @@ def check_config() -> Check:
     return check_config_desktop()
 
 
+def check_license() -> Check:
+    """StockLens 라이선스 활성화 상태. 키 원문은 절대 노출하지 않는다."""
+    c = Check("License (StockLens)")
+    from stock_mcp_server import licensing
+
+    key = licensing.stored_key()
+    if not key:
+        c.fail("No license key stored", fix="stocklens-activate <라이선스-키>")
+        return c
+
+    res = licensing.verify_key(key)
+    if not res["valid"]:
+        c.fail(
+            f"Stored license key is invalid ({res.get('reason', 'unknown')})",
+            fix="stocklens-activate <라이선스-키>",
+        )
+        return c
+
+    c.ok("License active")
+    license_id = res.get("license_id") or ""
+    if license_id:
+        c.info(f"license_id: {licensing.mask_tail(license_id.upper())}")
+    return c
+
+
 STATUS_ICON = {
     "ok": "[ OK ]",
     "warn": "[WARN]",
@@ -299,12 +324,45 @@ def print_check(c: Check):
     print()
 
 
+def _build_parser():
+    import argparse
+
+    p = argparse.ArgumentParser(
+        prog="stocklens-doctor",
+        description="StockLens installation/license/data-connectivity diagnosis.",
+    )
+    p.add_argument(
+        "--json",
+        action="store_true",
+        help="Print a structured DiagnosticReport as JSON (for Manager/automation) instead of human text.",
+    )
+    p.add_argument(
+        "--online",
+        action="store_true",
+        help="Include network reachability checks (KR/US sample quote + update check). Only applies with --json.",
+    )
+    return p
+
+
+def _run_json_mode(*, online: bool) -> int:
+    from stock_mcp_server.diagnostics import run_diagnostics
+
+    report = run_diagnostics(online=online)
+    print(report.to_json())
+    return 0 if report.overall != "fail" else 1
+
+
 def main():
     # Windows cp949 터미널 호환을 위해 stdout UTF-8 시도
     try:
         sys.stdout.reconfigure(encoding="utf-8")
     except Exception:
         pass
+
+    args = _build_parser().parse_args()
+
+    if args.json:
+        sys.exit(_run_json_mode(online=args.online))
 
     print("=" * 60)
     print("  StockLens Doctor - Installation Diagnosis")
@@ -321,6 +379,7 @@ def main():
         desktop_check,
         code_check,
         check_at_least_one_config(desktop_check, code_check),
+        check_license(),
     ]
 
     for c in checks:
