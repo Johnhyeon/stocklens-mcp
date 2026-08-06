@@ -207,6 +207,14 @@ def activate_cli() -> None:
         stocklens-activate --stdin         표준입력에서 키 읽기 (프로세스 목록 비노출)
         stocklens-activate --stdin --json  Manager 연동용 구조화 출력
     """
+    # 파이프/리다이렉트로 stdout이 콘솔이 아니게 되면 Windows는 로캘 코드페이지(cp949 등)로
+    # 떨어져 한글 에러 메시지가 깨진다. Manager가 --json 출력을 파이프로 읽는 게 기본
+    # 사용 패턴이라 이 reconfigure가 없으면 실패 메시지의 한글이 깨져서 전달된다.
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+
     args = _build_activate_parser().parse_args(sys.argv[1:])
 
     if args.stdin:
