@@ -161,9 +161,28 @@ mcp = FastMCP(
   event_date로 넘겨 공시 전후 거래일 반응을 확인할 때 사용
 
 ## ETF 도구
-- `get_etf_list`: ETF 목록 조회 + 카테고리 필터 + 정렬
+- `get_etf_list`: ETF 목록 조회 + 카테고리 필터 + 이름 키워드 필터 + 정렬
 - `get_etf_info`: ETF 상세 정보 (기초지수, 보수율, 구성종목, 수익률)
 - ETF도 일반 종목 도구(`search`, `get_price`, `get_chart`)로 조회 가능
+
+## 🔍 테마·컨셉으로 종목/ETF 찾기 (발견 vs 검증 분리)
+
+`search`/`get_etf_list`는 **이름을 아는 대상을 정확히 조회**하는 도구이지, "이런 조건에
+맞는 걸 찾아줘" 같은 발견(discovery)에는 한계가 있다. 특정 회사(특히 비상장사) 지분을
+보유한 ETF를 찾는 것처럼, 도구 검색만으로 후보가 안 나오는 질문은:
+
+1. 학습 지식이나 웹서치로 후보 종목·ETF **이름**을 먼저 좁혀라(추측 아님 — 실제 조사).
+2. 후보가 나오면 **반드시** `get_etf_info`/`get_price`/`get_financial` 등으로 넘어가서
+   수수료·구성종목·가격 같은 실제 숫자를 stocklens로 재검증하고 그 숫자로 답하라.
+   웹서치에서 본 숫자를 그대로 답에 쓰지 마라 — 오래됐거나 부정확할 수 있다.
+3. `get_etf_list(keyword="...")`로 먼저 시도해볼 것 — 한국 ETF는 이름 자체가 테마를
+   직설적으로 담는 관행이라(예: "TIGER 미국우주테크") 카테고리를 몰라도 키워드 하나로
+   꽤 많은 경우가 해결된다.
+4. keyword는 이름 부분일치라, 1~2글자처럼 짧거나 흔한 키워드는 무관한 결과가 섞인다
+   (예: "금" → 금현물 ETF 몇 개 말고 "CD금리액티브"·"금융채" 같은 무관한 상품이 다수
+   섞여 나옴 — "금리"·"금융"에도 "금"이 들어있어서). 결과 이름들을 훑어서 의도한
+   테마와 안 맞는 게 섞여 있으면 그대로 쓰지 말고, 종목명 검색 결과가 여러 개일 때와
+   같은 원칙으로 사용자에게 "이 중 어떤 뜻으로 물으신 건가요?" 하고 되물어라.
 
 ## 분석 도구
 - `get_consensus`: 컨센서스 — 증권사 투자의견, 목표주가, 실적 추정치
@@ -1591,20 +1610,29 @@ async def get_metrics_summary(days: int = 1) -> str:
 @track_metrics("get_etf_list")
 async def get_etf_list(
     category: str = "",
+    keyword: str = "",
     sort_by: str = "marketSum",
     limit: int = 20,
 ) -> str:
-    """ETF목록 — ETF 전체 목록 조회 및 카테고리별 필터링.
+    """ETF목록 — ETF 전체 목록 조회, 카테고리·이름 키워드 필터링.
 
     category: 카테고리 필터 (빈 문자열=전체). 가능한 값:
       "국내 시장지수", "국내 업종/테마", "국내 파생",
       "해외 주식", "원자재", "채권/금리", "단기자금"
+    keyword: ETF 이름에 포함된 키워드로 필터 (예: "우주", "반도체", "배당").
+      "OO 테마 ETF 뭐 있어" 같은 질문은 category를 추측하지 말고 keyword로
+      바로 찾는다 — 한국 ETF는 이름 자체가 테마를 직설적으로 담는 관행이라
+      (예: "TIGER 미국우주테크") 이름 검색만으로 대부분 커버된다. 단, 특정
+      회사(예: 비상장사)를 "보유"한 ETF를 찾는 건 이 키워드로 안 된다 — 그
+      회사명이 ETF 이름 자체에 없으면 못 찾으니, 후보 ETF를 좁힌 뒤
+      get_etf_info로 구성종목을 직접 확인해야 한다.
     sort_by: 정렬 기준 — "marketSum"(시가총액), "quant"(거래량),
       "threeMonthEarnRate"(3개월수익률)
     limit: 반환 개수 (기본 20, 최대 50)
     """
     data = await naver_get_etf_list(
         category=category or None,
+        keyword=keyword or None,
         sort_by=sort_by,
         limit=limit,
     )
@@ -1613,10 +1641,12 @@ async def get_etf_list(
     if not items:
         return "조건에 맞는 ETF가 없습니다."
 
+    header_extra = "".join([
+        f", 카테고리: {category}" if category else "",
+        f", 키워드: '{keyword}'" if keyword else "",
+    ])
     lines = [
-        f"ETF 목록 ({data['total']}개 중 상위 {len(items)}개"
-        + (f", 카테고리: {category}" if category else "")
-        + ")",
+        f"ETF 목록 ({data['total']}개 중 상위 {len(items)}개{header_extra})",
         "",
     ]
 

@@ -1094,6 +1094,7 @@ _ETF_TAB_NAMES = {
 @cached(ttl_market=300, ttl_closed=3600)  # 장중 5분, 장마감 1시간
 async def get_etf_list(
     category: str | None = None,
+    keyword: str | None = None,
     sort_by: str = "marketSum",
     limit: int = 20,
 ) -> dict:
@@ -1101,6 +1102,10 @@ async def get_etf_list(
 
     Args:
         category: 필터 카테고리 (None=전체, "국내 시장지수", "해외 주식" 등)
+        keyword: ETF 이름에 포함된 키워드로 필터 (예: "우주", "반도체", "배당").
+            카테고리를 몰라도 테마 이름으로 바로 찾을 수 있다. 이미 한 번에
+            받아온 전체 목록을 대상으로 in-memory 필터링이라 추가 네트워크
+            호출은 없다. category와 함께 쓰면 AND 조건.
         sort_by: 정렬 기준 ("marketSum", "quant", "threeMonthEarnRate", "nav")
         limit: 반환 개수 (기본 20, 최대 50)
     """
@@ -1121,6 +1126,11 @@ async def get_etf_list(
                 break
         if tab_code:
             items = [i for i in items if i.get("etfTabCode") == tab_code]
+
+    # 이름 키워드 필터 (부분일치, 대소문자 무시)
+    if keyword and keyword.strip():
+        kw = keyword.strip().lower()
+        items = [i for i in items if kw in (i.get("itemname") or "").lower()]
 
     # 정렬
     reverse = True
