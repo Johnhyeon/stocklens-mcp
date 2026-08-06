@@ -135,6 +135,15 @@ def get_claude_code_config_path() -> Path:
     return Path.home() / ".claude.json"
 
 
+def get_codex_config_path() -> Path:
+    """Codex CLI의 MCP 서버 설정 — `~/.codex/config.toml`, `[mcp_servers.<name>]` 섹션.
+
+    Windows에서 실제 설치본으로 이 경로를 확인했다. macOS/Linux도 관례상 같은 경로일
+    가능성이 높으나 이 환경에서 직접 검증하지는 못했다.
+    """
+    return Path.home() / ".codex" / "config.toml"
+
+
 # 하위 호환 — 기존 코드/외부 import 보존
 def get_config_path() -> Path:
     return get_claude_desktop_config_path()
@@ -144,6 +153,7 @@ def get_config_path() -> Path:
 TARGETS: dict[str, tuple] = {
     "claude-desktop": (get_claude_desktop_config_path, "Claude Desktop"),
     "claude-code": (get_claude_code_config_path, "Claude Code CLI"),
+    "codex": (get_codex_config_path, "Codex CLI"),
 }
 
 
@@ -183,7 +193,14 @@ def _configure_one_target(config_path: Path, label: str, *, command: str, quiet:
     quiet=True 면 사람용 진행 로그를 찍지 않는다(Manager의 --json/--non-interactive
     호출에서 stdout을 구조화 결과 하나로만 유지하기 위함). 파일 변경 로직 자체는
     quiet 여부와 무관하게 동일하다.
+
+    Codex 등 TOML 기반 클라이언트는 config_path 확장자가 `.toml`이라 여기서
+    `_configure_toml_target`으로 분기한다 — TARGETS 딕셔너리 구조를 바꾸지 않고도
+    JSON/TOML 두 포맷을 같은 인터페이스로 지원.
     """
+    if config_path.suffix == ".toml":
+        return _configure_toml_target(config_path, label, command=command, quiet=quiet)
+
     if not quiet:
         print()
         print(f"  → {label}")
@@ -253,6 +270,76 @@ def _configure_one_target(config_path: Path, label: str, *, command: str, quiet:
     }
 
 
+def _configure_toml_target(config_path: Path, label: str, *, command: str, quiet: bool = False) -> dict:
+    """Codex처럼 TOML(`[mcp_servers.<name>]`)로 MCP 서버를 등록하는 클라이언트용.
+
+    tomlkit으로 파싱·재작성해서 다른 mcp_servers.* 항목·주석은 그대로 두고 우리
+    섹션만 추가/갱신한다(전체를 다시 문자열로 쓰는 JSON 경로와 달리, 파일에 이미
+    다른 도구가 등록한 서버들이 섞여 있을 수 있어 round-trip 보존이 필요).
+    """
+    import tomlkit
+
+    if not quiet:
+        print()
+        print(f"  → {label}")
+
+    config_dir = config_path.parent
+    config_dir.mkdir(parents=True, exist_ok=True)
+
+    backup_path: Path | None = None
+    if config_path.exists():
+        backup_path = config_path.with_suffix(".toml.backup")
+        backup_path.write_bytes(config_path.read_bytes())
+        if not quiet:
+            print(f"  [OK] Backup saved: {backup_path}")
+        try:
+            doc = tomlkit.parse(config_path.read_text(encoding="utf-8"))
+        except Exception:
+            if not quiet:
+                print("  [WARN] Existing config is corrupted. Creating new one.")
+            doc = tomlkit.document()
+    else:
+        doc = tomlkit.document()
+
+    if "mcp_servers" not in doc:
+        doc["mcp_servers"] = tomlkit.table()
+
+    entry = resolve_server_entry(command)
+    server_table = tomlkit.table()
+    server_table["command"] = entry["command"]
+    if "args" in entry:
+        server_table["args"] = entry["args"]
+    doc["mcp_servers"][SERVER_KEY] = server_table
+
+    config_path.write_text(tomlkit.dumps(doc), encoding="utf-8")
+
+    warnings: list[str] = []
+    cmd = entry["command"]
+    if Path(cmd).is_absolute() and not Path(cmd).exists():
+        warnings.append(f"Recorded command file does not exist: {cmd}")
+    elif not Path(cmd).is_absolute() and not shutil.which(cmd):
+        warnings.append(f"'{cmd}' not found in PATH. Run 'stocklens-doctor' to diagnose.")
+
+    if not quiet:
+        print(f"  [OK] Config updated (key: {SERVER_KEY})")
+        print(f"  Path:    {config_path}")
+        print(f"  Command: {entry['command']}")
+        if "args" in entry:
+            print(f"  Args:    {' '.join(entry['args'])}")
+        for w in warnings:
+            print(f"  [WARN] {w}")
+
+    return {
+        "target_label": label,
+        "config_path": str(config_path),
+        "backup_path": str(backup_path) if backup_path else None,
+        "command": entry["command"],
+        "args": entry.get("args"),
+        "legacy_removed": [],
+        "warnings": warnings,
+    }
+
+
 def configure(
     command: str = "stocklens", *, targets: list[str] | None = None, quiet: bool = False
 ) -> list[dict]:
@@ -287,12 +374,13 @@ def _build_parser():
     )
     p.add_argument(
         "--target",
-        choices=["claude-desktop", "claude-code", "both", "auto"],
+        choices=["claude-desktop", "claude-code", "both", "auto", "codex"],
         default="auto",
         help=(
             "MCP 등록 대상. claude-desktop=Claude Desktop 앱, "
             "claude-code=Claude Code CLI, both=둘 다, auto=환경 자동 감지 "
-            "(기본: auto). STOCKLENS_TARGET 환경변수로도 지정 가능."
+            "(기본: auto), codex=Codex CLI(명시적 선택만 지원, auto 감지 대상 아님). "
+            "STOCKLENS_TARGET 환경변수로도 지정 가능."
         ),
     )
     p.add_argument(
