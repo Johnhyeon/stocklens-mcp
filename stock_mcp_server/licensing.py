@@ -230,7 +230,17 @@ def activate_cli() -> None:
         print(_usage())
         sys.exit(1)
 
-    res = save_key(key)
+    try:
+        res = save_key(key)
+    except Exception as e:
+        # 서명 검증은 통과했는데 디스크 쓰기(권한/디스크 부족 등)가 실패한 경우.
+        # --json 모드는 항상 파싱 가능한 JSON을 내보내야 하므로 traceback으로 죽으면 안 된다.
+        key = None
+        if args.json:
+            print(json.dumps({"ok": False, "status": "error", "reason": f"{type(e).__name__}: {e}"}, ensure_ascii=False))
+            sys.exit(1)
+        print(f"활성화 실패 ❌  — 키 저장 중 오류: {type(e).__name__}: {e}")
+        sys.exit(1)
     key = None  # 저장 직후 로컬 참조 제거 — 이후 경로에서 키 원문을 다시 쓰지 않는다.
 
     if res["valid"]:

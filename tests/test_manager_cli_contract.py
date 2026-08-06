@@ -146,6 +146,31 @@ class ActivateCliStdinContractTests(unittest.TestCase):
         argv = ["stocklens-activate", "--stdin", "--json"]
         self.assertNotIn(FAKE_KEY, argv)
 
+    def test_disk_write_failure_after_valid_signature_still_emits_json_not_traceback(self) -> None:
+        """서명 검증은 통과했지만 디스크 쓰기(권한/디스크 부족 등)가 실패하는 경우.
+
+        --json 모드는 Manager가 항상 json.loads할 수 있어야 하므로, save_key()가
+        예외를 던져도 raw traceback이 아니라 유효한 JSON + 0이 아닌 종료코드로
+        끝나야 한다.
+        """
+        argv = ["stocklens-activate", "--stdin", "--json"]
+        buf = io.StringIO()
+        with patch.object(licensing, "save_key", side_effect=OSError("disk full")), \
+             patch("sys.argv", argv), \
+             patch("sys.stdin", io.StringIO(FAKE_KEY + "\n")), \
+             contextlib.redirect_stdout(buf):
+            with self.assertRaises(SystemExit) as cm:
+                licensing.activate_cli()
+
+        out = buf.getvalue()
+        self.assertEqual(cm.exception.code, 1)
+        self.assertNotIn("Traceback", out)
+        self.assertNotIn(FAKE_KEY, out)
+
+        data = json.loads(out)
+        self.assertFalse(data["ok"])
+        self.assertEqual(data["status"], "error")
+
 
 if __name__ == "__main__":
     unittest.main()

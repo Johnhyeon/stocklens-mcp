@@ -427,6 +427,31 @@ def _check_cache_writable() -> DiagnosticCheck:
         )
 
 
+def _safe_check(fn, *args, fallback_id: str, fallback_critical: bool = True, **kwargs) -> DiagnosticCheck:
+    """개별 체크 함수 하나가 예상 못한 예외를 던져도 전체 리포트가 죽지 않게 감싼다.
+
+    각 체크 내부에 이미 자체 try/except가 있지만(예: 파일 읽기, crypto 검증),
+    여기서 한 번 더 막아둬야 '오프라인 진단은 절대 traceback으로 안 죽는다'는
+    계약을 실제로 보장할 수 있다 — 체크 로직이 하나 늘어날 때마다 그 안에
+    빠짐없이 try/except를 넣었는지 매번 감사하는 것보다 이 안전망이 낫다.
+
+    fallback_critical은 이 체크가 정상 동작했을 때의 critical 값과 맞춰서
+    넘겨야 한다 — 그래야 예컨대 LICENSE_ACTIVE가 죽었을 때도 전체 상태가
+    'degraded'가 아니라 'fail'로 정확히 올라간다(critical=False로 뭉뚱그리면
+    심각한 체크의 크래시가 사소한 경고처럼 보인다).
+    """
+    try:
+        return fn(*args, **kwargs)
+    except Exception as e:
+        return DiagnosticCheck(
+            id=fallback_id,
+            status="fail",
+            critical=fallback_critical,
+            summary=f"진단 중 예상치 못한 오류: {type(e).__name__}",
+            detail=[str(e)],
+        )
+
+
 def _skip(check_id: str) -> DiagnosticCheck:
     return DiagnosticCheck(
         id=check_id,
@@ -554,16 +579,22 @@ async def run_diagnostics_async(*, online: bool = False) -> DiagnosticReport:
     `asyncio.run()`을 쓰므로 루프 안에서 부르면 RuntimeError가 난다."""
     start = time.monotonic()
 
-    targets = _registered_targets()
-    license_summary = _license_summary()
+    try:
+        targets = _registered_targets()
+    except Exception:
+        targets = []  # 보수적 기본값 — '등록 안 됨'으로 취급
+    try:
+        license_summary = _license_summary()
+    except Exception:
+        license_summary = LicenseSummary(status="missing")  # 보수적 기본값
 
     checks: list[DiagnosticCheck] = [
-        _check_package_importable(),
-        _check_command_available(),
-        _check_python_supported(),
-        _check_mcp_config_valid(targets),
-        _check_license_active(license_summary),
-        _check_cache_writable(),
+        _safe_check(_check_package_importable, fallback_id="PACKAGE_IMPORTABLE"),
+        _safe_check(_check_command_available, fallback_id="COMMAND_AVAILABLE"),
+        _safe_check(_check_python_supported, fallback_id="PYTHON_SUPPORTED"),
+        _safe_check(_check_mcp_config_valid, targets, fallback_id="MCP_CONFIG_VALID"),
+        _safe_check(_check_license_active, license_summary, fallback_id="LICENSE_ACTIVE"),
+        _safe_check(_check_cache_writable, fallback_id="CACHE_WRITABLE", fallback_critical=False),
     ]
 
     latest_version: str | None = None

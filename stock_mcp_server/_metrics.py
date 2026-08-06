@@ -19,7 +19,7 @@
 from __future__ import annotations
 
 import json
-import socket
+import threading
 import time
 from datetime import datetime
 from functools import wraps
@@ -36,19 +36,32 @@ _ENCODER_LOAD_TIMEOUT = 2.0  # 초. 제한된 네트워크에서 다운로드가
 
 
 def _load_encoder():
+    """tiktoken 인코더를 백그라운드 스레드에서 불러오고 최대 _ENCODER_LOAD_TIMEOUT초만 기다린다.
+
+    socket.setdefaulttimeout()으로 감싸는 방식은 쓰지 않는다 — 그건 프로세스 전역
+    설정이라, 이 로딩이 진행되는 동안 동시에 실행 중인 다른 도구 호출(예: yfinance가
+    명시적 타임아웃 없이 여는 커넥션)까지 의도치 않게 잘라버릴 수 있다. 별도 스레드로
+    격리하면 지정한 타임아웃 안에 못 끝나도 이 스레드만 백그라운드에 남고(daemon이라
+    프로세스 종료를 막지 않음), 다른 동시 요청에는 전혀 영향을 주지 않는다.
+    """
     global _encoder, _encoder_load_attempted
     if _encoder is not None or _encoder_load_attempted:
         return _encoder
     _encoder_load_attempted = True
-    old_timeout = socket.getdefaulttimeout()
-    try:
-        import tiktoken
-        socket.setdefaulttimeout(_ENCODER_LOAD_TIMEOUT)
-        _encoder = tiktoken.get_encoding("cl100k_base")
-    except Exception:
-        _encoder = None
-    finally:
-        socket.setdefaulttimeout(old_timeout)
+
+    result: dict = {}
+
+    def _attempt() -> None:
+        try:
+            import tiktoken
+            result["encoder"] = tiktoken.get_encoding("cl100k_base")
+        except Exception:
+            result["encoder"] = None
+
+    thread = threading.Thread(target=_attempt, daemon=True)
+    thread.start()
+    thread.join(timeout=_ENCODER_LOAD_TIMEOUT)
+    _encoder = result.get("encoder")  # 타임아웃 시 None — 스레드는 백그라운드에서 계속되다 버려짐
     return _encoder
 
 

@@ -345,9 +345,19 @@ def _build_parser():
 
 
 def _run_json_mode(*, online: bool) -> int:
-    from stock_mcp_server.diagnostics import run_diagnostics
+    from stock_mcp_server import diagnostics
 
-    report = run_diagnostics(online=online)
+    try:
+        report = diagnostics.run_diagnostics(online=online)
+    except Exception as e:
+        # 개별 체크는 diagnostics._safe_check로 이미 보호되지만, 이 바깥 레이어도
+        # 예상 못한 예외에 traceback 대신 항상 JSON을 내보내도록 한 번 더 막는다.
+        print(json.dumps(
+            {"schema_version": diagnostics.SCHEMA_VERSION, "overall": "fail", "ok": False,
+             "error": f"{type(e).__name__}: {e}"},
+            ensure_ascii=False,
+        ))
+        return 1
     print(report.to_json())
     return 0 if report.overall != "fail" else 1
 
@@ -369,17 +379,23 @@ def main():
     print("=" * 60)
     print()
 
-    desktop_check = check_config_desktop()
-    code_check = check_config_code()
+    def _safe(fn, *args):
+        try:
+            return fn(*args)
+        except Exception as e:
+            return Check(fn.__name__).fail(f"진단 중 예상치 못한 오류: {type(e).__name__}: {e}")
+
+    desktop_check = _safe(check_config_desktop)
+    code_check = _safe(check_config_code)
 
     checks = [
-        check_uv(),
-        check_package(),
-        check_stocklens_command(),
+        _safe(check_uv),
+        _safe(check_package),
+        _safe(check_stocklens_command),
         desktop_check,
         code_check,
-        check_at_least_one_config(desktop_check, code_check),
-        check_license(),
+        _safe(check_at_least_one_config, desktop_check, code_check),
+        _safe(check_license),
     ]
 
     for c in checks:
