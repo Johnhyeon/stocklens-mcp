@@ -307,7 +307,14 @@ def _registered_targets() -> list[str]:
         SERVER_KEY,
         get_claude_code_config_path,
         get_claude_desktop_config_path,
+        get_codex_config_path,
     )
+
+    def _resolvable(cmd: str | None) -> bool:
+        return bool(cmd) and (
+            (Path(cmd).is_absolute() and Path(cmd).exists())
+            or (not Path(cmd).is_absolute() and shutil.which(cmd) is not None)
+        )
 
     slugs = [
         ("claude-desktop", get_claude_desktop_config_path()),
@@ -325,18 +332,28 @@ def _registered_targets() -> list[str]:
         entry = (cfg.get("mcpServers") or {}).get(SERVER_KEY)
         if not entry:
             continue
-        cmd = entry.get("command")
-        resolvable = bool(cmd) and (
-            (Path(cmd).is_absolute() and Path(cmd).exists())
-            or (not Path(cmd).is_absolute() and shutil.which(cmd) is not None)
-        )
-        if resolvable:
+        if _resolvable(entry.get("command")):
             result.append(slug)
+
+    # Codex는 TOML(`~/.codex/config.toml`, [mcp_servers.<key>])이라 위 JSON 루프와 구조가
+    # 달라 별도로 읽는다 — setup_claude._configure_toml_target()이 쓰는 것과 동일한 구조.
+    codex_path = get_codex_config_path()
+    if codex_path.exists():
+        try:
+            import tomlkit
+
+            codex_cfg = tomlkit.parse(codex_path.read_text(encoding="utf-8"))
+            codex_entry = (codex_cfg.get("mcp_servers") or {}).get(SERVER_KEY)
+            if codex_entry and _resolvable(codex_entry.get("command")):
+                result.append("codex")
+        except Exception:
+            pass
+
     return result
 
 
 def _check_mcp_config_valid(targets: list[str]) -> DiagnosticCheck:
-    label_by_slug = {"claude-desktop": "Claude Desktop", "claude-code": "Claude Code CLI"}
+    label_by_slug = {"claude-desktop": "Claude Desktop", "claude-code": "Claude Code CLI", "codex": "Codex CLI"}
     if targets:
         labels = [label_by_slug[t] for t in targets]
         return DiagnosticCheck(
@@ -350,7 +367,7 @@ def _check_mcp_config_valid(targets: list[str]) -> DiagnosticCheck:
         id="MCP_CONFIG_VALID",
         status="fail",
         critical=True,
-        summary="Claude Desktop/Code 어디에도 stocklens가 정상 등록돼 있지 않습니다.",
+        summary="Claude Desktop/Code/Codex 어디에도 stocklens가 정상 등록돼 있지 않습니다.",
         error_code="MCP_CONFIG_MISSING",
         fix="stocklens-setup --target both",
     )
