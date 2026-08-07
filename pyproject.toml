@@ -1,6 +1,6 @@
 [project]
 name = "stocklens-mcp"
-version = "0.5.8"
+version = "0.5.9"
 description = "StockLens — AI가 진짜 데이터로 분석합니다. 한국·미국 주식 + ETF MCP 서버 (차트, 수급, 재무, 실적, 배당, 스크리닝, Excel)"
 readme = "README.md"
 license = { text = "Proprietary" }
@@ -21,7 +21,12 @@ classifiers = [
 ]
 requires-python = ">=3.11"
 dependencies = [
-    "mcp[cli]>=1.12.0",
+    # 상한을 반드시 둔다. mcp 2.0.0에서 mcp.server.fastmcp가 사라져서, 상한 없이
+    # 나간 이 패키지를 새로 설치한 사람은 서버가 import 단계에서 죽었다
+    # (ModuleNotFoundError: No module named 'mcp.server.fastmcp' → Claude/Codex 둘 다
+    # "server disconnected"). DartLens·TelegramLens는 처음부터 <2.0.0이라 무사했고
+    # 여기만 빠져 있었다. 2.x로 올리려면 FastMCP 사용부를 전부 옮겨야 하므로 별건이다.
+    "mcp[cli]>=1.12.0,<2.0.0",
     "httpx>=0.27.0",
     "pandas>=2.2.0",
     "beautifulsoup4>=4.12.0",
