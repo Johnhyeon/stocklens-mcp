@@ -25,25 +25,33 @@ PROVIDER_ERROR = "PROVIDER_ERROR"
 
 CODE_MESSAGES: dict[str, str] = {
     EVENT_BEFORE_PRICE_HISTORY: (
-        "사건일이 보유 가격 데이터의 시작일보다 이릅니다. "
-        "보유 구간의 첫 거래일을 기준일로 대체하지 않고 계산을 중단했습니다."
+        "이 종목의 주가를 위 구간부터만 가지고 있습니다. 그보다 이른 날짜라서, "
+        "가지고 있는 첫 거래일로 슬쩍 옮겨 계산하지 않고 멈췄습니다."
     ),
     EVENT_AFTER_PRICE_HISTORY: (
-        "사건일 이후의 거래일이 보유 가격 데이터에 없습니다. "
-        "미래 날짜이거나 아직 반응 구간이 형성되지 않았습니다."
+        "이 날짜 이후의 거래일이 아직 없습니다. 앞날짜이거나 반응 구간이 아직 안 생겼습니다."
     ),
-    NO_PRICE_HISTORY: "가격 데이터가 비어 있어 사건창을 구성할 수 없습니다.",
+    NO_PRICE_HISTORY: "주가 데이터를 받지 못해 앞뒤 구간을 만들 수 없었습니다.",
     NO_TRADING_ACTIVITY: (
-        "사건일 이후 요청한 사건창 안에 거래량이 양수인 거래일이 없습니다. "
-        "거래정지·유동성 부재 가능성이며 시장 무반응과 다릅니다."
+        "이 사건 이후 구간에서 거래가 한 건도 없었습니다(거래량 0). 거래정지였거나 "
+        "사려는 사람·팔려는 사람이 없던 구간으로, 주가가 안 움직인 것과는 다릅니다."
     ),
     INSUFFICIENT_POST_EVENT_HISTORY: (
-        "사건 이후 거래 가능한 관측치가 부족해 일부 시점의 수익률을 계산하지 못했습니다."
+        "사건 뒤 거래된 날이 모자라 일부 시점은 등락률을 내지 못했습니다."
     ),
     FLOW_UNAVAILABLE_FOR_EVENT_WINDOW: (
-        "사건창과 겹치는 투자자 수급 행이 없습니다. 순매매 0이 아니라 데이터 없음입니다."
+        "이 구간의 기관·외국인 수급이 없습니다(수급은 최근 60거래일까지만 조회합니다). "
+        "순매매 0이 아니라 데이터가 없는 것입니다."
     ),
-    PROVIDER_ERROR: "데이터 공급자 조회에 실패했습니다. 데이터 부재와 구분해 취급하세요.",
+    PROVIDER_ERROR: "데이터를 불러오지 못했습니다. 데이터가 없는 것과는 다르며 재시도 대상입니다.",
+}
+
+# 차단 사유별 첫 줄 — 고객이 겪은 상황을 그대로 말한다.
+UNAVAILABLE_HEADLINES: dict[str, str] = {
+    EVENT_BEFORE_PRICE_HISTORY: "이 날짜의 주가를 가지고 있지 않습니다",
+    EVENT_AFTER_PRICE_HISTORY: "이 날짜 이후로 아직 거래된 날이 없습니다",
+    NO_PRICE_HISTORY: "주가 데이터를 불러오지 못했습니다",
+    NO_TRADING_ACTIVITY: "이 기간에 거래가 한 건도 없었습니다",
 }
 
 # 이 코드가 붙으면 수익률·수급 숫자를 일절 생성하지 않는다.
@@ -231,6 +239,7 @@ def _unavailable(
     after: int,
     history_gap: int | None = None,
     next_tradable_date: str | None = None,
+    details: dict | None = None,
 ) -> dict:
     """수익률·수급 숫자를 만들지 않는 응답 골격."""
     blocked_flow = {
@@ -240,6 +249,19 @@ def _unavailable(
         "foreign": None,
         "reason": "event_window_unavailable",
     }
+    validation = _validation(
+        status="unavailable",
+        codes=codes,
+        event_date=event_date,
+        earliest=earliest,
+        latest=latest,
+        basis_date=None,
+        alignment_gap=None,
+        alignment_reason=None,
+        history_gap=history_gap,
+        next_tradable_date=next_tradable_date,
+    )
+    validation.update(details or {})
     return {
         "code": code,
         "event_date": event_date,
@@ -248,18 +270,7 @@ def _unavailable(
         "points": {},
         "volume": {"pre_avg": None, "basis": None, "post_avg": None},
         "flow": {"pre": dict(blocked_flow), "post": dict(blocked_flow)},
-        "validation": _validation(
-            status="unavailable",
-            codes=codes,
-            event_date=event_date,
-            earliest=earliest,
-            latest=latest,
-            basis_date=None,
-            alignment_gap=None,
-            alignment_reason=None,
-            history_gap=history_gap,
-            next_tradable_date=next_tradable_date,
-        ),
+        "validation": validation,
     }
 
 
@@ -333,6 +344,7 @@ def build_event_reaction(
     basis = next((row for row in window_sessions if row["volume"] > 0), None)
     if basis is None:
         resumed = next((row["date"] for row in tradable if row["date"] >= target_date), None)
+        closes = {row["close"] for row in window_sessions}
         return _unavailable(
             code=code,
             event_date=target_date,
@@ -342,6 +354,12 @@ def build_event_reaction(
             before=before,
             after=after,
             next_tradable_date=resumed,
+            # 거래정지인지 유동성 부재인지는 시세 데이터로 확정할 수 없다. 관측 사실만 남긴다.
+            details={
+                "no_trade_sessions": len(window_sessions),
+                "no_trade_last_close": window_sessions[-1]["close"],
+                "no_trade_close_unchanged": len(closes) == 1,
+            },
         )
 
     basis_date = basis["date"]
@@ -474,10 +492,15 @@ def _history_line(validation: dict) -> str:
 
 def _format_unavailable(reaction: dict) -> str:
     validation = reaction["validation"]
+    codes = validation.get("codes") or []
+    headline = next(
+        (UNAVAILABLE_HEADLINES[c] for c in codes if c in UNAVAILABLE_HEADLINES),
+        "이 사건창은 계산할 수 없습니다",
+    )
     lines = [
         f"# 이벤트 반응 — {reaction['code']} (event_date={reaction['event_date']})",
         "",
-        "**분석 불가 — 수익률·수급 숫자를 생성하지 않았습니다.**",
+        f"**{headline} — 등락률·수급 숫자를 만들지 않았습니다.**",
         "",
         "| 항목 | 값 |",
         "|---|---|",
@@ -488,6 +511,13 @@ def _format_unavailable(reaction: dict) -> str:
     gap = validation.get("history_gap_calendar_days")
     if gap is not None:
         lines.append(f"| 사건일-데이터 경계 차이 | {gap:,}일 |")
+    sessions = validation.get("no_trade_sessions")
+    if sessions:
+        last_close = validation.get("no_trade_last_close")
+        detail = f"{sessions}거래일 내내 거래량 0"
+        if validation.get("no_trade_close_unchanged") and last_close is not None:
+            detail += f", 종가 {_fmt_int(last_close)}원 그대로"
+        lines.append(f"| 사건창 거래 상황 | {detail} |")
     resumed = validation.get("next_tradable_date_outside_window")
     if resumed:
         resumed_gap = _calendar_gap(resumed, validation.get("event_date"))
@@ -499,19 +529,20 @@ def _format_unavailable(reaction: dict) -> str:
     lines.extend(
         [
             "",
-            "_이 응답에는 D0/D+ 수익률, 기관·외국인 순매매 값이 없습니다. "
-            "숫자가 없는 것은 반응이 0이라는 뜻이 아니라 측정 자체가 불가능하다는 뜻입니다._",
+            "_이 응답에는 등락률도, 기관·외국인 숫자도 없습니다. 반응이 0이었다는 뜻이 "
+            "아니라 계산할 재료가 없다는 뜻입니다._",
         ]
     )
     if resumed:
         lines.append(
-            "_거래가 재개된 날은 사건창 밖입니다. 그 날의 등락은 이 사건의 반응이 아니라 "
-            "거래재개 자체의 가격 조정이므로 기준일로 쓰지 않습니다._"
+            "_거래가 다시 시작된 날은 이 사건창 밖입니다. 그 날의 등락은 이 사건에 대한 "
+            "반응이 아니라 거래 재개 자체로 생긴 가격 조정이라 기준일로 쓰지 않습니다._"
         )
-    else:
+    elif EVENT_BEFORE_PRICE_HISTORY in codes:
         lines.append(
-            "_보유 구간 밖 사건은 첫 보유 거래일로 대체하지 않습니다. "
-            "더 이른 사건은 현재 조회 범위(일봉 500개)로 측정할 수 없습니다._"
+            "_이 도구는 일봉 500개(약 2년)까지만 봅니다. 그보다 오래된 날짜는 가지고 있는 "
+            "첫 거래일로 옮겨 계산하지 않습니다 — 다른 시기의 등락을 이 사건의 반응처럼 "
+            "보여주게 되기 때문입니다._"
         )
     return "\n".join(lines)
 
@@ -574,8 +605,14 @@ def format_event_reaction(reaction: dict) -> str:
             continue
         lines.append(f"| {label} | {_MISSING} | {_MISSING} | {_MISSING} |")
         if row["status"] == "unavailable":
+            why = (
+                "수급 조회에 실패했습니다"
+                if row.get("reason") == "provider_error"
+                else "수급은 최근 60거래일까지만 조회합니다"
+            )
             flow_notes.append(
-                f"- {label}: 해당 사건창 수급 데이터 없음 (`{FLOW_UNAVAILABLE_FOR_EVENT_WINDOW}`)"
+                f"- {label}: 해당 사건창 수급 데이터 없음 — {why} "
+                f"(`{FLOW_UNAVAILABLE_FOR_EVENT_WINDOW}`)"
             )
 
     if flow_notes:

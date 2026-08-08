@@ -20,6 +20,7 @@ if sys.platform == "win32":
         pass
 
 from stock_mcp_server.event_reaction import (
+    UNAVAILABLE_HEADLINES,
     EVENT_AFTER_PRICE_HISTORY,
     EVENT_BEFORE_PRICE_HISTORY,
     FLOW_UNAVAILABLE_FOR_EVENT_WINDOW,
@@ -488,7 +489,10 @@ class TwelveCaseFixtureTests(unittest.TestCase):
             text = format_event_reaction(reaction)
 
             with self.subTest(case=case["case_id"]):
-                self.assertIn("분석 불가", text)
+                # 사유별로 고객이 겪은 상황을 그대로 말한다 — 뭉뚱그린 "분석 불가" 금지.
+                headline = UNAVAILABLE_HEADLINES[case["expect"]["codes"][0]]
+                self.assertIn(headline, text)
+                self.assertIn("등락률·수급 숫자를 만들지 않았습니다", text)
                 self.assertNotIn("0.00%", text)
                 self.assertNotIn("+0.00", text)
                 self.assertNotIn("기관 순매매", text)
@@ -532,7 +536,7 @@ class EventReactionToolTests(unittest.IsolatedAsyncioTestCase):
                 after=10,
             )
 
-        self.assertIn("분석 불가", text)
+        self.assertIn("이 날짜의 주가를 가지고 있지 않습니다", text)
         self.assertIn(EVENT_BEFORE_PRICE_HISTORY, text)
         self.assertIn("2024-07-17", text)
         self.assertNotIn("기준 거래일=2024-07-17", text)
