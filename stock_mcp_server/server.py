@@ -58,7 +58,7 @@ from stock_mcp_server.market_clock import format_market_clock, get_market_clock 
 from stock_mcp_server.event_reaction import build_event_reaction, format_event_reaction
 from stock_mcp_server.status import build_status, format_status
 from stock_mcp_server import yfinance_source as us
-from stock_mcp_server.licensing import is_licensed, LOCKED_MESSAGE
+from stock_mcp_server.licensing import is_licensed, locked_message
 from stock_mcp_server._update_check import get_update_notice
 import asyncio
 import json
@@ -101,7 +101,7 @@ def safe_tool(func):
     @functools.wraps(func)
     async def wrapper(*args, **kwargs):
         if not is_licensed():
-            return LOCKED_MESSAGE
+            return locked_message()
         try:
             result = await func(*args, **kwargs)
         except httpx.TimeoutException:
@@ -1758,7 +1758,7 @@ def safe_us_tool(func):
     @functools.wraps(func)
     async def wrapper(*args, **kwargs):
         if not is_licensed():
-            return LOCKED_MESSAGE
+            return locked_message()
         try:
             return await func(*args, **kwargs)
         except httpx.TimeoutException:
