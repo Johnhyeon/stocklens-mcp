@@ -244,7 +244,7 @@ class EventReactionTests(unittest.TestCase):
         self.assertIsNone(reaction["basis_trading_date"])
         self.assertEqual(reaction["points"], {})
         self.assertEqual(validation["next_tradable_date_outside_window"], "2026-06-26")
-        self.assertIn("사건창 밖 거래 재개일", text)
+        self.assertIn("거래가 다시 시작된 날", text)
         self.assertNotIn("-49.52%", text)
         self.assertNotIn("기준 거래일=2026-06-26", text)
 
@@ -308,7 +308,7 @@ class EventReactionTests(unittest.TestCase):
             self.assertIsNone(reaction["flow"][key]["institutional"])
             self.assertIsNone(reaction["flow"][key]["foreign"])
             self.assertEqual(reaction["flow"][key]["days"], 0)
-        self.assertIn("해당 사건창 수급 데이터 없음", text)
+        self.assertIn("이 기간 수급 데이터 없음", text)
         self.assertNotIn("+0 |", text)
 
     def test_real_zero_flow_sum_stays_numeric_zero(self):
@@ -565,7 +565,7 @@ class EventReactionToolTests(unittest.IsolatedAsyncioTestCase):
                 code="005930", event_date="2026-05-15", before=5, after=5
             )
 
-        self.assertIn("해당 사건창 수급 데이터 없음", text)
+        self.assertIn("이 기간 수급 데이터 없음", text)
         self.assertIn("PROVIDER_ERROR", text)
 
     async def test_tool_rejects_malformed_event_date(self):

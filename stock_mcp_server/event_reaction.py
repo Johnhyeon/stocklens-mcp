@@ -25,7 +25,7 @@ PROVIDER_ERROR = "PROVIDER_ERROR"
 
 CODE_MESSAGES: dict[str, str] = {
     EVENT_BEFORE_PRICE_HISTORY: (
-        "이 종목의 주가를 위 구간부터만 가지고 있습니다. 그보다 이른 날짜라서, "
+        "이 종목 주가는 위에 적힌 기간부터만 가지고 있습니다. 그보다 이른 날짜라서, "
         "가지고 있는 첫 거래일로 슬쩍 옮겨 계산하지 않고 멈췄습니다."
     ),
     EVENT_AFTER_PRICE_HISTORY: (
@@ -33,14 +33,14 @@ CODE_MESSAGES: dict[str, str] = {
     ),
     NO_PRICE_HISTORY: "주가 데이터를 받지 못해 앞뒤 구간을 만들 수 없었습니다.",
     NO_TRADING_ACTIVITY: (
-        "이 사건 이후 구간에서 거래가 한 건도 없었습니다(거래량 0). 거래정지였거나 "
+        "입력한 날짜 이후 그 기간에 거래가 한 건도 없었습니다(거래량 0). 거래정지였거나 "
         "사려는 사람·팔려는 사람이 없던 구간으로, 주가가 안 움직인 것과는 다릅니다."
     ),
     INSUFFICIENT_POST_EVENT_HISTORY: (
-        "사건 뒤 거래된 날이 모자라 일부 시점은 등락률을 내지 못했습니다."
+        "기준 거래일 뒤로 거래된 날이 모자라 일부 시점은 등락률을 내지 못했습니다."
     ),
     FLOW_UNAVAILABLE_FOR_EVENT_WINDOW: (
-        "이 구간의 기관·외국인 수급이 없습니다(수급은 최근 60거래일까지만 조회합니다). "
+        "이 기간의 기관·외국인 수급이 없습니다(수급은 최근 60거래일까지만 조회합니다). "
         "순매매 0이 아니라 데이터가 없는 것입니다."
     ),
     PROVIDER_ERROR: "데이터를 불러오지 못했습니다. 데이터가 없는 것과는 다르며 재시도 대상입니다.",
@@ -476,9 +476,9 @@ _STATUS_LABELS = {
 }
 
 _ALIGNMENT_LABELS = {
-    ALIGN_EXACT: "사건일 당일 거래(exact)",
-    ALIGN_NEXT_SESSION: "휴장 이월 — 다음 거래일(next_trading_session)",
-    ALIGN_FIRST_TRADABLE: "사건일 무거래 — 거래 재개일(first_tradable_session_after_event)",
+    ALIGN_EXACT: "입력한 날짜에 거래가 있어 그대로 씀(exact)",
+    ALIGN_NEXT_SESSION: "입력한 날짜가 휴장일이라 다음 거래일로(next_trading_session)",
+    ALIGN_FIRST_TRADABLE: "그날 거래가 없어 다시 거래된 날로(first_tradable_session_after_event)",
 }
 
 
@@ -486,7 +486,7 @@ def _history_line(validation: dict) -> str:
     earliest = validation.get("earliest_available_date")
     latest = validation.get("latest_available_date")
     if not earliest or not latest:
-        return "보유 가격 데이터 없음"
+        return "가지고 있는 주가 없음"
     return f"{earliest} ~ {latest}"
 
 
@@ -495,7 +495,7 @@ def _format_unavailable(reaction: dict) -> str:
     codes = validation.get("codes") or []
     headline = next(
         (UNAVAILABLE_HEADLINES[c] for c in codes if c in UNAVAILABLE_HEADLINES),
-        "이 사건창은 계산할 수 없습니다",
+        "이 기간은 계산할 수 없습니다",
     )
     lines = [
         f"# 이벤트 반응 — {reaction['code']} (event_date={reaction['event_date']})",
@@ -504,25 +504,25 @@ def _format_unavailable(reaction: dict) -> str:
         "",
         "| 항목 | 값 |",
         "|---|---|",
-        f"| 검증 상태 | {_STATUS_LABELS['unavailable']} |",
-        f"| 사건일 | {reaction['event_date']} |",
-        f"| 보유 가격 데이터 구간 | {_history_line(validation)} |",
+        f"| 판정 | {_STATUS_LABELS['unavailable']} |",
+        f"| 입력한 날짜 | {reaction['event_date']} |",
+        f"| 가지고 있는 주가 기간 | {_history_line(validation)} |",
     ]
     gap = validation.get("history_gap_calendar_days")
     if gap is not None:
-        lines.append(f"| 사건일-데이터 경계 차이 | {gap:,}일 |")
+        lines.append(f"| 얼마나 벗어났나 | {gap:,}일 |")
     sessions = validation.get("no_trade_sessions")
     if sessions:
         last_close = validation.get("no_trade_last_close")
         detail = f"{sessions}거래일 내내 거래량 0"
         if validation.get("no_trade_close_unchanged") and last_close is not None:
             detail += f", 종가 {_fmt_int(last_close)}원 그대로"
-        lines.append(f"| 사건창 거래 상황 | {detail} |")
+        lines.append(f"| 그 기간 거래 상황 | {detail} |")
     resumed = validation.get("next_tradable_date_outside_window")
     if resumed:
         resumed_gap = _calendar_gap(resumed, validation.get("event_date"))
-        suffix = f" (사건일 +{resumed_gap:,}일)" if resumed_gap is not None else ""
-        lines.append(f"| 사건창 밖 거래 재개일 | {resumed}{suffix} |")
+        suffix = f" (입력한 날짜로부터 {resumed_gap:,}일 뒤)" if resumed_gap is not None else ""
+        lines.append(f"| 거래가 다시 시작된 날 | {resumed}{suffix} |")
     lines.extend(["", "## 사유", ""])
     for item in validation["messages"]:
         lines.append(f"- `{item['code']}` — {item['message']}")
@@ -535,13 +535,14 @@ def _format_unavailable(reaction: dict) -> str:
     )
     if resumed:
         lines.append(
-            "_거래가 다시 시작된 날은 이 사건창 밖입니다. 그 날의 등락은 이 사건에 대한 "
-            "반응이 아니라 거래 재개 자체로 생긴 가격 조정이라 기준일로 쓰지 않습니다._"
+            "_거래가 다시 시작된 날은 보시려는 전후 기간을 한참 벗어나 있습니다. 그 날의 "
+            "등락은 이 날짜에 대한 반응이 아니라 거래 재개 자체로 생긴 가격 조정이라 "
+            "기준 거래일로 쓰지 않습니다._"
         )
     elif EVENT_BEFORE_PRICE_HISTORY in codes:
         lines.append(
             "_이 도구는 일봉 500개(약 2년)까지만 봅니다. 그보다 오래된 날짜는 가지고 있는 "
-            "첫 거래일로 옮겨 계산하지 않습니다 — 다른 시기의 등락을 이 사건의 반응처럼 "
+            "첫 거래일로 옮겨 계산하지 않습니다 — 엉뚱한 시기의 등락을 이 날짜의 반응처럼 "
             "보여주게 되기 때문입니다._"
         )
     return "\n".join(lines)
@@ -611,7 +612,7 @@ def format_event_reaction(reaction: dict) -> str:
                 else "수급은 최근 60거래일까지만 조회합니다"
             )
             flow_notes.append(
-                f"- {label}: 해당 사건창 수급 데이터 없음 — {why} "
+                f"- {label}: 이 기간 수급 데이터 없음 — {why} "
                 f"(`{FLOW_UNAVAILABLE_FOR_EVENT_WINDOW}`)"
             )
 
@@ -623,27 +624,28 @@ def format_event_reaction(reaction: dict) -> str:
     lines.extend(
         [
             "",
-            "## 검증",
+            "## 판정",
             "",
             "| 항목 | 값 |",
             "|---|---|",
-            f"| 검증 상태 | "
+            f"| 판정 | "
             f"{_STATUS_LABELS.get(validation.get('status'), validation.get('status'))} |",
-            f"| 기준일 정렬 | {_ALIGNMENT_LABELS.get(validation.get('alignment_reason'), '-')} |",
-            f"| 사건일→기준 거래일 차이 | "
+            f"| 기준 거래일을 고른 방법 | "
+            f"{_ALIGNMENT_LABELS.get(validation.get('alignment_reason'), '-')} |",
+            f"| 입력한 날짜와 며칠 차이 | "
             f"{_fmt_int(validation.get('alignment_gap_calendar_days'))}일 |",
-            f"| 보유 가격 데이터 구간 | {_history_line(validation)} |",
+            f"| 가지고 있는 주가 기간 | {_history_line(validation)} |",
         ]
     )
     if validation.get("messages"):
-        lines.extend(["", "### 경고", ""])
+        lines.extend(["", "### 같이 봐두실 점", ""])
         for item in validation["messages"]:
             lines.append(f"- `{item['code']}` — {item['message']}")
 
     lines.append("")
     lines.append(
         "_시간축: event_date는 DartLens의 공시 접수일을 그대로 넘기는 필드입니다. "
-        "event_date가 휴장일이면 다음 거래일, 사건일에 거래가 없으면 거래가 재개된 "
+        "입력한 날짜가 휴장일이면 다음 거래일, 그날 거래가 없으면 거래가 다시 된 "
         "첫 날을 기준 거래일로 사용합니다._"
     )
     lines.append(
