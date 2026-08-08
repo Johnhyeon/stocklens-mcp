@@ -55,7 +55,12 @@ from stock_mcp_server._indicators import (
 )
 from stock_mcp_server._chart_html import render_chart_html, render_multi_chart_html
 from stock_mcp_server.market_clock import format_market_clock, get_market_clock as build_market_clock, KST
-from stock_mcp_server.event_reaction import build_event_reaction, format_event_reaction
+from stock_mcp_server.event_reaction import (
+    PROVIDER_ERROR,
+    build_event_reaction,
+    format_event_reaction,
+    normalize_date,
+)
 from stock_mcp_server.status import build_status, format_status
 from stock_mcp_server import yfinance_source as us
 from stock_mcp_server.licensing import is_licensed, locked_message
@@ -158,7 +163,10 @@ mcp = FastMCP(
 - `get_indicators`: **기술지표 판정값** (RSI/MACD/Phase 등 숫자+라벨)
 - `get_price`: **현재가 스냅샷** (단일 시점, 시계열 아님)
 - `get_event_reaction`: **event_date 기준 주가·수급 반응**. DartLens 공시 접수일을
-  event_date로 넘겨 공시 전후 거래일 반응을 확인할 때 사용
+  event_date로 넘겨 공시 전후 거래일 반응을 확인할 때 사용.
+  응답의 **검증 상태**를 먼저 보라 — `unavailable`이면 숫자가 아예 없다(보유 데이터 구간
+  밖 사건·전 구간 거래정지). 이때 "반응 없음/변동 없음"으로 서술하지 말고 측정 불가라고
+  말하라. `—` 표기와 `해당 사건창 수급 데이터 없음`은 0이 아니라 데이터 없음이다.
 
 ## ETF 도구
 - `get_etf_list`: ETF 목록 조회 + 카테고리 필터 + 이름 키워드 필터 + 정렬
@@ -578,6 +586,7 @@ async def get_flow(code: str, days: int = 20) -> str:
 
 
 _CODE_RE = re.compile(r"^[A-Za-z0-9]{6}$")
+_EVENT_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
 @mcp.tool()
@@ -595,6 +604,9 @@ async def get_event_reaction(
     (휴장일이면 다음 거래일 기준). "공시→주가/수급" 또는 "주가/수급 이상→해당 기간 공시 확인"
     시간축 정렬용 — 원인 단정·매수/매도 판단 아님.
 
+    분석 불가한 사건창(보유 데이터 구간 밖·전 구간 거래정지·수급 결측)은 숫자를 만들지 않고
+    `validation` 상태와 코드로 되돌린다. 데이터 없음은 0%·순매매 0으로 표기되지 않는다.
+
     Args:
         code: 종목코드 6자리 (예: "005930")
         event_date: 기준 날짜 YYYY-MM-DD 또는 YYYYMMDD. DartLens 공시 접수일 권장
@@ -604,15 +616,28 @@ async def get_event_reaction(
     if not _CODE_RE.match(code or ""):
         return "종목코드는 6자리 영숫자여야 합니다. 종목명이라면 먼저 search 도구로 코드를 확정하세요."
 
+    if not _EVENT_DATE_RE.match(normalize_date(event_date)):
+        return "event_date는 YYYY-MM-DD 또는 YYYYMMDD 형식이어야 합니다."
+
     before = max(0, min(int(before), 60))
     after = max(0, min(int(after), 60))
 
-    ohlcv = await get_ohlcv(code, "day", 500)
-    if not ohlcv:
-        return f"종목코드 {code}의 차트 데이터를 가져올 수 없습니다."
+    # 공급자 실패는 '사건 무반응'이 아니라 조회 실패로 구분해 되돌린다.
+    try:
+        ohlcv = await get_ohlcv(code, "day", 500)
+    except Exception as e:
+        return (
+            f"⚠️ `{PROVIDER_ERROR}` — 종목코드 {code}의 일봉 조회에 실패했습니다 "
+            f"({type(e).__name__}). 데이터 없음이 아니라 조회 실패이므로 재시도하세요."
+        )
 
+    # 수급은 최근 구간만 제공된다. 실패해도 주가 반응은 계산하되 결측으로 표시한다.
     flow_days = max(20, min(before + after + 10, 60))
-    flows = await get_investor_flow(code, flow_days)
+    flow_error = None
+    try:
+        flows = await get_investor_flow(code, flow_days)
+    except Exception as e:
+        flows, flow_error = [], type(e).__name__
 
     reaction = build_event_reaction(
         code=code,
@@ -621,6 +646,7 @@ async def get_event_reaction(
         flows=flows,
         before=before,
         after=after,
+        flow_error=flow_error,
     )
     return format_event_reaction(reaction)
 
