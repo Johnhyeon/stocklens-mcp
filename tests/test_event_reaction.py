@@ -217,6 +217,57 @@ class EventReactionTests(unittest.TestCase):
         self.assertNotIn("0.00%", text)
         self.assertIn("NO_TRADING_ACTIVITY", text)
 
+    def test_trading_resumed_outside_window_is_not_used_as_basis(self):
+        """사건창을 한참 지나 재개된 거래를 그 사건의 반응으로 정렬하지 않는다.
+
+        실데이터 회귀: 222160은 2024-06-28 사건 후 2026-06-26에 거래가 재개됐고,
+        수정 전에는 재개일(-49.52%)이 D+1로 표시됐다.
+        """
+        halted = [_bar(f"202406{d:02d}", 8040, 0) for d in range(24, 29)]
+        halted += [_bar(f"202407{d:02d}", 8040, 0) for d in range(1, 13)]
+        resumed = [_bar("20260626", 208, 6_361_145), _bar("20260629", 105, 4_340_924)]
+
+        reaction = build_event_reaction(
+            code="222160",
+            event_date="2024-06-28",
+            ohlcv=halted + resumed,
+            flows=[],
+            before=5,
+            after=10,
+        )
+        validation = reaction["validation"]
+        text = format_event_reaction(reaction)
+
+        self.assertEqual(validation["status"], "unavailable")
+        self.assertIn(NO_TRADING_ACTIVITY, validation["codes"])
+        self.assertIsNone(reaction["basis_trading_date"])
+        self.assertEqual(reaction["points"], {})
+        self.assertEqual(validation["next_tradable_date_outside_window"], "2026-06-26")
+        self.assertIn("사건창 밖 거래 재개일", text)
+        self.assertNotIn("-49.52%", text)
+        self.assertNotIn("기준 거래일=2026-06-26", text)
+
+    def test_short_halt_inside_window_still_computes(self):
+        """창 안에서 거래가 재개되면 정상적으로 기준일을 잡는다(과잉 차단 방지)."""
+        bars = [
+            _bar("20260511", 1000, 5000),
+            _bar("20260512", 1000, 0),  # 사건일 — 무거래
+            _bar("20260513", 1000, 0),
+            _bar("20260514", 1000, 0),
+            _bar("20260515", 940, 8000),  # 3세션 뒤 재개, 창(after=10) 안
+            _bar("20260518", 900, 7000),
+        ]
+
+        reaction = build_event_reaction(
+            code="005930", event_date="2026-05-12", ohlcv=bars, flows=[], before=1, after=10
+        )
+
+        self.assertEqual(reaction["basis_trading_date"], "2026-05-15")
+        self.assertEqual(
+            reaction["validation"]["alignment_reason"], "first_tradable_session_after_event"
+        )
+        self.assertAlmostEqual(reaction["points"]["D+1"]["return_pct"], -4.26)
+
     def test_insufficient_post_history_nulls_only_that_point(self):
         bars = _normal_bars()  # 2026-05-15 이후 거래일 5개뿐
 
@@ -405,6 +456,10 @@ class TwelveCaseFixtureTests(unittest.TestCase):
                     self.assertEqual(reaction["points"], {})
                     self.assertIsNone(reaction["volume"]["basis"])
                     self.assertIsNone(reaction["flow"]["post"]["institutional"])
+                    self.assertEqual(
+                        validation["next_tradable_date_outside_window"],
+                        expect.get("next_tradable_date_outside_window"),
+                    )
                     if "history_gap_calendar_days" in expect:
                         self.assertEqual(
                             validation["earliest_available_date"],

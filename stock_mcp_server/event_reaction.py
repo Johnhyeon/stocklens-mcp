@@ -34,7 +34,7 @@ CODE_MESSAGES: dict[str, str] = {
     ),
     NO_PRICE_HISTORY: "가격 데이터가 비어 있어 사건창을 구성할 수 없습니다.",
     NO_TRADING_ACTIVITY: (
-        "사건일 이후 조회 구간에 거래량이 양수인 거래일이 없습니다. "
+        "사건일 이후 요청한 사건창 안에 거래량이 양수인 거래일이 없습니다. "
         "거래정지·유동성 부재 가능성이며 시장 무반응과 다릅니다."
     ),
     INSUFFICIENT_POST_EVENT_HISTORY: (
@@ -202,6 +202,7 @@ def _validation(
     alignment_gap: int | None,
     alignment_reason: str | None,
     history_gap: int | None = None,
+    next_tradable_date: str | None = None,
 ) -> dict:
     return {
         "status": status,
@@ -214,6 +215,8 @@ def _validation(
         "alignment_gap_calendar_days": alignment_gap,
         "alignment_reason": alignment_reason,
         "history_gap_calendar_days": history_gap,
+        # 사건창 밖에서 거래가 재개된 경우의 첫 거래일 — 기준일로 쓰지 않는다.
+        "next_tradable_date_outside_window": next_tradable_date,
     }
 
 
@@ -227,6 +230,7 @@ def _unavailable(
     before: int,
     after: int,
     history_gap: int | None = None,
+    next_tradable_date: str | None = None,
 ) -> dict:
     """수익률·수급 숫자를 만들지 않는 응답 골격."""
     blocked_flow = {
@@ -254,6 +258,7 @@ def _unavailable(
             alignment_gap=None,
             alignment_reason=None,
             history_gap=history_gap,
+            next_tradable_date=next_tradable_date,
         ),
     }
 
@@ -321,9 +326,13 @@ def build_event_reaction(
         )
 
     # R2 — 가격 발견이 실제로 일어난 봉(거래량 > 0)만 기준일·오프셋 계산에 쓴다.
+    # 거래 재개는 **요청한 사건창(D0~D+after 세션) 안**에서만 인정한다. 2년 뒤 재개된
+    # 거래를 그 사건의 반응으로 정렬하면 무거래 0.00%와 똑같은 종류의 허위 분석이 된다.
     tradable = [row for row in bars if row["volume"] > 0]
-    basis = next((row for row in tradable if row["date"] >= target_date), None)
+    window_sessions = candidates[: max(1, after + 1)]
+    basis = next((row for row in window_sessions if row["volume"] > 0), None)
     if basis is None:
+        resumed = next((row["date"] for row in tradable if row["date"] >= target_date), None)
         return _unavailable(
             code=code,
             event_date=target_date,
@@ -332,6 +341,7 @@ def build_event_reaction(
             latest=latest,
             before=before,
             after=after,
+            next_tradable_date=resumed,
         )
 
     basis_date = basis["date"]
@@ -472,6 +482,11 @@ def _format_unavailable(reaction: dict) -> str:
     gap = validation.get("history_gap_calendar_days")
     if gap is not None:
         lines.append(f"| 사건일-데이터 경계 차이 | {gap:,}일 |")
+    resumed = validation.get("next_tradable_date_outside_window")
+    if resumed:
+        resumed_gap = _calendar_gap(resumed, validation.get("event_date"))
+        suffix = f" (사건일 +{resumed_gap:,}일)" if resumed_gap is not None else ""
+        lines.append(f"| 사건창 밖 거래 재개일 | {resumed}{suffix} |")
     lines.extend(["", "## 사유", ""])
     for item in validation["messages"]:
         lines.append(f"- `{item['code']}` — {item['message']}")
@@ -480,10 +495,18 @@ def _format_unavailable(reaction: dict) -> str:
             "",
             "_이 응답에는 D0/D+ 수익률, 기관·외국인 순매매 값이 없습니다. "
             "숫자가 없는 것은 반응이 0이라는 뜻이 아니라 측정 자체가 불가능하다는 뜻입니다._",
-            "_보유 구간 밖 사건은 첫 보유 거래일로 대체하지 않습니다. "
-            "더 이른 사건은 현재 조회 범위(일봉 500개)로 측정할 수 없습니다._",
         ]
     )
+    if resumed:
+        lines.append(
+            "_거래가 재개된 날은 사건창 밖입니다. 그 날의 등락은 이 사건의 반응이 아니라 "
+            "거래재개 자체의 가격 조정이므로 기준일로 쓰지 않습니다._"
+        )
+    else:
+        lines.append(
+            "_보유 구간 밖 사건은 첫 보유 거래일로 대체하지 않습니다. "
+            "더 이른 사건은 현재 조회 범위(일봉 500개)로 측정할 수 없습니다._"
+        )
     return "\n".join(lines)
 
 
