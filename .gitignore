@@ -50,5 +50,9 @@ tests/preview_output/
 # MCPB 빌드 산출물 (릴리즈 자산으로만 배포)
 *.mcpb
 
+# Sandbox 런타임 데이터 (코드는 추적, 캐시·산출물은 무시)
+sandbox/**/data/
+sandbox/**/.env
+
 # Claude Desktop scheduled tasks junk
 .claude/

@@ -3,7 +3,7 @@ import asyncio
 import sys
 
 sys.stdout.reconfigure(encoding="utf-8")
-sys.path.insert(0, "D:/project/stock-mcp-server")
+sys.path.insert(0, "D:/project/stocklens/mcp")
 
 from stock_mcp_server import naver, server
 

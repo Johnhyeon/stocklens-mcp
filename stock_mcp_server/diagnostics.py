@@ -242,13 +242,19 @@ def _check_command_available() -> DiagnosticCheck:
         for name in ("stocklens.exe", "stocklens"):
             candidate = bin_dir / name
             if candidate.exists():
+                # PATH에 없는 것 자체는 문제가 아니다 — MCP 등록이 절대경로로 이뤄지므로
+                # 그대로 동작한다. 예전엔 warn(critical)이라 멀쩡한 설치에도 카드가 계속
+                # "주의"로 남고, 정작 안내문에는 "무시 가능"이라고 적혀 있었다.
+                # 고칠 것도 없는데 고치라고 하면 진짜 경고까지 같이 안 믿게 된다.
                 return DiagnosticCheck(
                     id="COMMAND_AVAILABLE",
-                    status="warn",
+                    status="ok",
                     critical=True,
-                    summary="'stocklens' 커맨드는 존재하지만 PATH에 없습니다.",
-                    detail=[str(candidate)],
-                    fix=f'PATH에 "{bin_dir}" 추가 (또는 stocklens-setup이 절대경로로 등록하므로 무시 가능)',
+                    summary="'stocklens' 커맨드를 찾았습니다.",
+                    detail=[
+                        str(candidate),
+                        "PATH에는 없지만 MCP 등록은 이 절대경로로 하므로 그대로 쓰시면 됩니다.",
+                    ],
                 )
 
     try:

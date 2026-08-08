@@ -73,9 +73,30 @@ class Check:
         return self
 
 
+def _find_uv() -> str | None:
+    """uv 실행 파일 경로. PATH뿐 아니라 설치 스크립트가 실제로 두는 위치까지 본다.
+
+    PATH만 보면 오탐이 난다 — LeetKit Manager가 uv를 자동 설치해주면 uv는
+    `~/.local/bin`에 생기지만 설치 스크립트는 *영구* PATH(레지스트리)만 갱신하므로,
+    이미 실행 중인 프로세스에는 반영되지 않는다. 그 상태로 PATH만 확인하면 uv를
+    멀쩡히 갖고 있는 사람에게 "uv를 설치하세요"라고 계속 안내하게 된다(실제로
+    그렇게 떴다). DartLens·TelegramLens는 이미 이렇게 찾고 있었는데 여기만 빠져 있었다.
+    """
+    found = shutil.which("uv")
+    if found:
+        return found
+    home = Path.home()
+    for bin_dir in (home / ".local" / "bin", home / ".cargo" / "bin"):
+        for name in ("uv.exe", "uv"):
+            candidate = bin_dir / name
+            if candidate.exists():
+                return str(candidate)
+    return None
+
+
 def check_uv() -> Check:
     c = Check("uv (Python runtime manager)")
-    uv = shutil.which("uv")
+    uv = _find_uv()
     if uv:
         c.ok("uv is installed")
         c.info(f"Path:       {uv}")
@@ -123,14 +144,13 @@ def check_stocklens_command() -> Check:
         for name in ("stocklens.exe", "stocklens"):
             candidate = bin_dir / name
             if candidate.exists():
-                c.warn(
-                    "'stocklens' exists but not on PATH",
-                    fix=(
-                        f'Add to PATH: "{bin_dir}"\n'
-                        f'(or proceed — setup_claude will use absolute path)'
-                    ),
-                )
+                # PATH에 없는 것 자체는 문제가 아니다 — MCP 등록은 절대경로로 하므로
+                # 그대로 동작한다. 예전엔 warn이라 카드가 영영 "주의"로 남았는데,
+                # 정작 안내문에 "무시 가능"이라고 적혀 있는 경고였다.
+                c.ok("'stocklens' is installed")
                 c.info(f"Path:       {candidate}")
+                c.info("Not on PATH — MCP registration uses this absolute path, so no action is needed.")
+                c.info(f'Add "{bin_dir}" to PATH only if you want to type the command in a terminal.')
                 return c
 
     # 3) sysconfig scripts 디렉토리 (pip 설치 호환)
