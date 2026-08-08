@@ -451,6 +451,12 @@ def _fmt_pct(value: float | None) -> str:
     return f"{value:+.2f}%"
 
 
+_STATUS_LABELS = {
+    "usable": "쓸 수 있음(usable)",
+    "partial": "일부만 쓸 수 있음(partial)",
+    "unavailable": "측정 불가(unavailable)",
+}
+
 _ALIGNMENT_LABELS = {
     ALIGN_EXACT: "사건일 당일 거래(exact)",
     ALIGN_NEXT_SESSION: "휴장 이월 — 다음 거래일(next_trading_session)",
@@ -475,7 +481,7 @@ def _format_unavailable(reaction: dict) -> str:
         "",
         "| 항목 | 값 |",
         "|---|---|",
-        "| 검증 상태 | `unavailable` |",
+        f"| 검증 상태 | {_STATUS_LABELS['unavailable']} |",
         f"| 사건일 | {reaction['event_date']} |",
         f"| 보유 가격 데이터 구간 | {_history_line(validation)} |",
     ]
@@ -584,7 +590,8 @@ def format_event_reaction(reaction: dict) -> str:
             "",
             "| 항목 | 값 |",
             "|---|---|",
-            f"| 검증 상태 | `{validation.get('status')}` |",
+            f"| 검증 상태 | "
+            f"{_STATUS_LABELS.get(validation.get('status'), validation.get('status'))} |",
             f"| 기준일 정렬 | {_ALIGNMENT_LABELS.get(validation.get('alignment_reason'), '-')} |",
             f"| 사건일→기준 거래일 차이 | "
             f"{_fmt_int(validation.get('alignment_gap_calendar_days'))}일 |",
