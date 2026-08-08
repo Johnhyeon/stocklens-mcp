@@ -492,7 +492,7 @@ class TwelveCaseFixtureTests(unittest.TestCase):
                 # 사유별로 고객이 겪은 상황을 그대로 말한다 — 뭉뚱그린 "분석 불가" 금지.
                 headline = UNAVAILABLE_HEADLINES[case["expect"]["codes"][0]]
                 self.assertIn(headline, text)
-                self.assertIn("등락률·수급 숫자를 만들지 않았습니다", text)
+                self.assertIn("반응이 0이었다는 뜻이 아니라", text)
                 self.assertNotIn("0.00%", text)
                 self.assertNotIn("+0.00", text)
                 self.assertNotIn("기관 순매매", text)

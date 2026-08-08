@@ -25,16 +25,14 @@ PROVIDER_ERROR = "PROVIDER_ERROR"
 
 CODE_MESSAGES: dict[str, str] = {
     EVENT_BEFORE_PRICE_HISTORY: (
-        "이 종목 주가는 위에 적힌 기간부터만 가지고 있습니다. 그보다 이른 날짜라서, "
-        "가지고 있는 첫 거래일로 슬쩍 옮겨 계산하지 않고 멈췄습니다."
+        "가지고 있는 첫 거래일로 옮겨 계산하면 엉뚱한 시기의 등락을 이 날짜의 반응처럼 "
+        "보여주게 되어, 계산하지 않고 멈췄습니다."
     ),
-    EVENT_AFTER_PRICE_HISTORY: (
-        "이 날짜 이후의 거래일이 아직 없습니다. 앞날짜이거나 반응 구간이 아직 안 생겼습니다."
-    ),
-    NO_PRICE_HISTORY: "주가 데이터를 받지 못해 앞뒤 구간을 만들 수 없었습니다.",
+    EVENT_AFTER_PRICE_HISTORY: "앞날짜이거나, 아직 반응을 볼 기간이 안 생겼습니다.",
+    NO_PRICE_HISTORY: "주가를 한 건도 받지 못해 앞뒤 기간을 만들 수 없었습니다.",
     NO_TRADING_ACTIVITY: (
-        "입력한 날짜 이후 그 기간에 거래가 한 건도 없었습니다(거래량 0). 거래정지였거나 "
-        "사려는 사람·팔려는 사람이 없던 구간으로, 주가가 안 움직인 것과는 다릅니다."
+        "거래정지였거나 사려는 사람·팔려는 사람이 없던 기간입니다. "
+        "주가가 안 움직인 것과는 다릅니다."
     ),
     INSUFFICIENT_POST_EVENT_HISTORY: (
         "기준 거래일 뒤로 거래된 날이 모자라 일부 시점은 등락률을 내지 못했습니다."
@@ -500,7 +498,7 @@ def _format_unavailable(reaction: dict) -> str:
     lines = [
         f"# 이벤트 반응 — {reaction['code']} (event_date={reaction['event_date']})",
         "",
-        f"**{headline} — 등락률·수급 숫자를 만들지 않았습니다.**",
+        f"**{headline}.**",
         "",
         "| 항목 | 값 |",
         "|---|---|",
@@ -529,8 +527,7 @@ def _format_unavailable(reaction: dict) -> str:
     lines.extend(
         [
             "",
-            "_이 응답에는 등락률도, 기관·외국인 숫자도 없습니다. 반응이 0이었다는 뜻이 "
-            "아니라 계산할 재료가 없다는 뜻입니다._",
+            "_반응이 0이었다는 뜻이 아니라, 계산할 재료가 없다는 뜻입니다._",
         ]
     )
     if resumed:
@@ -541,9 +538,7 @@ def _format_unavailable(reaction: dict) -> str:
         )
     elif EVENT_BEFORE_PRICE_HISTORY in codes:
         lines.append(
-            "_이 도구는 일봉 500개(약 2년)까지만 봅니다. 그보다 오래된 날짜는 가지고 있는 "
-            "첫 거래일로 옮겨 계산하지 않습니다 — 엉뚱한 시기의 등락을 이 날짜의 반응처럼 "
-            "보여주게 되기 때문입니다._"
+            "_이 도구가 보는 주가는 일봉 500개(약 2년)까지입니다._"
         )
     return "\n".join(lines)
 
