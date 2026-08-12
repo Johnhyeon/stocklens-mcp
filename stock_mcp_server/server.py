@@ -125,7 +125,13 @@ def safe_tool(func):
             notice = await get_update_notice()
         except Exception:
             notice = ""
-        return result + notice if notice else result
+        if notice:
+            result = result + notice
+        # 체험 만료가 다가오면 한 줄 덧붙인다. 사람들은 LeetKit Manager를 잘 안 열어서,
+        # 그 화면에만 두면 기간이 끝나고 도구가 잠긴 뒤에야 알게 된다(trial_notice 참고).
+        from stock_mcp_server.trial_notice import append_notice
+
+        return append_notice(result)
 
     return wrapper
 

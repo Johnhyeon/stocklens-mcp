@@ -109,11 +109,14 @@ def _format_notice(latest: str, current: str, notes: str, test_mode: bool = Fals
             f"주요 변경:\n{notes_text}"
         )
 
+    # 안내는 LeetKit Manager 하나만 말한다. 예전엔 터미널 명령(`uv tool upgrade`)을
+    # 적어뒀는데, 주 고객층은 거기서 막힌다 — Manager가 있는 이유가 그 명령을 안 치게
+    # 하려는 것이다. 길이 둘이면 쉬운 쪽도 어려워 보인다.
     return (
         f"\n\n---\n"
         f"ℹ️ StockLens 업데이트 정보\n"
         f"새 버전: v{latest} (현재 v{current})\n"
-        f"업데이트: `uv tool upgrade stocklens-mcp`\n\n"
+        f"업데이트: LeetKit Manager를 열고 [지금 업데이트]를 눌러주세요.\n\n"
         f"주요 변경:\n{notes_text}"
     )
 
