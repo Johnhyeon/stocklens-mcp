@@ -42,11 +42,11 @@ def _shown() -> set[int]:
         return set()
 
 
-def _mark(milestone: int) -> None:
+def _mark(milestones: set[int]) -> None:
     try:
         path = _state_path()
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps({"shown": sorted(_shown() | {milestone})}), encoding="utf-8")
+        path.write_text(json.dumps({"shown": sorted(_shown() | milestones)}), encoding="utf-8")
     except OSError:
         pass  # 못 적으면 다음에 또 뜰 뿐이다 — 도구 응답을 막을 이유는 없다
 
@@ -68,12 +68,16 @@ def pending_notice() -> str | None:
         if left < 0:
             return None  # 이미 끝났으면 잠금 안내가 따로 나간다
 
+        # 지금 지나쳐 있는 시점들을 한꺼번에 처리한다. 하나씩 소진하면, 7일을 건너뛰고
+        # 3일째에 처음 쓴 사람에게 같은 안내가 연달아 두 번 나간다(7이 먼저 걸려 뜨고,
+        # 바로 다음 호출에서 4가 또 걸린다). 지난 시점은 지난 것이므로 한 번만 말하고
+        # 전부 닫는다 — 남은 안내는 그 아래(1일)뿐이다.
         shown = _shown()
-        for milestone in _MILESTONES:
-            if left <= milestone and milestone not in shown:
-                _mark(milestone)
-                return _format(left, expiry)
-        return None
+        due = {m for m in _MILESTONES if left <= m} - shown
+        if not due:
+            return None
+        _mark(due)
+        return _format(left, expiry)
     except Exception:
         return None
 

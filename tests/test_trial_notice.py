@@ -80,6 +80,22 @@ class TestTiming:
         first = N.pending_notice()
         assert first is not None and "2일 남았습니다" in first
 
+    def test_skipped_milestones_do_not_stack(self, trial):
+        """7일을 건너뛰고 3일째에 처음 쓰면, 예전엔 7이 먼저 걸려 뜨고 바로 다음
+        호출에서 4가 또 걸려 같은 안내가 연달아 두 번 나갔다. 지난 시점은 지난
+        것이므로 한 번만 말하고 전부 닫는다."""
+        trial(3)
+        assert N.pending_notice() is not None
+        for _ in range(5):
+            assert N.pending_notice() is None
+
+    def test_the_last_milestone_still_fires_after_a_skip(self, trial):
+        """한꺼번에 닫되 아직 안 지난 시점(1일)까지 삼키면 안 된다."""
+        trial(3)
+        N.pending_notice()
+        trial(1)
+        assert "1일 남았습니다" in N.pending_notice()
+
     def test_last_day_says_today(self, trial):
         trial(0)
         assert "오늘까지입니다" in N.pending_notice()
