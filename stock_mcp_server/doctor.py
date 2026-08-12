@@ -318,6 +318,18 @@ def check_license() -> Check:
         )
         return c
 
+    reason = licensing.license_block_reason()
+    if reason in ("expired", "revoked", "clock"):
+        c.fail(
+            {
+                "expired": "License has expired",
+                "revoked": "License has been revoked",
+                "clock": "System clock is set in the past",
+            }[reason],
+            fix="stocklens-activate <라이선스-키>" if reason == "expired" else None,
+        )
+        return c
+
     c.ok("License active")
     license_id = res.get("license_id") or ""
     if license_id:
