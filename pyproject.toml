@@ -1,6 +1,6 @@
 [project]
 name = "stocklens-mcp"
-version = "0.6.2"
+version = "0.6.3"
 description = "StockLens — AI가 진짜 데이터로 분석합니다. 한국·미국 주식 + ETF MCP 서버 (차트, 수급, 재무, 실적, 배당, 스크리닝, Excel)"
 readme = "README.md"
 license = { text = "Proprietary" }
@@ -37,6 +37,9 @@ dependencies = [
     "yfinance>=0.2.40",
     "cryptography>=42.0.0",
     "tomlkit>=0.12",
+    # TLS 검증에 OS 인증서 저장소를 쓴다. 백신·회사망 프록시가 TLS를 가로채는 PC에서
+    # certifi 번들만 믿으면 전부 CERTIFICATE_VERIFY_FAILED 로 죽는다(_http.py 참고).
+    "truststore>=0.9",
 ]
 
 [project.urls]
