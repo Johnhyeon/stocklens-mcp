@@ -401,6 +401,11 @@ def main():
     except Exception:
         pass
 
+    # 서버와 같은 TLS 기준으로 진단한다.
+    from stock_mcp_server import _tls
+
+    _tls.apply()
+
     args = _build_parser().parse_args()
 
     if args.json:

@@ -9,9 +9,16 @@ import re
 from datetime import datetime
 from pathlib import Path
 
-import httpx
+# TLS 신뢰 기준(OS 인증서 저장소)을 다른 무엇보다 먼저 세운다. 순서가 중요하다 —
+# yfinance(curl_cffi)는 첫 요청 때 환경변수를 읽고, httpx 클라이언트도 이 기준으로
+# 만들어진다. 아래 import 들보다 뒤로 밀면 미국 주식 도구만 조용히 옛 기준으로 남는다.
+from stock_mcp_server import _tls as _tls_bootstrap
 
-from mcp.server.fastmcp import FastMCP
+_tls_bootstrap.apply()
+
+import httpx  # noqa: E402
+
+from mcp.server.fastmcp import FastMCP  # noqa: E402
 from stock_mcp_server.naver import (
     search_stock as naver_search_stock,
     get_ohlcv,

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import base64
 import secrets
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
@@ -11,6 +11,13 @@ from stock_mcp_server import licensing as L
 from stock_mcp_server import trial_notice as N
 
 _EPOCH = date(1970, 1, 1)
+
+
+def _today() -> date:
+    """오늘 날짜를 UTC 로 센다 — `trial_notice._days_left` 가 UTC 로 세기 때문이다.
+    로컬 날짜를 쓰면 KST 00~09시에만 하루가 어긋나 "4일 남음"이 "5일 남음"으로 나온다.
+    """
+    return datetime.now(timezone.utc).date()
 
 
 @pytest.fixture
@@ -25,7 +32,7 @@ def trial(tmp_path, monkeypatch):
     def use(days_left: int | None) -> None:
         payload = L.PRODUCT + secrets.token_bytes(6)
         if days_left is not None:
-            expiry = date.today() + timedelta(days=days_left)
+            expiry = _today() + timedelta(days=days_left)
             payload += ((expiry - _EPOCH).days).to_bytes(4, "big")
         raw = payload + priv.sign(payload)
         key = base64.b32encode(raw).decode().rstrip("=")

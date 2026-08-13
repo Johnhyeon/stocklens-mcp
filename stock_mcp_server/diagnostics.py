@@ -639,6 +639,12 @@ async def run_diagnostics_async(*, online: bool = False) -> DiagnosticReport:
     """`run_diagnostics`의 async 코어. 이미 실행 중인 이벤트 루프(예: MCP 도구)
     안에서는 이 쪽을 직접 await 한다 — `run_diagnostics()`는 내부에서
     `asyncio.run()`을 쓰므로 루프 안에서 부르면 RuntimeError가 난다."""
+    # 서버와 같은 TLS 기준으로 본다. 이게 없으면 진단은 통과하는데 서버는 실패하는,
+    # 가장 나쁜 종류의 어긋남이 생긴다 — 2026-08-13 문의에서 실제로 그랬다.
+    from stock_mcp_server import _tls
+
+    _tls.apply()
+
     start = time.monotonic()
 
     try:
