@@ -136,8 +136,13 @@ def safe_tool(func):
             return locked_message()
         try:
             result = await func(*args, **kwargs)
-        except httpx.TimeoutException:
-            return "⚠️ 네이버 증권 응답이 지연되고 있습니다. 잠시 후 다시 시도해주세요."
+        except httpx.TimeoutException as e:
+            # ConnectError/HTTPError에는 원인을 붙였는데 이 분기만 빠뜨렸었다 —
+            # 어떤 요청이 얼마나 걸리다 잘렸는지 알 수 없으면 똑같이 손을 못 쓴다.
+            return (
+                "⚠️ 네이버 증권 응답이 지연되고 있습니다. 잠시 후 다시 시도해주세요.\n"
+                f"(원인: {_cause_text(e)})"
+            )
         except httpx.ConnectError as e:
             # 원인을 같이 적는다. 예전엔 이 한 줄로 뭉갰는데, 실제 문의(2026-08-13,
             # 뉴질랜드 사용자)에서 연결 실패가 3시간 내내 100% 재현되는데도 원인을
