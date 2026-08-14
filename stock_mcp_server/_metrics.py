@@ -151,7 +151,12 @@ def track_metrics(tool_name: str) -> Callable:
                 if result is not None:
                     result_text = str(result)
                 return result
-            except Exception as e:
+            # BaseException 까지 잡는 이유: asyncio.CancelledError 는 Exception 이
+            # 아니라 BaseException 이다. 클라이언트가 느린 호출을 취소하면 예전엔
+            # error=null, output_chars=0 으로 기록돼 **성공한 것처럼** 보였다.
+            # corpCode 같은 벌크 다운로드는 취소될 여지가 실제로 있다. 잡아서
+            # 기록만 하고 그대로 다시 올린다(흐름은 바뀌지 않는다).
+            except BaseException as e:
                 error_type = type(e).__name__
                 # 타입만 남기면 "ConnectError"가 전부라 원인을 못 좁힌다 — 이름 조회
                 # 실패인지·거부인지·프록시인지에 따라 사용자가 할 일이 완전히 다르다
