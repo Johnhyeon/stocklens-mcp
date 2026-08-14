@@ -83,11 +83,23 @@ class SearchStockTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(results, [])
 
-    async def test_network_failure_returns_empty_list(self) -> None:
+    async def test_network_failure_is_not_disguised_as_no_results(self) -> None:
+        """예전엔 여기서 []를 돌려줬다. 그러면 네이버에 아예 못 붙는 PC에서도 화면에는
+        "종목을 찾을 수 없습니다"만 뜬다 — 2026-08-13 문의에서 고객은 종목명만 바꿔가며
+        재시도했고, 기록에도 error=null 로 남아 우리도 성공한 호출로 읽었다.
+        '못 찾음'과 '못 물어봄'은 사용자가 할 일이 다르므로 구분해서 올린다."""
         with patch.object(naver, "fetch", AsyncMock(side_effect=ConnectionError("boom"))):
-            results = await naver.search_stock("삼성전자")
+            with self.assertRaises(ConnectionError):
+                await naver.search_stock("삼성전자")
 
-        self.assertEqual(results, [])
+    async def test_non_json_body_is_still_treated_as_no_results(self) -> None:
+        """200인데 JSON이 아니면 네이버가 형식을 바꾼 것 — 그건 조회 실패가 아니다."""
+        class _Bad:
+            def json(self):
+                raise ValueError("not json")
+
+        with patch.object(naver, "fetch", AsyncMock(return_value=_Bad())):
+            self.assertEqual(await naver.search_stock("삼성전자"), [])
 
 
 if __name__ == "__main__":

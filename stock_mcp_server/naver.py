@@ -38,10 +38,15 @@ async def search_stock(query: str) -> list[dict]:
     """
     url = "https://m.stock.naver.com/front-api/search/autoComplete"
     params = {"query": query, "target": "stock"}
+    # 연결 실패를 삼키지 않는다. 예전엔 여기서 통째로 []를 돌려줘서, 네이버에 아예
+    # 못 붙는 PC에서도 화면에는 "종목을 찾을 수 없습니다"만 떴다 — 2026-08-13 문의에서
+    # 고객이 종목명만 바꿔가며 재시도했고, 기록에도 error=null 로 남아 우리도 성공한
+    # 호출로 읽었다. 네트워크 오류는 safe_tool 이 원인까지 붙여 안내한다.
+    resp = await fetch(url, params=params)
     try:
-        resp = await fetch(url, params=params)
         data = resp.json()
     except Exception:
+        # 200인데 JSON이 아니면 네이버가 형식을 바꾼 것 — '검색 결과 없음'이 맞다.
         return []
 
     if not data.get("isSuccess"):
@@ -574,6 +579,27 @@ async def get_sector_stocks(sector_name: str, count: int = 30) -> dict:
     }
 
 
+def _raise_if_all_failed(
+    ok: list, codes: list[str], failures: list[Exception]
+) -> None:
+    """배치에서 한 건도 못 건졌고 그게 전부 예외 때문이면, 그대로 올린다.
+
+    배치 도구는 종목 하나가 실패해도 나머지를 살리려고 예외를 삼킨다 — 상장폐지·
+    거래정지처럼 정상적인 이유가 있기 때문이다. 그런데 네트워크가 통째로 죽으면
+    전부 삼켜져서 빈 리스트가 나오고, 화면에는 "조회 결과 없음"이 뜬다. 2026-08-13
+    문의에서 실제로 이렇게 나갔다(get_multi_stocks 가 output_chars=18 로 기록됐고
+    error 는 null 이었다 — 우리도 성공한 호출로 읽었다).
+
+    '요청한 게 있는데 하나도 못 건졌고, 실패가 요청 수만큼 쌓였다'면 그건 결과가
+    없는 게 아니라 조회가 안 된 것이다. safe_tool 이 원인을 붙여 안내한다.
+    """
+    if ok or not codes:
+        return
+    if len(failures) < len(codes):
+        return  # 예외 없이 걸러진 것들 — 진짜로 자료가 없는 경우
+    raise failures[0]
+
+
 async def get_multi_stocks(codes: list[str]) -> list[dict]:
     """여러 종목의 기본 정보를 한 번에 병렬로 가져옵니다.
 
@@ -588,6 +614,8 @@ async def get_multi_stocks(codes: list[str]) -> list[dict]:
     """
     # 최대 30개 제한 (네이버 rate limit 및 응답 크기 제어)
     codes = codes[:30]
+
+    failures: list[Exception] = []
 
     async def fetch_one(code: str) -> dict | None:
         try:
@@ -612,11 +640,16 @@ async def get_multi_stocks(codes: list[str]) -> list[dict]:
                 "change_rate": change_rate,
                 "volume": data.get("volume", 0),
             }
-        except Exception:
+        except Exception as e:
+            # 한 종목이 실패했다고 배치 전체를 죽이지 않는다(상장폐지·거래정지 등).
+            # 다만 무엇이 실패했는지는 남겨서, 아래에서 '전부 실패'를 가려낸다.
+            failures.append(e)
             return None
 
     results = await asyncio.gather(*[fetch_one(code) for code in codes])
-    return [r for r in results if r is not None]
+    ok = [r for r in results if r is not None]
+    _raise_if_all_failed(ok, codes, failures)
+    return ok
 
 
 async def scan_stocks_to_snapshot(
@@ -765,6 +798,7 @@ async def get_multi_chart_stats(
         }
     """
     codes = codes[:100]  # 최대 100개
+    failures: list[Exception] = []
 
     async def fetch_one(code: str) -> dict | None:
         try:
@@ -814,11 +848,14 @@ async def get_multi_chart_stats(
                 "period_return_pct": round(period_return_pct, 2),
                 "avg_volume": avg_volume,
             }
-        except Exception:
+        except Exception as e:
+            failures.append(e)
             return None
 
     results = await asyncio.gather(*[fetch_one(c) for c in codes])
-    return [r for r in results if r is not None]
+    ok = [r for r in results if r is not None]
+    _raise_if_all_failed(ok, codes, failures)
+    return ok
 
 
 def _market_to_sosok(market: str) -> str | None:
