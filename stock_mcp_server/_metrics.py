@@ -3,7 +3,8 @@
 각 도구 호출 시 JSONL 파일에 기록한다.
 추후 get_metrics_summary 도구로 집계/분석 가능.
 
-저장 위치: ~/Downloads/kstock/logs/metrics_YYYYMMDD.jsonl
+저장 위치: ~/.stocklens/logs/metrics_YYYYMMDD.jsonl
+          (2026-08 이전: ~/Downloads/kstock/logs/ — 기존 사용자 것은 읽기만 계속한다)
 
 기록 항목:
 - timestamp: 호출 시각
@@ -97,12 +98,48 @@ def estimate_tokens(text: str) -> int:
     return len(text) // 3
 
 
-def get_metrics_dir() -> Path:
-    """로그 저장 폴더. ~/Downloads/kstock/logs/"""
+def _state_home() -> Path:
+    """앱 상태 폴더. licensing._home()과 같은 규칙(STOCKLENS_HOME 존중)."""
+    import os
+
+    base = os.environ.get("STOCKLENS_HOME")
+    return Path(base) if base else (Path.home() / ".stocklens")
+
+
+def _legacy_metrics_dir() -> Path:
+    """2026-08 이전에 쓰던 자리. 읽기만 한다."""
     from stock_mcp_server._excel import get_snapshot_dir
-    folder = get_snapshot_dir() / "logs"
+
+    return get_snapshot_dir() / "logs"
+
+
+def get_metrics_dir() -> Path:
+    """로그 저장 폴더. ~/.stocklens/logs/
+
+    예전에는 엑셀 저장 폴더(~/Downloads/kstock/)에 얹어 썼다. 그 폴더가 Downloads에
+    있는 건 '사용자가 내보낸 엑셀을 찾을 수 있게'라는 이유였고 그건 지금도 맞다.
+    문제는 사용자가 열 일 없는 진단 로그까지 거기 쌓았다는 것이다 — Downloads는
+    사람들이 주기적으로 비우는 폴더라, 정리 한 번에 지원 문의 때 필요한 기록이
+    통째로 날아간다(실측 42MB·81일치). DartLens는 처음부터 ~/.dartlens/logs 를
+    썼으므로 여기서 그쪽에 맞춘다.
+    """
+    folder = _state_home() / "logs"
     folder.mkdir(parents=True, exist_ok=True)
     return folder
+
+
+def get_metrics_dirs() -> list[Path]:
+    """읽을 때 훑을 폴더들 — 새 위치 먼저, 옛 위치 나중.
+
+    기존 사용자의 로그는 옛 위치에 그대로 있다. 옮기지 않는다: 42MB를 복사하다
+    실패하면 하필 지원 문의에 필요한 자료가 반쯤 날아가는데, 얻는 건 없다.
+    새 기록만 새 자리에 쌓고 읽을 때 둘 다 보면 아무도 아쉬울 일이 없다.
+    """
+    dirs = [get_metrics_dir()]
+    legacy = _legacy_metrics_dir()
+    if legacy not in dirs:
+        dirs.append(legacy)
+    return dirs
 
 
 def get_metrics_file() -> Path:
@@ -199,18 +236,26 @@ def load_metrics(days: int = 1) -> list[dict]:
     records: list[dict] = []
     today = datetime.now()
 
+    folders = get_metrics_dirs()
     for i in range(days):
         date = today - timedelta(days=i)
         date_str = date.strftime("%Y%m%d")
-        file_path = get_metrics_dir() / f"metrics_{date_str}.jsonl"
-        if not file_path.exists():
-            continue
-        with open(file_path, "r", encoding="utf-8") as f:
-            for line in f:
-                try:
-                    records.append(json.loads(line))
-                except json.JSONDecodeError:
-                    continue
+        # 같은 날짜 파일은 한 곳에만 있다(새 기록은 새 자리에만 쌓인다). 옮기던 날
+        # 양쪽에 걸쳐 있을 수는 있으므로, 먼저 찾은 쪽(새 위치)만 쓰고 멈춘다.
+        for folder in folders:
+            file_path = folder / f"metrics_{date_str}.jsonl"
+            if not file_path.exists():
+                continue
+            try:
+                with open(file_path, "r", encoding="utf-8") as f:
+                    for line in f:
+                        try:
+                            records.append(json.loads(line))
+                        except json.JSONDecodeError:
+                            continue
+            except OSError:
+                continue  # 권한 등 — 못 읽는 폴더 때문에 전체가 실패하면 안 된다
+            break
 
     return records
 

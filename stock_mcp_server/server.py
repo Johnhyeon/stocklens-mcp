@@ -1617,7 +1617,8 @@ async def get_metrics_summary(days: int = 1) -> str:
     - 에러 발생 횟수
     를 보여줍니다.
 
-    로그 파일 위치: ~/Downloads/kstock/logs/metrics_YYYYMMDD.jsonl
+    로그 파일 위치: ~/.stocklens/logs/metrics_YYYYMMDD.jsonl
+    (2026-08 이전 기록은 ~/Downloads/kstock/logs/ 에 있고, 그것도 같이 읽습니다)
 
     Args:
         days: 조회할 일수 (기본 1, 오늘만. 최대 30)

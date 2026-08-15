@@ -401,7 +401,9 @@ def _license_summary() -> LicenseSummary:
 
     license_id = res.get("license_id") or ""
     masked = licensing.mask_tail(license_id.upper()) if license_id else None
-    expiry = res.get("expires_on")
+    # 키에 박힌 날짜가 아니라 실제로 끝나는 날. 이 값이 매니저의 "N일 남음" 배지로
+    # 그대로 나가므로, 서명 날짜를 쓰면 "12월까지"라고 안내해놓고 9월에 잠긴다.
+    expiry = licensing.effective_expiry(res)
     # 키는 진짜지만 지금 못 쓰는 경우(기간 종료·폐기·시계 되돌림)를 그대로 드러낸다.
     reason = licensing.license_block_reason()
     return LicenseSummary(
