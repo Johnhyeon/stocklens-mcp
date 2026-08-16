@@ -343,3 +343,78 @@ class OverseasViewerTests(unittest.TestCase):
     def test_viewer_tz_none_for_same_offset(self):
         seoul_now = datetime.now(rmeta.KST)
         self.assertIsNone(rmeta.viewer_tz(seoul_now))
+
+
+# ---------------------------------------------------------------------------
+# 7. 서머타임 — 전환 자체보다 '예고 없음'이 문제였다
+# ---------------------------------------------------------------------------
+
+
+class DaylightSavingTests(unittest.TestCase):
+    """DST 규칙은 코드에 박지 않고 tzinfo를 탐침한다.
+
+    미국은 2007년에 전환일을 옮겼고 EU는 폐지를 논의 중이다. 하드코딩하면 그날
+    조용히 1시간 틀린다. 그래서 규칙이 아니라 IANA 데이터베이스를 직접 본다.
+    """
+
+    def _clock(self, when, viewer_tz="Asia/Seoul"):
+        from zoneinfo import ZoneInfo
+        from stock_mcp_server import market_clock as mc
+        original = mc.viewer_now
+        try:
+            mc.viewer_now = lambda: datetime.now(ZoneInfo(viewer_tz))
+            return mc.get_market_clock(when)
+        finally:
+            mc.viewer_now = original
+
+    def test_finds_us_transition_without_hardcoding_rules(self):
+        from stock_mcp_server import market_clock as mc
+        ch = mc.next_offset_change(mc.ET, datetime(2026, 10, 20, tzinfo=mc.KST))
+        self.assertEqual(ch["at"][:10], "2026-11-01")   # 11월 첫째 일요일
+        self.assertEqual(ch["shift_minutes"], -60)
+        self.assertEqual(ch["kind"], "end")
+
+    def test_korea_has_no_dst(self):
+        """한국은 서머타임이 없다. '없다'가 명시돼야 가정이 안 생긴다."""
+        from stock_mcp_server import market_clock as mc
+        self.assertIsNone(mc.next_offset_change(mc.KST, datetime(2026, 3, 1, tzinfo=mc.KST)))
+        self.assertFalse(self._clock(datetime(2026, 8, 16, 10, tzinfo=mc.KST))["dst"]["krx"]["has_dst"])
+
+    def test_us_open_shifts_one_hour_in_kst(self):
+        """한국 사용자가 가장 자주 겪는 혼란 — 미국장이 22:30에서 23:30으로 밀린다."""
+        from stock_mcp_server import market_clock as mc
+        d = self._clock(datetime(2026, 10, 20, 10, tzinfo=mc.KST))["dst"]["us"]
+        self.assertTrue(d["imminent"])
+        self.assertEqual(d["cause"], "market")
+        self.assertEqual((d["open_in_viewer_now"], d["open_in_viewer_after"]), ("22:30", "23:30"))
+
+    def test_viewer_side_transition_also_shifts_krx_open(self):
+        """시드니 사용자는 한국장(서머타임 없음)을 보는데도 자기 지역 전환으로
+        개장이 10:00 → 11:00으로 바뀐다. 시장 쪽만 보면 이걸 놓친다."""
+        from stock_mcp_server import market_clock as mc
+        d = self._clock(datetime(2026, 10, 1, 10, tzinfo=mc.KST), "Australia/Sydney")["dst"]["krx"]
+        self.assertTrue(d["has_dst"])
+        self.assertFalse(d["market_has_dst"])      # KRX 자체는 DST 없음
+        self.assertEqual(d["cause"], "viewer")
+        self.assertEqual((d["open_in_viewer_now"], d["open_in_viewer_after"]), ("10:00", "11:00"))
+
+    def test_no_warning_when_transition_is_far(self):
+        """평소에는 아무 말도 하지 않아야 한다. 항상 뜨는 경고는 무시된다."""
+        from stock_mcp_server import market_clock as mc
+        clock = self._clock(datetime(2026, 8, 16, 10, tzinfo=mc.KST))
+        self.assertEqual(mc.dst_warnings(clock), [])
+
+    def test_warning_names_the_new_time(self):
+        from stock_mcp_server import market_clock as mc
+        msgs = mc.dst_warnings(self._clock(datetime(2026, 10, 20, 10, tzinfo=mc.KST)))
+        self.assertTrue(any("23:30" in m and "22:30" in m for m in msgs), msgs)
+
+    def test_countdown_correct_across_transition(self):
+        """전환을 건너뛰는 카운트다운은 실제 경과 시간이어야 한다(벽시계 아님)."""
+        from stock_mcp_server import market_clock as mc
+        before = self._clock(datetime(2026, 10, 30, 20, tzinfo=mc.KST))["us"]
+        after = self._clock(datetime(2026, 11, 2, 20, tzinfo=mc.KST))["us"]
+        self.assertEqual(before["next_open_local"][11:16], "09:30")
+        self.assertEqual(after["next_open_local"][11:16], "09:30")   # ET 벽시계는 동일
+        self.assertIn("-04:00", before["next_open_local"])            # EDT
+        self.assertIn("-05:00", after["next_open_local"])             # EST

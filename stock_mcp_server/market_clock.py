@@ -4,11 +4,16 @@ from __future__ import annotations
 import calendar
 import json
 from dataclasses import dataclass
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
 
+UTC = timezone.utc
 KST = ZoneInfo("Asia/Seoul")
 ET = ZoneInfo("America/New_York")
+
+# 서머타임 전환을 며칠 전부터 미리 알릴지. 전환 당일에 알면 이미 늦다 —
+# 한국 사용자가 미국장 보려고 22:30에 켰는데 안 열려 있는 식이 된다.
+DST_NOTICE_DAYS = 14
 
 
 def viewer_now() -> datetime:
@@ -19,6 +24,50 @@ def viewer_now() -> datetime:
     그래서 시장 시각과 사용자 현지 시각을 같이 낸다.
     """
     return datetime.now().astimezone()
+
+
+def next_offset_change(tz, after: datetime, horizon_days: int = 400) -> dict | None:
+    """`after` 이후 그 타임존의 UTC 오프셋이 바뀌는 첫 시점 (= 서머타임 전환).
+
+    **DST 규칙을 코드에 박지 않는다.** 미국은 2007년에 전환일을 옮겼고 EU는 폐지를
+    계속 논의 중이다. 규칙을 하드코딩하면 그날 조용히 1시간 틀린다. 대신 tzinfo를
+    직접 탐침해서 IANA 데이터베이스가 갱신되면 자동으로 따라가게 한다.
+
+    하루 단위로 훑어 바뀌는 구간을 찾고 그 안을 이분 탐색으로 좁힌다.
+    한국(Asia/Seoul)은 현재 서머타임이 없어 None이 나온다.
+    """
+    base_utc = after.astimezone(UTC)
+    current = base_utc.astimezone(tz).utcoffset()
+
+    lo = base_utc
+    hi = None
+    for step in range(1, horizon_days + 1):
+        probe = base_utc + timedelta(days=step)
+        if probe.astimezone(tz).utcoffset() != current:
+            hi = probe
+            break
+        lo = probe
+    if hi is None:
+        return None
+
+    while (hi - lo) > timedelta(minutes=1):
+        mid = lo + (hi - lo) / 2
+        if mid.astimezone(tz).utcoffset() == current:
+            lo = mid
+        else:
+            hi = mid
+
+    at = hi.astimezone(tz)
+    shift = int((at.utcoffset() - current).total_seconds() // 60)
+    return {
+        "at": at.isoformat(timespec="minutes"),
+        "days_until": max(0, (hi - base_utc).days),
+        "shift_minutes": shift,
+        "from_abbr": base_utc.astimezone(tz).tzname() or "",
+        "to_abbr": at.tzname() or "",
+        # 서머타임 '시작'이면 오프셋이 커지고(+60), '해제'면 작아진다(-60).
+        "kind": "start" if shift > 0 else "end",
+    }
 
 
 def _fmt_duration(seconds: float | None) -> str | None:
@@ -117,7 +166,9 @@ def get_market_clock(now: datetime | None = None) -> dict:
         holiday_name_func=_us_holiday_name,
     )
     viewer = base.astimezone(viewer_now().tzinfo)
+    dst = _dst_outlook(base, viewer, {"krx": (KST, krx), "us": (ET, us)})
     return {
+        "dst": dst,
         "source": "stocklens.market_clock",
         "now_kst": now_kst.isoformat(timespec="seconds"),
         "now_et": now_et.isoformat(timespec="seconds"),
@@ -135,6 +186,79 @@ def get_market_clock(now: datetime | None = None) -> dict:
             "Unexpected exchange closures are not knowable until the exchange announces them.",
         ],
     }
+
+
+def _open_time_in(tz, market_tz, on_day: date, open_time: time) -> str:
+    """특정 날짜의 개장 시각을 다른 타임존으로 환산해 'HH:MM' 로."""
+    dt = datetime.combine(on_day, open_time, tzinfo=market_tz)
+    return dt.astimezone(tz).strftime("%H:%M")
+
+
+def _dst_outlook(now: datetime, viewer: datetime, markets: dict) -> dict:
+    """서머타임 전환 예보.
+
+    전환 자체는 ZoneInfo가 알아서 처리하므로 계산은 이미 맞다. 문제는 **예고가
+    없다는 것**이다. 10/30에 "미국장 22:30 개장"이라 답하고 사흘 뒤 23:30으로
+    바뀌는데 아무도 모른다.
+
+    중요한 건 **사용자가 보는 개장 시각은 양쪽 전환에 다 흔들린다**는 점이다.
+    시드니 사용자는 한국장(서머타임 없음)을 보는데도 자기 지역 서머타임이
+    시작되면 개장이 현지 10:00 → 11:00으로 바뀐다. 그래서 시장 쪽 전환과
+    사용자 쪽 전환 중 **먼저 오는 쪽**을 기준으로 예보한다.
+    """
+    viewer_change = next_offset_change(viewer.tzinfo, now)
+    out: dict = {"viewer": dict(viewer_change, has_dst=True) if viewer_change
+                 else {"has_dst": False}}
+
+    for key, (tz, state) in markets.items():
+        market_change = next_offset_change(tz, now)
+        candidates = [(c, src) for c, src in
+                      ((market_change, "market"), (viewer_change, "viewer")) if c]
+        if not candidates:
+            # 양쪽 다 서머타임이 없다(예: 한국 사용자 + 한국장).
+            # '없다'는 사실도 명시해야 읽는 쪽에서 가정이 안 생긴다.
+            out[key] = {"has_dst": False, "market_has_dst": False}
+            continue
+
+        change, cause = min(candidates, key=lambda cs: cs[0]["days_until"])
+        after_day = datetime.fromisoformat(change["at"]).date() + timedelta(days=1)
+        open_t = time.fromisoformat(state["regular_open"])
+        before = _open_time_in(viewer.tzinfo, tz, now.astimezone(tz).date(), open_t)
+        after = _open_time_in(viewer.tzinfo, tz, after_day, open_t)
+        out[key] = dict(
+            change,
+            has_dst=True,
+            market_has_dst=market_change is not None,
+            cause=cause,                      # 시장 쪽 전환인지 사용자 쪽 전환인지
+            imminent=change["days_until"] <= DST_NOTICE_DAYS,
+            open_in_viewer_now=before,
+            open_in_viewer_after=after,
+            open_time_shifts=before != after,
+        )
+    return out
+
+
+def dst_warnings(clock: dict) -> list[str]:
+    """임박한 전환만 문장으로. 평소에는 아무 말도 하지 않는다."""
+    msgs = []
+    labels = {"krx": "한국장", "us": "미국장"}
+    for key, label in labels.items():
+        d = clock["dst"].get(key) or {}
+        if not d.get("has_dst") or not d.get("imminent"):
+            continue
+        kind = "서머타임 시작" if d["kind"] == "start" else "서머타임 해제"
+        who = "현지" if d.get("cause") == "viewer" else label
+        line = (
+            f"{who} {kind}까지 {d['days_until']}일 "
+            f"({d['at'][:10]}, {d['from_abbr']}→{d['to_abbr']})"
+        )
+        if d.get("open_time_shifts"):
+            line += (f" — 이후 {label} 개장이 사용자 기준 "
+                     f"{d['open_in_viewer_now']} → {d['open_in_viewer_after']} 로 바뀝니다")
+        else:
+            line += f" — {label} 개장 시각은 그대로입니다"
+        msgs.append(line)
+    return msgs
 
 
 def _market_lines(label: str, state: dict, viewer: dict) -> list[str]:
@@ -165,6 +289,8 @@ def format_market_clock(clock: dict) -> str:
         )
     lines += _market_lines("한국장", krx, viewer)
     lines += _market_lines("미국장", us, viewer)
+    for msg in dst_warnings(clock):
+        lines.append(f"- ⏰ {msg}")
     lines += [
         "",
         "MARKET_CLOCK_JSON_START",
