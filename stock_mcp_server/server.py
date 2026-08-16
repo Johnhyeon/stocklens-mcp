@@ -64,6 +64,7 @@ from stock_mcp_server._indicators import (
 from stock_mcp_server._chart_html import render_chart_html, render_multi_chart_html
 from stock_mcp_server.market_clock import format_market_clock, get_market_clock as build_market_clock, KST
 from stock_mcp_server import _result_meta as rmeta
+from stock_mcp_server import _watchlist as wl
 from stock_mcp_server.event_reaction import (
     PROVIDER_ERROR,
     build_event_reaction,
@@ -259,6 +260,18 @@ payload 안 `_meta` 키로) 붙인다. **날짜를 말하기 전에 반드시 �
 - `cause`가 `viewer`면 시장이 아니라 **사용자 지역**이 전환하는 것이다. 한국장은
   서머타임이 없지만 시드니·런던 사용자는 자기 지역 전환으로 현지 개장 시각이 바뀐다.
 - `krx.has_dst`가 false면 한국은 서머타임이 없다는 뜻이다. 있다고 가정하지 마라.
+
+## ⭐ 관심종목 (`watchlist`)
+
+사용자가 지정한 '내 종목' 목록. **DartLens·TelegramLens와 같은 목록을 공유**한다.
+
+- "내 종목", "관심종목", "○○ 넣어줘/빼줘" → `watchlist` 도구를 쓴다.
+- 조회 결과에 ⭐가 붙어 있으면 그 종목은 사용자의 관심종목이다. 언급해주면 좋다.
+- **"내 종목 어때?" 류 요청**: `watchlist(action="list")`로 codes를 받아
+  `get_multi_stocks`·`get_flow_batch`·`get_indicators_bulk`에 **한 번에** 넘긴다.
+  종목마다 개별 호출하지 마라 (토큰·시간 낭비).
+- 사용자가 특정 종목을 반복해서 물어보면 관심종목 등록을 한 번 권해도 좋다.
+  다만 매번 권하지는 마라.
 
 ## 도구 역할 구분
 - `get_chart`: **OHLCV 시계열 데이터** (수치 분석·요약용, count 최소 120)
@@ -462,6 +475,82 @@ async def search_stock(query: str) -> str:
         매칭된 종목 리스트. 여러 개면 사용자에게 확인 요청 필요.
     """
     return await _search_impl(query)
+
+
+@mcp.tool()
+@safe_tool
+@track_metrics("watchlist")
+async def watchlist(action: str = "list", query: str = "") -> str:
+    """관심종목 — '내 종목' 목록 보기/추가/삭제 (LeetKit 세 Lens 공용).
+
+    "내 종목", "관심종목", "○○ 관심종목에 넣어줘", "내 종목 시세 보여줘" 같은
+    요청에 사용합니다. DartLens·TelegramLens와 **같은 목록**을 공유합니다.
+
+    `list` 결과의 `codes`를 그대로 `get_multi_stocks` / `get_flow_batch` /
+    `get_indicators_bulk`에 넘기면 관심종목 전체를 한 번에 볼 수 있습니다.
+    종목을 하나씩 다시 조회하지 마세요.
+
+    Args:
+        action: "list"(기본) / "add" / "remove" / "clear"
+        query: add·remove에 쓸 종목명 또는 6자리 코드 (예: "디오", "039840")
+    """
+    action = (action or "list").strip().lower()
+    if action not in ("list", "add", "remove", "clear"):
+        return f"⚠️ action은 list/add/remove/clear 중 하나여야 합니다 (받음: '{action}')."
+
+    if action == "add":
+        if not query.strip():
+            return "⚠️ 추가할 종목명이나 코드를 알려주세요. 예: watchlist(action='add', query='디오')"
+        # 코드를 추측하지 않는다 — 검색으로 확정한다.
+        q = query.strip()
+        found = await naver_search_stock(q)
+        if not found:
+            return f"'{q}' 종목을 찾을 수 없습니다. 6자리 코드로 다시 시도해주세요."
+
+        # 네이버 자동완성은 부분일치도 함께 준다("디오" → 디오·디와이파워·디와이…).
+        # **정확히 일치하는 이름이나 코드가 있으면 그건 추측이 아니라 확정이다.**
+        # 그때까지 되물으면 매번 한 번 더 묻게 되어 쓸모가 떨어진다.
+        exact = [r for r in found if r["code"] == q.upper() or r["name"] == q]
+        if len(exact) == 1:
+            hit = exact[0]
+        elif len(found) == 1:
+            hit = found[0]
+        else:
+            cands = exact if len(exact) > 1 else found
+            names = ", ".join(f"{r['name']}({r['code']})" for r in cands[:5])
+            return f"'{q}'에 해당하는 종목이 여러 개입니다. 어느 것인가요? — {names}"
+        ok, why = wl.add(hit["code"], hit["name"])
+        head = (f"✅ 관심종목에 추가했습니다: {hit['name']} ({hit['code']})"
+                if ok else f"ℹ️ {hit['name']} ({hit['code']}) — {why}")
+    elif action == "remove":
+        if not query.strip():
+            return "⚠️ 삭제할 종목명이나 코드를 알려주세요."
+        gone = wl.remove(query.strip())
+        head = (f"🗑️ 관심종목에서 뺐습니다: {gone['name']} ({gone['code']})"
+                if gone else f"'{query}'는 관심종목에 없습니다.")
+    elif action == "clear":
+        head = f"🗑️ 관심종목 {wl.clear()}개를 모두 비웠습니다."
+    else:
+        head = None
+
+    stocks = wl.load()
+    lines = [head] if head else []
+    if not stocks:
+        lines += ["", "관심종목이 비어 있습니다.",
+                  "예: \"디오를 관심종목에 넣어줘\" 또는 watchlist(action='add', query='디오')"]
+        return _append_result_meta("\n".join(lines).strip(),
+                                   _kr_meta(kind="snapshot", data_completeness=rmeta.NONE))
+
+    lines += ["", f"## ⭐ 내 관심종목 ({len(stocks)}개)", ""]
+    lines.append("| # | 종목명 | 코드 |")
+    lines.append("|---:|---|---|")
+    for i, s in enumerate(stocks, 1):
+        lines.append(f"| {i} | {s['name']} | {s['code']} |")
+    lines.append("")
+    lines.append("codes: " + ", ".join(s["code"] for s in stocks))
+    lines.append("_시세·수급을 한 번에 보려면 위 codes를 get_multi_stocks / "
+                 "get_flow_batch 에 그대로 넘기세요._")
+    return _append_result_meta("\n".join(lines).strip(), _kr_meta(kind="snapshot"))
 
 
 @mcp.tool()
@@ -685,7 +774,9 @@ async def get_price(code: str) -> str:
     has_nxt = "nxt_price" in data
     price_label = "현재가 (KRX 정규장)" if has_nxt else "현재가"
 
-    lines = [f"종목: {data.get('name', code)} ({code})"]
+    # 관심종목이면 조회할 때마다 눈에 띄게. 안 보이면 등록해둔 걸 잊는다.
+    star = "⭐ " if code in wl.codes() else ""
+    lines = [f"{star}종목: {data.get('name', code)} ({code})"]
     # 관리종목·투자경고를 정상 종목과 똑같이 보여주면 시세만 보고 판단하게 된다.
     # 값이 아니라 종목의 성격이 다르므로 가격보다 위에 둔다.
     flags = data.get("status_flags") or []
@@ -1373,20 +1464,29 @@ async def get_change_ranking(
     # 급등주 목록은 시장경보 종목이 섞이기 가장 쉬운 자리다. 종목마다 페이지를
     # 여는 대신 경보 목록(수십 종목)만 한 번 받아 매칭한다.
     alerts = await naver_get_alert_codes()
+    mine = wl.codes()
 
     dir_label = "상승률 상위" if direction.lower() == "up" else "하락률 상위"
     lines = [f"{dir_label} ({market}, {len(ranks)}개):", ""]
     lines.append("순위 | 코드 | 종목명 | 현재가 | 등락률 | 거래량 | 시장경보")
     lines.append("---|---|---|---:|---:|---:|---")
     flagged = 0
+    mine_hits = []
     for i, r in enumerate(ranks, 1):
         marks = alerts.get(r["code"]) or []
         if marks:
             flagged += 1
+        # 급등 목록에 내 관심종목이 있으면 그게 가장 먼저 알고 싶은 사실이다.
+        star = "⭐ " if r["code"] in mine else ""
+        if star:
+            mine_hits.append(f"{r['name']}({r['code']})")
         lines.append(
-            f"{i} | {r['code']} | {r['name']} | {r['price']:,} | "
+            f"{i} | {r['code']} | {star}{r['name']} | {r['price']:,} | "
             f"{r['change_rate']} | {r['volume']:,} | {'⚠️ ' + ' · '.join(marks) if marks else '-'}"
         )
+    if mine_hits:
+        lines.append("")
+        lines.append(f"⭐ **이 목록에 내 관심종목이 있습니다:** {', '.join(mine_hits)}")
     if flagged:
         lines.append("")
         lines.append(
