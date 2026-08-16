@@ -206,7 +206,7 @@ def render_chart_html(
     rsi_val = rsi_info.get("value")
     rsi_state = rsi_info.get("state", "")
     vol_info = quick.get("volume") or {}
-    vol_ratio = vol_info.get("ratio_vs_20d")
+    vol_ratio = vol_info.get("ratio_vs_avg_20b")
     pos_info = quick.get("position") or {}
     pct_from_high = pos_info.get("pct_from_high_52w")
 

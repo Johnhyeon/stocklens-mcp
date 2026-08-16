@@ -166,5 +166,58 @@ class FinancialBasisCaptureTests(unittest.TestCase):
         self.assertGreater(len({b for b in bases if b}), 1)
 
 
+# ---------------------------------------------------------------------------
+# 4. 종목 상태(시장경보·관리종목)는 시세와 함께 보여야 한다
+# ---------------------------------------------------------------------------
+
+# 네이버 종목 페이지 div.description 실제 구조 (035290 골드앤에스, 2026-08-16 확인).
+# 상태 마커는 em으로 붙고, date/realtime/summary는 마커가 아니다.
+_DESC_HTML = """
+<div class="wrap_company"><div class="description">
+  <span class="code">035290</span>
+  <em class="date">2026.08.14 기준(KRX 장마감)</em>
+  <em class="realtime">실시간</em>
+  <em class="summary">기업개요 동사는 1999년 코스닥시장에 상장하고…</em>
+  {markers}
+</div></div>
+"""
+
+
+class StockStatusMarkerTests(unittest.TestCase):
+    def _flags(self, markers: str) -> list[str]:
+        from stock_mcp_server.naver import _NON_STATUS_EM_CLASSES
+        soup = BeautifulSoup(_DESC_HTML.format(markers=markers), "lxml")
+        desc = soup.select_one("div.description")
+        return [
+            t
+            for em in desc.select("em")
+            if not (set(em.get("class") or []) & _NON_STATUS_EM_CLASSES)
+            for t in [" ".join(em.get_text(" ", strip=True).split())]
+            if t and len(t) <= 12
+        ]
+
+    def test_managed_stock_flags_extracted(self):
+        flags = self._flags('<em class="caution">투자주의</em><em class="manage">관리종목</em>')
+        self.assertEqual(flags, ["투자주의", "관리종목"])
+
+    def test_warning_stock_flag_extracted(self):
+        self.assertEqual(self._flags('<em class="warning">투자경고</em>'), ["투자경고"])
+
+    def test_normal_stock_has_no_flags(self):
+        self.assertEqual(self._flags(""), [])
+
+    def test_unknown_future_marker_still_surfaces(self):
+        """클래스 화이트리스트로 잡으면 새 유형이 생겼을 때 조용히 놓친다.
+
+        마커가 아닌 것만 제외하는 방식이라 처음 보는 클래스도 그대로 드러난다.
+        """
+        self.assertEqual(self._flags('<em class="brandnew">정리매매</em>'), ["정리매매"])
+
+    def test_long_text_is_not_mistaken_for_a_marker(self):
+        """summary처럼 긴 본문이 클래스만 바뀌어도 상태로 오인되면 안 된다."""
+        body = "가" * 200
+        self.assertEqual(self._flags(f'<em class="odd">{body}</em>'), [])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

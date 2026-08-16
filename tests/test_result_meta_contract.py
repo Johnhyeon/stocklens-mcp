@@ -195,3 +195,79 @@ class HandoffTests(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+# ---------------------------------------------------------------------------
+# 5. 키 이름이 곧 정의 (2단계)
+# ---------------------------------------------------------------------------
+
+
+class KeyNamesStateTheirDefinitionTests(unittest.TestCase):
+    """값이 아니라 **이름**이 틀려서 오독을 유발하던 키들의 회귀 방지.
+
+    예전 이름은 정의를 다 담지 못했다:
+      today            마지막 봉인데 '오늘'로 읽힘 (토요일 조회 시 금요일 값)
+      days_since_high  봉 개수인데 '일'로 읽힘 (123봉 = 달력 184일)
+      trade_value_krw  종가×거래량 추산인데 실거래대금으로 읽힘
+      rank_52w         1이 최다인지 최소인지, 모집단이 뭔지 이름에 없음
+    """
+
+    def _df(self, n=300):
+        import pandas as pd
+        return pd.DataFrame({
+            "date": [f"2026{(i % 12) + 1:02d}{(i % 28) + 1:02d}" for i in range(n)],
+            "open": [100] * n, "high": [110] * n, "low": [90] * n,
+            "close": [100] * n, "volume": list(range(1, n + 1)),
+        })
+
+    def test_volume_keys_renamed(self):
+        from stock_mcp_server._indicators import compute_volume
+        v = compute_volume(self._df())
+        self.assertIn("latest", v)
+        self.assertIn("latest_date", v)          # 어느 봉인지 이름 옆에 날짜로
+        self.assertIn("ratio_vs_avg_20b", v)
+        self.assertIn("trade_value_est_krw", v)  # 추산임을 이름에 명시
+        self.assertIn("volume_rank_252b", v)
+        for gone in ("today", "avg_20d", "ratio_vs_20d", "trade_value_krw", "rank_52w"):
+            self.assertNotIn(gone, v, f"옛 키 {gone}가 남아 있음")
+
+    def test_latest_is_the_last_bar_with_its_date(self):
+        from stock_mcp_server._indicators import compute_volume
+        df = self._df()
+        v = compute_volume(df)
+        self.assertEqual(v["latest"], int(df["volume"].iloc[-1]))
+        self.assertEqual(v["latest_date"], df["date"].iloc[-1])
+
+    def test_volume_rank_one_means_highest(self):
+        from stock_mcp_server._indicators import compute_volume
+        # 마지막 봉이 252봉 중 최대 거래량 → 1위
+        df = self._df()
+        self.assertEqual(compute_volume(df)["volume_rank_252b"], 1)
+
+    def test_trade_value_is_close_times_volume(self):
+        from stock_mcp_server._indicators import compute_volume
+        df = self._df()
+        v = compute_volume(df)
+        self.assertEqual(
+            v["trade_value_est_krw"], int(df["close"].iloc[-1]) * int(df["volume"].iloc[-1])
+        )
+
+    def test_position_uses_bars_not_days(self):
+        from stock_mcp_server._indicators import compute_position
+        p = compute_position(self._df())
+        self.assertIn("bars_since_high", p)
+        self.assertIn("bars_since_low", p)
+        self.assertNotIn("days_since_high", p)
+        self.assertNotIn("days_since_low", p)
+        # 달력일을 원하면 직접 계산하라 — 날짜는 그대로 제공한다
+        self.assertIn("high_date", p)
+
+    def test_short_history_returns_named_nulls_not_missing_keys(self):
+        """20봉 미만이어도 키는 있어야 한다 — 없으면 '0'으로 오해할 여지가 생긴다."""
+        from stock_mcp_server._indicators import compute_volume
+        v = compute_volume(self._df(5))
+        self.assertEqual(set(v), {
+            "latest", "latest_date", "avg_20b",
+            "ratio_vs_avg_20b", "trade_value_est_krw", "volume_rank_252b",
+        })
+        self.assertTrue(all(val is None for val in v.values()))

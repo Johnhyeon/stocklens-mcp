@@ -15,6 +15,18 @@ from stock_mcp_server._cache import cached
 BASE_URL = "https://finance.naver.com"
 FCHART_URL = "https://fchart.stock.naver.com/siseJson.nhn"
 
+# div.description 안의 em 중 '종목 상태 마커가 아닌' 것들.
+# date=기준일, realtime=실시간 배지, summary=기업개요 본문.
+_NON_STATUS_EM_CLASSES = {"date", "realtime", "summary"}
+
+# 시장경보 목록 페이지. type은 실제 탭 링크에서 확인한 값만 쓴다
+# (trading_halt 같은 추측 값은 기본 페이지를 돌려주므로 넣지 않는다).
+_ALERT_TYPES = {
+    "caution": "투자주의",
+    "warning": "투자경고",
+    "risk": "투자위험",
+}
+
 
 def _parse_int(text: str, default: int = 0) -> int:
     """'+1,234', '-1,234', '1,234', '-' 등을 정수로 변환합니다."""
@@ -173,20 +185,35 @@ async def get_current_price(code: str) -> dict:
     if name_tag:
         result["name"] = name_tag.text.strip()
 
+    desc = soup.select_one("div.wrap_company div.description")
+
     # 네이버가 페이지 상단에 "2026.08.14 기준(KRX 장마감)"으로 **기준일을 직접**
     # 명시한다. 우리 시장 캘린더로 역산하는 것보다 이게 정확하다(예상 못 한 휴장
     # 포함). 못 찾으면 None으로 두고 호출부가 캘린더로 대체한다.
-    quote_day = None
-    stamp = soup.select_one("div.wrap_company .description em.date, div.wrap_company em.date")
-    if stamp is None:
-        wrap = soup.select_one("div.wrap_company")
-        stamp_text = " ".join(wrap.get_text(" ", strip=True).split()) if wrap else ""
-    else:
-        stamp_text = " ".join(stamp.get_text(" ", strip=True).split())
+    stamp = desc.select_one("em.date") if desc else None
+    stamp_text = " ".join(stamp.get_text(" ", strip=True).split()) if stamp else ""
     m = re.search(r"(20\d{2})[.\-/](\d{1,2})[.\-/](\d{1,2})", stamp_text)
-    if m:
-        quote_day = f"{m.group(1)}-{int(m.group(2)):02d}-{int(m.group(3)):02d}"
-    result["quote_date"] = quote_day
+    result["quote_date"] = (
+        f"{m.group(1)}-{int(m.group(2)):02d}-{int(m.group(3)):02d}" if m else None
+    )
+
+    # 종목 상태(관리종목·투자경고·투자주의 등). 같은 div.description 안에 em으로
+    # 붙는다 — 035290은 em.caution "투자주의" + em.manage "관리종목",
+    # 024850은 em.warning "투자경고", 정상 종목(039840)은 아무것도 없다.
+    # 클래스 이름을 화이트리스트로 잡으면 새 유형(투자위험·거래정지 등)이 생겼을 때
+    # 조용히 놓친다. 그래서 **마커가 아닌 것만 제외**하고 나머지는 텍스트 그대로
+    # 싣는다 — 라벨은 네이버가 이미 한글로 써 준다.
+    result["status_flags"] = (
+        [
+            t
+            for em in desc.select("em")
+            if not (set(em.get("class") or []) & _NON_STATUS_EM_CLASSES)
+            for t in [" ".join(em.get_text(" ", strip=True).split())]
+            if t and len(t) <= 12
+        ]
+        if desc
+        else []
+    )
 
     # KRX 블록이 없는(NXT 비대상) 종목은 페이지 전체를 그대로 스코프로 사용
     krx_scope = soup.select_one("#rate_info_krx") or soup
@@ -198,6 +225,37 @@ async def get_current_price(code: str) -> dict:
             result[f"nxt_{key}"] = value
 
     return result
+
+
+@cached(ttl_market=1800, ttl_closed=86400)  # 시장경보는 하루 단위로만 바뀐다
+async def get_alert_codes() -> dict[str, list[str]]:
+    """시장경보 종목 → {종목코드: [경보 라벨]}.
+
+    랭킹·스크리닝 결과에 상태를 달기 위한 것. 종목마다 페이지를 여는 대신
+    경보 목록 3개(수십 종목)만 받아 매칭한다. 라벨은 추론이 아니라 **어느
+    목록에서 나왔는지** 그 자체다.
+
+    한 종목이 여러 목록에 들어갈 수 있어 값은 리스트다.
+    """
+    out: dict[str, list[str]] = {}
+
+    async def one(alert_type: str, label: str) -> None:
+        try:
+            resp = await fetch(
+                f"{BASE_URL}/sise/investment_alert.naver", params={"type": alert_type}
+            )
+        except Exception:
+            return  # 경보 목록은 부가 정보다. 실패해도 본 조회를 막지 않는다.
+        soup = BeautifulSoup(resp.text, "lxml")
+        for a in soup.select('table a[href*="code="]'):
+            m = re.search(r"code=(\d{6})", a.get("href", ""))
+            if m:
+                out.setdefault(m.group(1), [])
+                if label not in out[m.group(1)]:
+                    out[m.group(1)].append(label)
+
+    await asyncio.gather(*(one(t, lbl) for t, lbl in _ALERT_TYPES.items()))
+    return out
 
 
 @cached(ttl_market=300, ttl_closed=7200)  # 장중 5분, 장마감 2시간
@@ -933,7 +991,8 @@ async def _fetch_ranking_page(url: str, sosok: str | None, page: int = 1) -> lis
             "price": price,
             "change_rate": cells[4].text.strip(),
             "volume": volume,
-            "trade_value_krw": price * volume,
+            # 현재가 × 거래량 추산. 실제 거래대금은 체결가 가중이라 살짝 다르다.
+            "trade_value_est_krw": price * volume,
         })
 
     return results
@@ -972,7 +1031,7 @@ async def get_volume_ranking(
     """
     count = min(count, 500)
     url = f"{BASE_URL}/sise/sise_quant.naver"
-    sort_key = "trade_value_krw" if sort_by == "trade_value" else "volume"
+    sort_key = "trade_value_est_krw" if sort_by == "trade_value" else "volume"
 
     if market.upper() == "ALL":
         kospi, kosdaq = await asyncio.gather(
@@ -988,7 +1047,7 @@ async def get_volume_ranking(
         sosok = _market_to_sosok(market)
         results = await _fetch_ranking_multi_page(url, sosok, count)
         if sort_by == "trade_value":
-            results = sorted(results, key=lambda x: x.get("trade_value_krw", 0), reverse=True)
+            results = sorted(results, key=lambda x: x.get("trade_value_est_krw", 0), reverse=True)
             for i, item in enumerate(results[:count], 1):
                 item["rank"] = i
         return results[:count]

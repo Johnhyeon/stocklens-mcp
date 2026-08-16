@@ -32,6 +32,7 @@ from stock_mcp_server.naver import (
     get_sector_stocks as naver_get_sector_stocks,
     get_volume_ranking as naver_get_volume_ranking,
     get_change_ranking as naver_get_change_ranking,
+    get_alert_codes as naver_get_alert_codes,
     get_market_cap_ranking as naver_get_market_cap_ranking,
     get_multi_stocks as naver_get_multi_stocks,
     get_multi_chart_stats as naver_get_multi_chart_stats,
@@ -659,10 +660,13 @@ async def get_price(code: str) -> str:
     has_nxt = "nxt_price" in data
     price_label = "현재가 (KRX 정규장)" if has_nxt else "현재가"
 
-    lines = [
-        f"종목: {data.get('name', code)} ({code})",
-        f"{price_label}: {data['price']:,}원",
-    ]
+    lines = [f"종목: {data.get('name', code)} ({code})"]
+    # 관리종목·투자경고를 정상 종목과 똑같이 보여주면 시세만 보고 판단하게 된다.
+    # 값이 아니라 종목의 성격이 다르므로 가격보다 위에 둔다.
+    flags = data.get("status_flags") or []
+    if flags:
+        lines.append(f"⚠️ **시장경보/지정: {' · '.join(flags)}** — 일반 종목과 매매 조건·위험이 다릅니다")
+    lines.append(f"{price_label}: {data['price']:,}원")
     if "change" in data:
         sign = "+" if data["change"] > 0 else ""
         lines.append(f"전일대비: {sign}{data['change']:,}원")
@@ -694,6 +698,7 @@ async def get_price(code: str) -> str:
     meta = _kr_meta(
         kind="snapshot", code=code, name=data.get("name"),
         data_as_of=data.get("quote_date"), data_completeness=completeness,
+        warnings=[f"시장경보/지정 종목: {' · '.join(flags)}"] if flags else None,
     )
     return _append_result_meta("\n".join(lines), meta)
 
@@ -1307,10 +1312,10 @@ async def get_volume_ranking(
     lines = [f"{sort_label} 상위 ({market}, {len(ranks)}개, 정렬={sort_by}):", ""]
     # 헤더가 '거래대금(원)'인데 셀은 억 단위로 찍혀 헤더와 값이 어긋나 있었다.
     # 단위는 헤더 한 곳에서만 선언하고 셀은 숫자만 둔다.
-    lines.append("순위 | 코드 | 종목명 | 현재가(원) | 등락률 | 거래량(주) | 거래대금(억원)")
+    lines.append("순위 | 코드 | 종목명 | 현재가(원) | 등락률 | 거래량(주) | 거래대금(억원, 추산)")
     lines.append("---|---|---|---:|---:|---:|---:")
     for r in ranks:
-        tv = r.get("trade_value_krw")
+        tv = r.get("trade_value_est_krw")
         tv_cell = f"{tv / 100_000_000:,.1f}" if tv is not None else "-"
         lines.append(
             f"{r['rank']} | {r['code']} | {r['name']} | {r['price']:,} | "
@@ -1340,16 +1345,36 @@ async def get_change_ranking(
     if not ranks:
         return f"{direction} 등락률 순위를 가져올 수 없습니다."
 
+    # 급등주 목록은 시장경보 종목이 섞이기 가장 쉬운 자리다. 종목마다 페이지를
+    # 여는 대신 경보 목록(수십 종목)만 한 번 받아 매칭한다.
+    alerts = await naver_get_alert_codes()
+
     dir_label = "상승률 상위" if direction.lower() == "up" else "하락률 상위"
     lines = [f"{dir_label} ({market}, {len(ranks)}개):", ""]
-    lines.append("순위 | 코드 | 종목명 | 현재가 | 등락률 | 거래량")
-    lines.append("---|---|---|---|---|---")
+    lines.append("순위 | 코드 | 종목명 | 현재가 | 등락률 | 거래량 | 시장경보")
+    lines.append("---|---|---|---:|---:|---:|---")
+    flagged = 0
     for i, r in enumerate(ranks, 1):
+        marks = alerts.get(r["code"]) or []
+        if marks:
+            flagged += 1
         lines.append(
             f"{i} | {r['code']} | {r['name']} | {r['price']:,} | "
-            f"{r['change_rate']} | {r['volume']:,}"
+            f"{r['change_rate']} | {r['volume']:,} | {'⚠️ ' + ' · '.join(marks) if marks else '-'}"
         )
-    return _append_result_meta("\n".join(lines), _kr_meta(kind="snapshot"))
+    if flagged:
+        lines.append("")
+        lines.append(
+            f"※ {flagged}개 종목이 시장경보(투자주의/경고/위험) 지정 상태입니다. "
+            "일반 종목과 매매 조건·위험이 다르니 급등 사유를 함께 확인하세요."
+        )
+    return _append_result_meta(
+        "\n".join(lines),
+        _kr_meta(
+            kind="snapshot",
+            warnings=[f"시장경보 지정 {flagged}건 포함 — 표의 '시장경보' 열 확인"] if flagged else None,
+        ),
+    )
 
 
 @mcp.tool()
@@ -1469,6 +1494,16 @@ async def get_indicators(
     스크리닝·조건 필터·상태 판정 등 **숫자 비교가 필요할 때만** 호출.
     차트 시각화용 아님(시각화는 `get_chart`). OHLCV 대신 판정 결과만 반환해 토큰 절약.
     반환값의 라벨 필드(`phase_label`, `type_label`, `position` 등)는 그대로 인용할 것.
+
+    키 이름이 곧 정의입니다 — 임의로 바꿔 읽지 마세요:
+      `volume.latest`(+`latest_date`)  마지막 **봉**의 거래량. '오늘'이 아님
+      `volume.avg_20b` / `ratio_vs_avg_20b`  20**봉**(거래일) 평균 대비
+      `volume.trade_value_est_krw`  종가×거래량 **추산**. 실제 거래대금과 다름
+      `volume.volume_rank_252b`  252봉 중 순위, **1이 최다**
+      `position.bars_since_high/low`  달력일이 아니라 **봉 개수**.
+        달력일이 필요하면 `high_date`/`low_date`로 직접 계산하세요.
+    `_meta.data_basis`가 `in_progress_bar`면 마지막 봉이 미마감이라 이 판정들은
+    장 마감 시 달라질 수 있습니다.
 
     Args:
         code: 종목코드 (예: "005930")

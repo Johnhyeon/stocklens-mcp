@@ -332,25 +332,42 @@ def compute_obv(df: pd.DataFrame, window: int = 20) -> dict:
 # ─────────────────────────────────────────────────────────────
 
 def compute_volume(df: pd.DataFrame) -> dict:
+    """거래량 요약.
+
+    키 이름이 곧 정의여야 한다. 예전 이름들이 실제와 달라 오독을 유발했다:
+      today            → 오늘이 아니라 **마지막 봉**. 토요일 조회 시 금요일 값인데
+                         "오늘 거래량"으로 서술됐다. latest + latest_date로 교체.
+      trade_value_krw  → 실제 거래대금(체결가 가중)이 아니라 종가×거래량 **추산**.
+                         trade_value_est_krw로 교체.
+      rank_52w         → 1이 최다인지 최소인지, 모집단이 뭔지 이름에 없었다.
+                         volume_rank_252b(1=최다, 252봉 중)로 교체.
+    """
+    empty = {
+        "latest": None, "latest_date": None, "avg_20b": None,
+        "ratio_vs_avg_20b": None, "trade_value_est_krw": None,
+        "volume_rank_252b": None,
+    }
     if len(df) < 20:
-        return {"today": None, "avg_20d": None, "ratio_vs_20d": None, "trade_value_krw": None}
+        return empty
 
-    today_vol = int(df["volume"].iloc[-1])
-    avg_20d = float(df["volume"].rolling(20).mean().iloc[-1])
-    ratio = today_vol / avg_20d if avg_20d > 0 else None
-    trade_value = int(df["close"].iloc[-1]) * today_vol
+    latest_vol = int(df["volume"].iloc[-1])
+    avg_20b = float(df["volume"].rolling(20).mean().iloc[-1])
+    ratio = latest_vol / avg_20b if avg_20b > 0 else None
+    # 종가 × 거래량. 실제 거래대금은 체결가 가중이라 이 값과 약간 다르다.
+    trade_value_est = int(df["close"].iloc[-1]) * latest_vol
 
-    rank_52w = None
+    volume_rank = None
     if len(df) >= 252:
         window = df["volume"].iloc[-252:]
-        rank_52w = int((window > today_vol).sum()) + 1
+        volume_rank = int((window > latest_vol).sum()) + 1
 
     return {
-        "today": today_vol,
-        "avg_20d": int(avg_20d),
-        "ratio_vs_20d": round(float(ratio), 2) if ratio else None,
-        "trade_value_krw": trade_value,
-        "rank_52w": rank_52w,
+        "latest": latest_vol,
+        "latest_date": str(df["date"].iloc[-1]) if "date" in df.columns else None,
+        "avg_20b": int(avg_20b),
+        "ratio_vs_avg_20b": round(float(ratio), 2) if ratio else None,
+        "trade_value_est_krw": trade_value_est,
+        "volume_rank_252b": volume_rank,
     }
 
 
@@ -367,6 +384,9 @@ def compute_position(df: pd.DataFrame) -> dict:
     low_date = str(lookback.loc[low_idx, "date"]) if "date" in lookback.columns else None
     price = float(df["close"].iloc[-1])
 
+    # days_since_* 는 달력일이 아니라 **봉 개수**(거래일)였다. 2026-02-11 고점이
+    # 123으로 나오는데 달력으로는 184일이라, "123일 전"으로 서술되면 틀린다.
+    # bars_since_* 로 바꿔 이름이 단위를 말하게 한다. 달력일은 high_date로 계산.
     return {
         "price": int(price),
         "high_52w": int(high_52w),
@@ -375,8 +395,8 @@ def compute_position(df: pd.DataFrame) -> dict:
         "pct_from_low_52w": round((price - low_52w) / low_52w * 100, 2),
         "high_date": high_date,
         "low_date": low_date,
-        "days_since_high": int(len(lookback) - 1 - lookback.index.get_loc(high_idx)),
-        "days_since_low": int(len(lookback) - 1 - lookback.index.get_loc(low_idx)),
+        "bars_since_high": int(len(lookback) - 1 - lookback.index.get_loc(high_idx)),
+        "bars_since_low": int(len(lookback) - 1 - lookback.index.get_loc(low_idx)),
     }
 
 
