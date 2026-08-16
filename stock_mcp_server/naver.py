@@ -173,6 +173,21 @@ async def get_current_price(code: str) -> dict:
     if name_tag:
         result["name"] = name_tag.text.strip()
 
+    # 네이버가 페이지 상단에 "2026.08.14 기준(KRX 장마감)"으로 **기준일을 직접**
+    # 명시한다. 우리 시장 캘린더로 역산하는 것보다 이게 정확하다(예상 못 한 휴장
+    # 포함). 못 찾으면 None으로 두고 호출부가 캘린더로 대체한다.
+    quote_day = None
+    stamp = soup.select_one("div.wrap_company .description em.date, div.wrap_company em.date")
+    if stamp is None:
+        wrap = soup.select_one("div.wrap_company")
+        stamp_text = " ".join(wrap.get_text(" ", strip=True).split()) if wrap else ""
+    else:
+        stamp_text = " ".join(stamp.get_text(" ", strip=True).split())
+    m = re.search(r"(20\d{2})[.\-/](\d{1,2})[.\-/](\d{1,2})", stamp_text)
+    if m:
+        quote_day = f"{m.group(1)}-{int(m.group(2)):02d}-{int(m.group(3)):02d}"
+    result["quote_date"] = quote_day
+
     # KRX 블록이 없는(NXT 비대상) 종목은 페이지 전체를 그대로 스코프로 사용
     krx_scope = soup.select_one("#rate_info_krx") or soup
     result.update(_parse_rate_info(krx_scope))

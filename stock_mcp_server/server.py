@@ -62,6 +62,7 @@ from stock_mcp_server._indicators import (
 )
 from stock_mcp_server._chart_html import render_chart_html, render_multi_chart_html
 from stock_mcp_server.market_clock import format_market_clock, get_market_clock as build_market_clock, KST
+from stock_mcp_server import _result_meta as rmeta
 from stock_mcp_server.event_reaction import (
     PROVIDER_ERROR,
     build_event_reaction,
@@ -209,6 +210,29 @@ mcp = FastMCP(
 5. **`데이터 없음`·`추정`·`⚠️`는 그대로 전달하라.** "데이터 없음"을 0으로 바꾸지 말고,
    `단위: 억원 **추정**`이 붙은 값을 확정 수치로 쓰지 말고, `⚠️통화혼합`이 붙은 비율
    (P/B·P/S 등)을 정상 밸류에이션처럼 해석하지 마라.
+
+## 🕐 결과 메타 봉투 (RESULT_META_JSON / `_meta`) — 시간축의 진실
+
+대부분의 데이터 도구는 응답 끝에 `RESULT_META_JSON_START…END` 블록을(JSON 도구는
+payload 안 `_meta` 키로) 붙인다. **날짜를 말하기 전에 반드시 이걸 먼저 보라.**
+
+- `as_of` = **조회 시각**(내가 언제 물어봤나). `data_as_of` = **데이터 기준일**(이 숫자가
+  언제 것인가). 토요일에 조회하면 as_of는 토요일, data_as_of는 직전 거래일이다.
+  **사용자에게 말할 날짜는 언제나 `data_as_of`다.** as_of를 "오늘 시세"라고 쓰지 마라.
+- `data_basis`가 판정의 확정도를 말한다:
+  - `last_close` 확정치 — 그대로 서술 가능
+  - `realtime` 장중 스냅샷 — 종가 아님. "현재" 라고만 하고 "종가"라 하지 마라
+  - **`in_progress_bar` 장중 미완성 봉** — 이 봉으로 계산된 RSI·MACD·골든크로스·
+    신고가 판정은 **마감 시 달라질 수 있다.** 확정 신호로 단정하지 말고 "장중 기준
+    잠정"임을 반드시 함께 말하라
+  - `filing` 공시 기반 / `aggregate` 수집 구간 집계
+- `data_completeness`가 `partial`/`none`이면 없는 부분을 추정으로 메우지 마라.
+- `warnings`는 요약에 반영하라. 비어 있지 않은데 무시하면 안 된다.
+- `entity`의 `stock_code`·`corp_code`·`name`은 **다음 도구 호출에 그대로 재사용**하라
+  (DartLens `corp_code`, StockLens 6자리 `code`). 코드를 다시 검색하거나 추측하지 마라.
+- 메타 블록 자체는 내부용이다. **사용자에게 JSON을 그대로 보여주지 마라** — 필요한
+  사실(기준일·경고)만 문장으로 옮긴다.
+- 메타가 아예 없는 응답은 구버전 도구다. 그때는 기준일을 **미상**으로 다루고 추측하지 마라.
 
 ## 도구 역할 구분
 - `get_chart`: **OHLCV 시계열 데이터** (수치 분석·요약용, count 최소 120)
@@ -435,7 +459,10 @@ async def get_chart(
     count = min(count, 500)
     data = await get_ohlcv(code, timeframe, count)
     if not data:
-        meta = _result_meta(data_completeness="none", warnings=["차트 데이터를 가져오지 못했습니다."])
+        meta = _kr_meta(
+            kind="bars", code=code, data_completeness=rmeta.NONE,
+            warnings=["차트 데이터를 가져오지 못했습니다."],
+        )
         return _append_result_meta(f"종목코드 {code}의 차트 데이터를 가져올 수 없습니다.", meta)
 
     tf_name = {"day": "일봉", "week": "주봉", "month": "월봉"}.get(timeframe, timeframe)
@@ -443,12 +470,16 @@ async def get_chart(
     lines = [header, ""]
     lines.extend(_format_ohlcv_rows(data, is_intraday=False, decimals=0))
 
-    warnings = _kr_market_note()
-    completeness = "complete"
+    warnings = []
+    completeness = rmeta.COMPLETE
     if len(data) < count:
-        completeness = "partial"
-        warnings = warnings + [f"요청한 {count}개 중 {len(data)}개만 조회됨(상장일 등으로 이력이 짧을 수 있음)."]
-    meta = _result_meta(data_completeness=completeness, warnings=warnings)
+        completeness = rmeta.PARTIAL
+        warnings.append(f"요청한 {count}개 중 {len(data)}개만 조회됨(상장일 등으로 이력이 짧을 수 있음).")
+    # 기준일은 시장 캘린더 역산이 아니라 **실제 마지막 봉**에서 뽑는다.
+    meta = _kr_meta(
+        kind="bars", code=code, data_as_of=data[-1].get("date"),
+        data_completeness=completeness, warnings=warnings,
+    )
     return _append_result_meta("\n".join(lines), meta)
 
 
@@ -506,42 +537,101 @@ async def get_chart(
 #     )
 
 
-def _result_meta(
+_append_result_meta = rmeta.append_meta
+
+
+def _us_meta(
     *,
-    market: str = "KR",
-    is_delayed: bool = False,
-    data_completeness: str = "complete",
+    kind: str,
+    ticker: str | None = None,
+    data_as_of=None,
+    data_completeness: str = rmeta.COMPLETE,
     warnings: list[str] | None = None,
 ) -> dict:
-    """가격·차트·스크리닝 핵심 도구 공통 메타 봉투. as_of는 조회 시각(KST) 기준."""
-    return {
-        "as_of": datetime.now(KST).isoformat(timespec="seconds"),
-        "market": market,
-        "is_delayed": is_delayed,
-        "data_completeness": data_completeness,
-        "warnings": warnings or [],
-    }
+    """US 도구용 메타. yfinance는 15분 지연 공지가 있어 is_delayed를 세운다."""
+    us_state = build_market_clock()["us"]
+    if kind == "filing":
+        basis = rmeta.BASIS_FILING
+    elif us_state.get("is_open"):
+        basis = rmeta.BASIS_IN_PROGRESS_BAR if kind == "bars" else rmeta.BASIS_REALTIME
+    else:
+        basis = rmeta.BASIS_LAST_CLOSE
 
+    warns = list(warnings or [])
+    if kind != "filing" and not us_state.get("is_open"):
+        warns.insert(
+            0,
+            f"미국장 마감 상태 — 표시된 값은 최근 거래일({us_state.get('last_trading_day')}) 기준입니다.",
+        )
 
-def _append_result_meta(text: str, meta: dict) -> str:
-    return (
-        text
-        + "\n\nRESULT_META_JSON_START\n"
-        + json.dumps(meta, ensure_ascii=False, sort_keys=True)
-        + "\nRESULT_META_JSON_END"
+    return rmeta.build_meta(
+        lens="stocklens",
+        data_basis=basis,
+        data_as_of=data_as_of or (None if kind == "filing" else us_state.get("last_trading_day")),
+        market="US",
+        session=us_state.get("status"),
+        is_delayed=bool(us_state.get("is_open")),  # yfinance 실시간은 지연 시세
+        data_completeness=data_completeness,
+        entity_info=rmeta.entity(stock_code=ticker),
+        warnings=warns,
     )
 
 
-def _kr_market_note() -> list[str]:
+def _kr_market_note(krx: dict | None = None) -> list[str]:
     """KRX가 지금 닫혀 있으면, 보여주는 값이 실시간이 아니라 최근 종가 기준임을 명시.
 
     Naver 소스는 공식적으로 지연을 공지하지 않으므로(US Yahoo와 달리) is_delayed는
     건드리지 않고, '휴장 중 최근 종가' 사실만 warning으로 남긴다.
     """
-    krx = build_market_clock()["krx"]
+    krx = krx or build_market_clock()["krx"]
     if krx["is_open"]:
         return []
     return [f"KRX 장마감 상태 — 표시된 값은 최근 거래일({krx['last_trading_day']}) 기준입니다."]
+
+
+def _kr_meta(
+    *,
+    kind: str,
+    data_as_of=None,
+    data_period: str | None = None,
+    code: str | None = None,
+    name: str | None = None,
+    data_completeness: str = rmeta.COMPLETE,
+    warnings: list[str] | None = None,
+) -> dict:
+    """KRX 도구용 메타. 세션 상태에서 data_basis를 자동 판정한다.
+
+    kind:
+      "snapshot"    현재가·랭킹·ETF 시세 — 장중이면 realtime, 아니면 last_close
+      "bars"        차트·지표·수급 — 장중이면 **in_progress_bar**(마지막 봉 미마감)
+      "filing"      재무·컨센서스 — 세션과 무관하게 공시 기반
+
+    data_as_of는 실제 데이터에서 뽑은 날짜를 넘기는 게 원칙이고(차트 마지막 봉,
+    공시 발표일), 없을 때만 시장 캘린더의 최근 거래일로 대체한다.
+    """
+    krx = build_market_clock()["krx"]
+    if kind == "filing":
+        basis = rmeta.BASIS_FILING
+    elif krx.get("is_open"):
+        basis = rmeta.BASIS_IN_PROGRESS_BAR if kind == "bars" else rmeta.BASIS_REALTIME
+    else:
+        basis = rmeta.BASIS_LAST_CLOSE
+
+    warns = list(warnings or [])
+    if kind != "filing":
+        warns = _kr_market_note(krx) + warns
+
+    return rmeta.build_meta(
+        lens="stocklens",
+        data_basis=basis,
+        data_as_of=data_as_of or (None if kind == "filing" else krx.get("last_trading_day")),
+        data_period=data_period,
+        market="KR",
+        session=krx.get("status"),
+        data_completeness=data_completeness,
+        entity_info=rmeta.entity(stock_code=code, name=name),
+        warnings=warns,
+    )
 
 
 @mcp.tool()
@@ -560,7 +650,10 @@ async def get_price(code: str) -> str:
     """
     data = await get_current_price(code)
     if not data or "price" not in data:
-        meta = _result_meta(data_completeness="none", warnings=["현재가 데이터를 가져오지 못했습니다."])
+        meta = _kr_meta(
+            kind="snapshot", code=code, data_completeness=rmeta.NONE,
+            warnings=["현재가 데이터를 가져오지 못했습니다."],
+        )
         return _append_result_meta(f"종목코드 {code}의 현재가를 가져올 수 없습니다.", meta)
 
     has_nxt = "nxt_price" in data
@@ -593,8 +686,15 @@ async def get_price(code: str) -> str:
             lines.append(f"거래량: {data['nxt_volume']:,}")
         lines.append("※ NXT는 KRX와 별도 체결 시장으로, 위 정규장 수치에 포함되지 않습니다")
 
-    completeness = "complete" if all(k in data for k in ("price", "open", "high", "low", "volume")) else "partial"
-    meta = _result_meta(data_completeness=completeness, warnings=_kr_market_note())
+    completeness = (
+        rmeta.COMPLETE
+        if all(k in data for k in ("price", "open", "high", "low", "volume"))
+        else rmeta.PARTIAL
+    )
+    meta = _kr_meta(
+        kind="snapshot", code=code, name=data.get("name"),
+        data_as_of=data.get("quote_date"), data_completeness=completeness,
+    )
     return _append_result_meta("\n".join(lines), meta)
 
 
@@ -613,7 +713,11 @@ async def get_flow(code: str, days: int = 20) -> str:
     days = min(days, 60)
     data = await get_investor_flow(code, days)
     if not data:
-        return f"종목코드 {code}의 수급 데이터를 가져올 수 없습니다."
+        return _append_result_meta(
+            f"종목코드 {code}의 수급 데이터를 가져올 수 없습니다.",
+            _kr_meta(kind="bars", code=code, data_completeness=rmeta.NONE,
+                     warnings=["수급 데이터를 가져오지 못했습니다."]),
+        )
 
     lines = [f"종목 {code} 투자자별 매매동향 ({len(data)}일):", ""]
     lines.append("날짜 | [주] 기관 순매매 | [주] 외국인 순매매 | [참고] 종가 | [참고] 거래량")
@@ -636,7 +740,12 @@ async def get_flow(code: str, days: int = 20) -> str:
         "차트는 get_chart, 현재가는 get_price 사용."
     )
 
-    return "\n".join(lines)
+    # 기준일은 표의 최신 행에서 — 캘린더 역산보다 정확하다(거래정지 등).
+    return _append_result_meta(
+        "\n".join(lines),
+        _kr_meta(kind="bars", code=code, data_as_of=data[0].get("date"),
+                 data_completeness=rmeta.COMPLETE if len(data) >= min(days, 5) else rmeta.PARTIAL),
+    )
 
 
 _CODE_RE = re.compile(r"^[A-Za-z0-9]{6}$")
@@ -802,7 +911,7 @@ async def get_flow_batch(codes: list[str], days: int = 5) -> str:
     if failed:
         lines.append(f"※ 조회 실패: {', '.join(failed)}")
 
-    return "\n".join(lines)
+    return _append_result_meta("\n".join(lines), _kr_meta(kind="bars"))
 
 
 @mcp.tool()
@@ -836,7 +945,7 @@ async def screen_by_flow(
 
     ranks = await naver_get_volume_ranking(market=market, count=top_n, sort_by=sort_by)
     if not ranks:
-        meta = _result_meta(data_completeness="none", warnings=[f"{market} 거래량 순위를 가져오지 못했습니다."])
+        meta = _kr_meta(kind="bars", data_completeness=rmeta.NONE, warnings=[f"{market} 거래량 순위를 가져오지 못했습니다."])
         return _append_result_meta(f"{market} 거래량 순위를 가져올 수 없습니다.", meta)
 
     # 코드 단위 dedup — 네이버 페이지 경계나 시장 합산에서 같은 종목이
@@ -898,10 +1007,10 @@ async def screen_by_flow(
         "",
     ]
 
-    warnings = _kr_market_note()
+    warnings = []
     if failed_fetch:
-        warnings = warnings + [f"수급 조회 실패 종목 {failed_fetch}개 — 스크리닝 후보에서 제외됨."]
-    completeness = "partial" if failed_fetch else "complete"
+        warnings.append(f"수급 조회 실패 종목 {failed_fetch}개 — 스크리닝 후보에서 제외됨.")
+    completeness = rmeta.PARTIAL if failed_fetch else rmeta.COMPLETE
 
     if not matched:
         lines.append("⚠️ 조건을 만족하는 종목이 없습니다.")
@@ -909,7 +1018,7 @@ async def screen_by_flow(
         lines.append("💡 조건 완화 예: foreign_days=1 또는 inst_days=0 (외국인만 검사)")
         if exclude_etf and excluded_etf:
             lines.append(f"제외된 ETF/ETN ({len(excluded_etf)}개): {', '.join(excluded_etf[:5])}{' …' if len(excluded_etf) > 5 else ''}")
-        meta = _result_meta(data_completeness=completeness, warnings=warnings)
+        meta = _kr_meta(kind="bars", data_completeness=completeness, warnings=warnings)
         return _append_result_meta("\n".join(lines), meta)
 
     lines.append("매치 종목 (각 행: 날짜 | 기관 순매매 | 외국인 순매매, 양수=순매수):")
@@ -923,7 +1032,7 @@ async def screen_by_flow(
             )
         lines.append("")
 
-    meta = _result_meta(data_completeness=completeness, warnings=warnings)
+    meta = _kr_meta(kind="bars", data_completeness=completeness, warnings=warnings)
     return _append_result_meta("\n".join(lines), meta)
 
 
@@ -996,7 +1105,15 @@ async def get_financial(code: str) -> str:
                 lines.append(f"{key}: {' | '.join(value)}")
         else:
             lines.append(f"{key}: {value}")
-    return "\n".join(lines)
+
+    # 재무는 '날짜'가 아니라 '기간'이 기준이다. (E)가 안 붙은 마지막 기간이
+    # 확정 실적의 끝 — 날짜를 지어내는 대신 그 라벨을 그대로 싣는다.
+    confirmed = [p for p in (list(annual) + list(quarterly)) if p and "(E)" not in p]
+    meta = _kr_meta(
+        kind="filing", code=code, name=data.get("name"),
+        data_period=f"{confirmed[-1]} 확정" if confirmed else None,
+    )
+    return _append_result_meta("\n".join(lines), meta)
 
 
 @mcp.tool()
@@ -1019,7 +1136,7 @@ async def get_index() -> str:
         rate = item.get("change_rate")
         rate_str = f" ({rate:+.2f}%)" if rate is not None else ""
         lines.append(f"  {item['index']}: {value}{rate_str} {change}".rstrip())
-    return "\n".join(lines)
+    return _append_result_meta("\n".join(lines), _kr_meta(kind="snapshot"))
 
 
 @mcp.tool()
@@ -1103,7 +1220,7 @@ async def get_theme_stocks(
                 f"{s['code']} | {s['name']} | {s['price']:,} | {s['change_rate']} | {s['volume']:,}"
             )
 
-    return "\n".join(lines)
+    return _append_result_meta("\n".join(lines), _kr_meta(kind="snapshot"))
 
 
 @mcp.tool()
@@ -1157,7 +1274,7 @@ async def get_sector_stocks(sector_name: str, count: int = 30) -> str:
         lines.append(
             f"{s['code']} | {s['name']} | {s['price']:,} | {s['change_rate']} | {s['volume']:,}"
         )
-    return "\n".join(lines)
+    return _append_result_meta("\n".join(lines), _kr_meta(kind="snapshot"))
 
 
 @mcp.tool()
@@ -1199,7 +1316,7 @@ async def get_volume_ranking(
             f"{r['rank']} | {r['code']} | {r['name']} | {r['price']:,} | "
             f"{r['change_rate']} | {r['volume']:,} | {tv_cell}"
         )
-    return "\n".join(lines)
+    return _append_result_meta("\n".join(lines), _kr_meta(kind="snapshot"))
 
 
 @mcp.tool()
@@ -1232,7 +1349,7 @@ async def get_change_ranking(
             f"{i} | {r['code']} | {r['name']} | {r['price']:,} | "
             f"{r['change_rate']} | {r['volume']:,}"
         )
-    return "\n".join(lines)
+    return _append_result_meta("\n".join(lines), _kr_meta(kind="snapshot"))
 
 
 @mcp.tool()
@@ -1259,7 +1376,7 @@ async def get_market_cap_ranking(market: str = "KOSPI", count: int = 50) -> str:
             f"{r['rank']} | {r['code']} | {r['name']} | {r['price']:,} | "
             f"{r['change_rate']} | {r['market_cap_billion']:,}"
         )
-    return "\n".join(lines)
+    return _append_result_meta("\n".join(lines), _kr_meta(kind="snapshot"))
 
 
 @mcp.tool()
@@ -1291,7 +1408,7 @@ async def get_multi_stocks(codes: list[str]) -> str:
             f"{s['code']} | {s['name']} | {s['price']:,} | "
             f"{change_str} | {s['change_rate']} | {s['volume']:,}"
         )
-    return "\n".join(lines)
+    return _append_result_meta("\n".join(lines), _kr_meta(kind="snapshot"))
 
 
 @mcp.tool()
@@ -1334,7 +1451,7 @@ async def get_multi_chart_stats(codes: list[str], days: int = 260) -> str:
         "※ 기간 **집계값**만 반환(시계열 OHLCV 아님). "
         "봉별 시계열이 필요하면 get_chart를 별도 호출."
     )
-    return "\n".join(lines)
+    return _append_result_meta("\n".join(lines), _kr_meta(kind="bars"))
 
 
 @mcp.tool()
@@ -1384,6 +1501,9 @@ async def get_indicators(
         "timeframe": timeframe,
         "days": days,
         "indicators": result,
+        # JSON 도구라 텍스트 봉투 대신 payload 안에 넣는다. 장중이면 data_basis가
+        # in_progress_bar가 되어 "이 판정은 마감 때 뒤집힐 수 있다"가 명시된다.
+        "_meta": _kr_meta(kind="bars", code=code, data_as_of=ohlcv[-1].get("date")),
     }
     return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
 
@@ -1432,12 +1552,18 @@ async def get_indicators_bulk(
             return code, {"error": f"{type(e).__name__}: {e}"}
 
     results = await asyncio.gather(*[one(c) for c in codes])
+    failed = sum(1 for _, data in results if "error" in data)
     payload = {
         "timeframe": timeframe,
         "days": days,
         "include": include,
         "count": len(results),
         "results": {code: data for code, data in results},
+        "_meta": _kr_meta(
+            kind="bars",
+            data_completeness=rmeta.PARTIAL if failed else rmeta.COMPLETE,
+            warnings=[f"{failed}개 종목 조회 실패 — results의 error 필드 확인."] if failed else None,
+        ),
     }
     return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
 
@@ -1777,7 +1903,7 @@ async def get_etf_list(
     lines.append("")
     lines.append("카테고리: " + ", ".join(data["categories"].values()))
 
-    return "\n".join(lines)
+    return _append_result_meta("\n".join(lines), _kr_meta(kind="snapshot"))
 
 
 @mcp.tool()
@@ -1868,7 +1994,7 @@ async def get_etf_info(code: str) -> str:
             for h in holdings[:10]:
                 lines.append(f"{h['name']} | {h['shares']:,.0f}")
 
-    return "\n".join(lines)
+    return _append_result_meta("\n".join(lines), _kr_meta(kind="snapshot", code=code))
 
 
 # ========================================
@@ -1964,7 +2090,7 @@ async def get_us_price(ticker: str) -> str:
         lines.append(f"시가총액: {_fmt_num(data['market_cap'])}")
     if data.get("market_state"):
         lines.append(f"마켓 상태: {data['market_state']}")
-    return "\n".join(lines)
+    return _append_result_meta("\n".join(lines), _us_meta(kind="snapshot", ticker=ticker))
 
 
 @mcp.tool()
@@ -2002,7 +2128,7 @@ async def get_us_info(ticker: str) -> str:
         lines.append("")
         lines.append("## 사업 요약")
         lines.append(summary[:800] + ("..." if len(summary) > 800 else ""))
-    return "\n".join(lines)
+    return _append_result_meta("\n".join(lines), _us_meta(kind="snapshot", ticker=ticker))
 
 
 @mcp.tool()
@@ -2050,7 +2176,7 @@ async def get_us_chart(
             f"💡 더 필요하면 `limit={min(total, 5000)}`로 재호출하세요. "
             f"백테스트·CSV 저장 용도면 **export_us_to_excel** 로 파일 저장 (토큰 0)."
         )
-    return "\n".join(lines)
+    return _append_result_meta("\n".join(lines), _us_meta(kind="bars"))
 
 
 @mcp.tool()
@@ -2120,7 +2246,7 @@ async def get_us_financials(ticker: str) -> str:
     lines.append(f"- Dividend Yield: {_fmt_yield(data.get('dividend_yield'))}")
     lines.append(f"- Payout Ratio: {_fmt_ratio(data.get('payout_ratio'))}")
 
-    return "\n".join(lines)
+    return _append_result_meta("\n".join(lines), _us_meta(kind="filing", ticker=ticker))
 
 
 @mcp.tool()
@@ -2168,7 +2294,7 @@ async def get_us_earnings(ticker: str) -> str:
             sur = e.get("surprise(%)") or e.get("surprise_%") or e.get("surprise")
             lines.append(f"{date} | {_fmt_num(est)} | {_fmt_num(rep)} | {_fmt_num(sur)}%")
 
-    return "\n".join(lines)
+    return _append_result_meta("\n".join(lines), _us_meta(kind="filing", ticker=ticker))
 
 
 @mcp.tool()
@@ -2299,7 +2425,7 @@ async def get_us_analyst(ticker: str) -> str:
                     f"{e.get('downLast30days') or e.get('downlast30days') or 0}"
                 )
 
-    return "\n".join(lines)
+    return _append_result_meta("\n".join(lines), _us_meta(kind="filing", ticker=ticker))
 
 
 @mcp.tool()
@@ -2354,7 +2480,7 @@ async def get_us_dividends(ticker: str, limit: int = 12) -> str:
         lines.append("")
         lines.append("배당 이력 없음 (무배당 주식일 수 있습니다).")
 
-    return "\n".join(lines)
+    return _append_result_meta("\n".join(lines), _us_meta(kind="filing", ticker=ticker))
 
 
 # --- US Phase 2 tools ---
@@ -2476,7 +2602,7 @@ async def get_us_insider(ticker: str) -> str:
             recent = str(r.get("latest_transaction_date", ""))[:10]
             lines.append(f"{name} | {pos} | {held_s} | {recent}")
 
-    return "\n".join(lines)
+    return _append_result_meta("\n".join(lines), _us_meta(kind="filing", ticker=ticker))
 
 
 @mcp.tool()
@@ -2503,7 +2629,7 @@ async def get_us_holders(ticker: str) -> str:
     if not has_any:
         lines.append("")
         lines.append("보유자 정보 없음 (ETF·신규 상장·소형주의 경우 데이터가 제공되지 않을 수 있습니다).")
-        return "\n".join(lines)
+        return _append_result_meta("\n".join(lines), _us_meta(kind="filing", ticker=ticker))
 
     inst_pct = data.get("held_pct_institutions")
     insd_pct = data.get("held_pct_insiders")
@@ -2559,7 +2685,7 @@ async def get_us_holders(ticker: str) -> str:
                 val_s = str(val)
             lines.append(f"- {label}: {val_s}")
 
-    return "\n".join(lines)
+    return _append_result_meta("\n".join(lines), _us_meta(kind="filing", ticker=ticker))
 
 
 @mcp.tool()
@@ -2611,7 +2737,7 @@ async def get_us_short(ticker: str) -> str:
         lines.append(f"- 전월 ({_ts(prior_date)}): {prior:,.0f}")
         lines.append(f"- 변동: {change:+,.0f} ({pct:+.2f}%)")
 
-    return "\n".join(lines)
+    return _append_result_meta("\n".join(lines), _us_meta(kind="filing", ticker=ticker))
 
 
 @mcp.tool()
@@ -2643,7 +2769,7 @@ async def get_us_filings(ticker: str, limit: int = 15) -> str:
         url = f.get("edgar_url") or "-"
         lines.append(f"{date} | **{typ}** | {title} | [link]({url})")
 
-    return "\n".join(lines)
+    return _append_result_meta("\n".join(lines), _us_meta(kind="filing", ticker=ticker))
 
 
 @mcp.tool()
@@ -2779,7 +2905,15 @@ async def get_consensus(code: str) -> str:
     lines.append("※ 금액 단위: 억원, 에프앤가이드 기준")
     lines.append("※ 목표주가·투자의견·컨센서스는 증권사 전망치이며 미래 수익을 보장하지 않습니다.")
 
-    return "\n".join(lines)
+    # 가장 최근 잠정치 발표일을 기준일로. 이 날짜가 그대로
+    # get_event_reaction(event_date=...)로 넘어간다.
+    announced = [d for d in (data.get("earnings_surprise_dates") or []) if rmeta.normalize_day(d)]
+    meta = _kr_meta(
+        kind="filing", code=code,
+        data_as_of=announced[-1] if announced else None,
+        data_period=f"{periods[-1][:4]}.{periods[-1][4:]}" if periods else None,
+    )
+    return _append_result_meta("\n".join(lines), meta)
 
 
 @mcp.tool()
@@ -2833,7 +2967,7 @@ async def get_reports(code: str, count: int = 5) -> str:
 
     lines.append("※ 목표가·투자의견은 각 증권사 분석 의견이며 미래 수익을 보장하지 않습니다.")
 
-    return "\n".join(lines)
+    return _append_result_meta("\n".join(lines), _kr_meta(kind="filing", code=code))
 
 
 @mcp.tool()
@@ -2866,7 +3000,7 @@ async def get_disclosure(code: str) -> str:
     lines.append("")
     lines.append("※ 공시 본문은 DART(dart.fss.or.kr)에서 확인 가능합니다.")
 
-    return "\n".join(lines)
+    return _append_result_meta("\n".join(lines), _kr_meta(kind="filing", code=code))
 
 
 # --- US Phase 3: 탐색/시장/재무제표/ETF/멀티 ---
@@ -2919,7 +3053,7 @@ async def get_us_market() -> str:
         ch_s = f"{change:+,.2f}" if isinstance(change, (int, float)) else "-"
         chp_s = f"{chp:+.2f}%" if isinstance(chp, (int, float)) else "-"
         lines.append(f"{i['label']} | {i.get('symbol', '-')} | {price_s} | {ch_s} | {chp_s} | {i.get('market_state', '-')}")
-    return "\n".join(lines)
+    return _append_result_meta("\n".join(lines), _us_meta(kind="snapshot"))
 
 
 @mcp.tool()
@@ -2966,7 +3100,7 @@ async def get_us_screener(preset: str = "day_gainers", count: int = 20) -> str:
         price_s = f"${price:,.2f}" if isinstance(price, (int, float)) else "-"
         name = (q.get("name") or "-")[:30]
         lines.append(f"{q['symbol']} | {name} | {price_s} | {chp_s} | {vol_s} | {mcap_s} | {pe_s}")
-    return "\n".join(lines)
+    return _append_result_meta("\n".join(lines), _us_meta(kind="snapshot"))
 
 
 @mcp.tool()
@@ -3022,7 +3156,7 @@ async def get_us_financial_statement(
                 vals.append(str(v))
         lines.append(f"{r['item']} | " + " | ".join(vals))
 
-    return "\n".join(lines)
+    return _append_result_meta("\n".join(lines), _us_meta(kind="filing"))
 
 
 @mcp.tool()
@@ -3077,7 +3211,7 @@ async def get_us_sector(sector_key: str, top_n: int = 20) -> str:
             mw_s = f"{mw*100:.2f}%" if isinstance(mw, (int, float)) else "-"
             lines.append(f"{idx} | **{sym}** {name} | {rating} | {mw_s}")
 
-    return "\n".join(lines)
+    return _append_result_meta("\n".join(lines), _us_meta(kind="snapshot"))
 
 
 @mcp.tool()
@@ -3150,7 +3284,7 @@ async def get_us_etf_info(ticker: str) -> str:
         lines.append("")
         lines.append(f"_{desc[:400]}_")
 
-    return "\n".join(lines)
+    return _append_result_meta("\n".join(lines), _us_meta(kind="snapshot", ticker=ticker))
 
 
 @mcp.tool()
@@ -3192,7 +3326,7 @@ async def get_us_multi_price(tickers: list[str]) -> str:
         name = (r.get("name") or "-")[:25]
         lines.append(f"**{r['ticker']}** | {name} | {price_s} | {ch_s} | {chp_s} | {vol_s} | {mcap_s}")
 
-    return "\n".join(lines)
+    return _append_result_meta("\n".join(lines), _us_meta(kind="snapshot", ticker=ticker))
 
 
 @mcp.tool()
