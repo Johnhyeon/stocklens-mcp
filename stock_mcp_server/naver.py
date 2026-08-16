@@ -287,6 +287,13 @@ async def get_financials(code: str) -> dict:
                         "annual": periods_flat[:annual_count],
                         "quarterly": periods_flat[annual_count:],
                     }
+                    # thead 3행은 컬럼별 재무기준(IFRS연결/IFRS별도). 예전엔 통째로
+                    # 버려서, 연결과 별도가 섞인 종목도 한 줄로 보여 비교 범위가
+                    # 달라진 걸 알 수 없었다.
+                    if len(thead_rows) >= 3:
+                        bases = [th.text.strip() for th in thead_rows[2].select("th")]
+                        if len(bases) == len(periods_flat):
+                            result["_fs_basis"] = bases
 
             for row in table.select("tbody tr"):
                 th = row.select_one("th")
@@ -1197,8 +1204,12 @@ async def get_etf_list(
     }
 
 
-def _parse_float(text: str, default: float = 0.0) -> float:
-    """쉼표·공백 등을 제거하고 float로 변환."""
+def _parse_float(text: str, default: float | None = 0.0) -> float | None:
+    """쉼표·공백 등을 제거하고 float로 변환.
+
+    default=None을 넘기면 결측을 0이 아니라 None으로 돌려준다 — 베타·보수율처럼
+    0이 그 자체로 의미를 갖는 필드는 결측과 0을 반드시 구분해야 한다.
+    """
     if not text:
         return default
     cleaned = text.strip().replace(",", "").replace("+", "")
@@ -1248,7 +1259,7 @@ async def get_etf_detail(code: str) -> dict:
         result["base_index"] = summary.get("BASE_IDX_NM_KOR", "")
         result["issuer"] = summary.get("ISSUE_NM_KOR", "")
         result["etf_type"] = summary.get("ETF_TYP_SVC_NM", "")
-        result["total_fee"] = _parse_float(summary.get("TOT_PAY", ""))
+        result["total_fee"] = _parse_float(summary.get("TOT_PAY", ""), None)
 
     if product:
         result["listing_date"] = product.get("LIST_DT", "")
@@ -1259,20 +1270,23 @@ async def get_etf_detail(code: str) -> dict:
         result["website"] = product.get("URL", "")
 
     if status:
-        result["price"] = _parse_float(status.get("CLS_PRC", ""))
-        result["price_change"] = _parse_float(status.get("PRC_CHG", ""))
-        result["price_change_rate"] = _parse_float(status.get("ADJ_CHG", ""))
-        result["year_high"] = _parse_float(status.get("YR_HIGH", ""))
-        result["year_low"] = _parse_float(status.get("YR_LOW", ""))
-        result["market_cap"] = _parse_float(status.get("MKT_VAL", ""))  # 억원
-        result["nav"] = _parse_float(status.get("CLS_PRC", ""))  # fallback
-        result["beta"] = _parse_float(status.get("YR_BETA", ""))
-        result["foreign_rate"] = _parse_float(status.get("FRG_RT", ""))
-        result["return_1m"] = _parse_float(status.get("ERN1", ""))
-        result["return_3m"] = _parse_float(status.get("ERN3", ""))
-        result["return_6m"] = _parse_float(status.get("ERN6", ""))
-        result["return_1y"] = _parse_float(status.get("ERN12", ""))
-        result["volume_20d_avg"] = _parse_float(status.get("AVG_TRD_QTY20", ""))
+        # 결측은 None으로 — 0으로 채우면 "보수 0%", "베타 0.00"처럼 읽힌다.
+        result["price"] = _parse_float(status.get("CLS_PRC", ""), None)
+        result["price_change"] = _parse_float(status.get("PRC_CHG", ""), None)
+        result["price_change_rate"] = _parse_float(status.get("ADJ_CHG", ""), None)
+        result["year_high"] = _parse_float(status.get("YR_HIGH", ""), None)
+        result["year_low"] = _parse_float(status.get("YR_LOW", ""), None)
+        result["market_cap"] = _parse_float(status.get("MKT_VAL", ""), None)  # 억원
+        result["beta"] = _parse_float(status.get("YR_BETA", ""), None)
+        result["foreign_rate"] = _parse_float(status.get("FRG_RT", ""), None)
+        result["return_1m"] = _parse_float(status.get("ERN1", ""), None)
+        result["return_3m"] = _parse_float(status.get("ERN3", ""), None)
+        result["return_6m"] = _parse_float(status.get("ERN6", ""), None)
+        result["return_1y"] = _parse_float(status.get("ERN12", ""), None)
+        result["volume_20d_avg"] = _parse_float(status.get("AVG_TRD_QTY20", ""), None)
+        # NAV(순자산가치)에 종가를 넣던 fallback을 제거했다. 종가와 NAV는 다르고
+        # (둘의 차이가 괴리율이다) 'nav'라는 이름으로 종가를 내보내면 괴리율이
+        # 항상 0으로 계산된다.
 
     # 구성종목
     if cu_raw and "grid_data" in cu_raw:
@@ -1350,23 +1364,64 @@ async def get_consensus(code: str) -> dict:
             for item in ago
         }
 
-    # 실적 추정치
+    # 어닝 서프라이즈 (컨센서스 vs 잠정치)
     res_data = _extract_json_var("res")
-    if res_data and "yymm" in res_data:
-        result["estimate_periods"] = res_data["yymm"]
-        # wisereport res.data 인덱스: 0=매출액, 1=영업이익, 2=영업이익률(%)
-        # 3번 이후는 페이지마다 다를 수 있어 안전한 것만 사용
-        labels = ["매출액", "영업이익", "영업이익률"]
-        estimates = {}
-        for i, row in enumerate(res_data.get("data", [])):
-            if i < len(labels):
-                vals = {}
-                for period_idx, period in enumerate(res_data["yymm"]):
-                    vals[period] = row.get(str(period_idx + 1))
-                estimates[labels[i]] = vals
-        result["estimates"] = estimates
+    surprise = _parse_earnings_surprise(res_data) if res_data else None
+    if surprise:
+        result["earnings_surprise"] = surprise
+        result["earnings_surprise_periods"] = res_data["yymm"]
+        result["earnings_surprise_dates"] = res_data.get("yymmdd") or []
 
     return result
+
+
+# wisereport의 `var res`는 페이지 하단 '펀더멘털 > 어닝서프라이즈' 표(#earning_list)를
+# 채우는 payload다. data 행에 이름이 없어 **위치로만** 구분된다:
+#   0~4: 영업이익   (컨센서스 / 잠정치 / Surprise% / 전년동기대비 / 전분기대비)
+#   5~9: 당기순이익 (동일 순서)
+# 매출액은 이 표에 아예 없다. 예전 코드는 0~2를 [매출액, 영업이익, 영업이익률]로
+# 라벨링해서 영업이익 컨센서스를 매출액으로, 어닝쇼크(-71.8%)를 영업이익률로
+# 내보냈다(디오 2025.12 실측). 위치 가정이 깨지면 또 조용히 틀린 숫자가 나가므로
+# 아래에서 Surprise 항등식으로 자가검증하고, 안 맞으면 아무것도 반환하지 않는다.
+_SURPRISE_ROW_BASE = {"영업이익": 0, "당기순이익": 5}
+
+# 반올림 표기 오차만 허용. 행이 밀리면 이 정도로는 절대 안 맞는다.
+_SURPRISE_TOLERANCE_PCT = 0.5
+
+
+def _parse_earnings_surprise(res_data: dict) -> dict | None:
+    """어닝서프라이즈 payload → {지표: {기간: {consensus, actual, surprise}}}.
+
+    행 위치 가정을 Surprise = (잠정치-컨센서스)/|컨센서스|×100 항등식으로 검증한다.
+    한 건이라도 어긋나면(=행 배치가 바뀜) None을 돌려 섹션 자체를 생략한다.
+    검증할 표본이 하나도 없어도 None — 검증 못 한 숫자는 내보내지 않는다.
+    """
+    periods = res_data.get("yymm") or []
+    data = res_data.get("data") or []
+    if not periods or len(data) < max(_SURPRISE_ROW_BASE.values()) + 3:
+        return None
+
+    out: dict[str, dict] = {}
+    verified = 0
+    for metric, base in _SURPRISE_ROW_BASE.items():
+        rows: dict[str, dict] = {}
+        for idx, period in enumerate(periods):
+            key = str(idx + 1)
+            consensus = data[base].get(key)
+            actual = data[base + 1].get(key)
+            surprise = data[base + 2].get(key)
+            if consensus and actual is not None and surprise is not None:
+                expected = (actual - consensus) / abs(consensus) * 100
+                if abs(expected - surprise) > _SURPRISE_TOLERANCE_PCT:
+                    return None
+                verified += 1
+            rows[period] = {
+                "consensus": consensus,
+                "actual": actual,
+                "surprise": surprise,
+            }
+        out[metric] = rows
+    return out if verified else None
 
 
 # ---------------------------------------------------------------------------

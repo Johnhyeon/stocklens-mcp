@@ -177,6 +177,12 @@ async def get_financial_info(ticker: str) -> dict | None:
         return None
     return {
         "ticker": info.get("symbol"),
+        # 거래통화(currency)와 재무제표 통화(financialCurrency)는 ADR에서 갈린다.
+        # 예: TSM은 USD로 거래되고 재무는 TWD — yfinance의 priceToBook은 USD 주가를
+        # TWD BPS로 나눈 값이라 88배 같은 무의미한 수가 나온다. 숫자는 출처대로 두되
+        # 통화를 반드시 표시해 혼합 여부를 읽는 쪽이 알 수 있게 한다.
+        "currency": info.get("currency"),
+        "financial_currency": info.get("financialCurrency"),
         "trailing_pe": _clean(info.get("trailingPE")),
         "forward_pe": _clean(info.get("forwardPE")),
         "peg_ratio": _clean(info.get("trailingPegRatio")),

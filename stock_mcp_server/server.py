@@ -203,6 +203,12 @@ mcp = FastMCP(
    생성하는 것은 토큰 낭비이자 부정확하다. 수치는 반환된 표로 충분하다. 사용자가 굳이
    시각 차트를 원하면 임의로 그리지 말고 어떤 형태를 원하는지 먼저 확인하라.
 3. 데이터에 없는 해석·전망을 학습지식으로 채우지 마라. 반환에 담긴 판정 라벨·수치 안에서만 말한다.
+4. **단위·통화·기준을 바꿔 쓰지 마라.** 컬럼명과 `※` 주석에 단위(억원/원/주/%),
+   통화(USD/TWD), 재무기준(IFRS연결/별도)이 명시돼 있다. 그 라벨을 떼고 숫자만
+   옮기거나, 명시 안 된 단위를 추측해 붙이지 마라.
+5. **`데이터 없음`·`추정`·`⚠️`는 그대로 전달하라.** "데이터 없음"을 0으로 바꾸지 말고,
+   `단위: 억원 **추정**`이 붙은 값을 확정 수치로 쓰지 말고, `⚠️통화혼합`이 붙은 비율
+   (P/B·P/S 등)을 정상 밸류에이션처럼 해석하지 마라.
 
 ## 도구 역할 구분
 - `get_chart`: **OHLCV 시계열 데이터** (수치 분석·요약용, count 최소 120)
@@ -239,7 +245,9 @@ mcp = FastMCP(
    같은 원칙으로 사용자에게 "이 중 어떤 뜻으로 물으신 건가요?" 하고 되물어라.
 
 ## 분석 도구
-- `get_consensus`: 컨센서스 — 증권사 투자의견, 목표주가, 실적 추정치
+- `get_consensus`: 컨센서스 — 증권사 투자의견·목표주가 + **어닝 서프라이즈**
+  (영업이익·당기순이익의 컨센서스 vs 잠정치). **매출액은 이 도구에 없다** — 매출은
+  `get_financial`(네이버 실적표) 또는 DartLens `get_major_accounts`(공시 원본)로.
 - `get_reports`: 증권사 리포트 — 목록 + 본문 요약 + PDF 링크
 - `get_disclosure`: 공시 목록 — DART 전자공시 제목/날짜
 - DartLens가 함께 설치되어 있으면: StockLens 주가·수급 이상 구간 → DartLens 해당 기간 공시 확인,
@@ -948,8 +956,32 @@ async def get_financial(code: str) -> str:
         return " | ".join(parts)
 
     lines = [f"종목: {data.get('name', code)} ({code})", ""]
+
+    # 단위·재무기준을 안 적어 매출액 1,558이 억원인지 백만원인지 알 수 없었다.
+    # 행 이름에 단위가 붙은 항목(EPS(원)·PER(배) 등)은 그대로 두고, 단위가 없는
+    # 금액·비율 행이 무엇인지만 여기서 한 번 선언한다.
+    lines.append(
+        "※ 단위 — 매출액·영업이익·당기순이익: **억원** / "
+        "영업이익률·순이익률·ROE·부채비율·당좌비율·유보율: **%** "
+        "(네이버 금융 기업실적분석 표 기준). 그 외 행은 이름에 단위 표기."
+    )
+    basis = data.get("_fs_basis") or []
+    if basis:
+        uniq = sorted(set(b for b in basis if b))
+        if len(uniq) == 1:
+            lines.append(f"※ 재무기준: {uniq[0]} (전 기간 동일)")
+        elif uniq:
+            all_periods = list(annual) + list(quarterly)
+            pairs = [f"{p}={b}" for p, b in zip(all_periods, basis) if b]
+            lines.append(
+                "※ ⚠️ 재무기준이 기간마다 다릅니다 — " + ", ".join(pairs)
+                + ". 연결과 별도는 비교 범위가 달라 나란히 읽으면 안 됩니다."
+            )
+    lines.append("※ (E)는 확정 실적이 아니라 증권사 컨센서스 추정치입니다.")
+    lines.append("")
+
     for key, value in data.items():
-        if key in ("code", "name", "_periods"):
+        if key in ("code", "name", "_periods", "_fs_basis"):
             continue
         if isinstance(value, list):
             if annual or quarterly:
@@ -1156,15 +1188,16 @@ async def get_volume_ranking(
 
     sort_label = "거래대금" if sort_by == "trade_value" else "거래량"
     lines = [f"{sort_label} 상위 ({market}, {len(ranks)}개, 정렬={sort_by}):", ""]
-    lines.append("순위 | 코드 | 종목명 | 현재가 | 등락률 | 거래량(주) | 거래대금(원)")
-    lines.append("---|---|---|---|---|---|---")
+    # 헤더가 '거래대금(원)'인데 셀은 억 단위로 찍혀 헤더와 값이 어긋나 있었다.
+    # 단위는 헤더 한 곳에서만 선언하고 셀은 숫자만 둔다.
+    lines.append("순위 | 코드 | 종목명 | 현재가(원) | 등락률 | 거래량(주) | 거래대금(억원)")
+    lines.append("---|---|---|---:|---:|---:|---:")
     for r in ranks:
-        tv = r.get("trade_value_krw", 0)
-        # 거래대금 억원 단위 표시 (가독성)
-        tv_billion = tv / 100_000_000
+        tv = r.get("trade_value_krw")
+        tv_cell = f"{tv / 100_000_000:,.1f}" if tv is not None else "-"
         lines.append(
             f"{r['rank']} | {r['code']} | {r['name']} | {r['price']:,} | "
-            f"{r['change_rate']} | {r['volume']:,} | {tv_billion:,.1f}억"
+            f"{r['change_rate']} | {r['volume']:,} | {tv_cell}"
         )
     return "\n".join(lines)
 
@@ -1728,14 +1761,16 @@ async def get_etf_list(
         chg_sign = "+" if chg > 0 else ""
         ret3m = it.get("return_3m")
         ret3m_str = f" | 3M: {'+' if ret3m > 0 else ''}{ret3m:.1f}%" if ret3m else ""
-        mcap = it.get("market_cap", 0)
-        mcap_str = f"{mcap:,.0f}억" if mcap else ""
+        mcap = it.get("market_cap")
+        price = it.get("price")
+        nav = it.get("nav")
 
         lines.append(
             f"- **{it['name']}** ({it['code']}) "
-            f"| {it.get('price', 0):,.0f}원 ({chg_sign}{chg:.2f}%) "
-            f"| NAV {it.get('nav', 0):,.0f} "
-            f"| 시총 {mcap_str}"
+            f"| {f'{price:,.0f}원' if price is not None else '가격 없음'} "
+            f"({chg_sign}{chg:.2f}%) "
+            f"| NAV {f'{nav:,.0f}원' if nav is not None else '없음'} "
+            f"| 시총 {f'{mcap:,.0f}억원' if mcap else '없음'}"
             f"{ret3m_str}"
         )
 
@@ -1762,16 +1797,27 @@ async def get_etf_info(code: str) -> str:
     if not data.get("name"):
         return f"ETF코드 {code}의 정보를 가져올 수 없습니다. 코드를 확인해주세요."
 
+    # 예전엔 결측을 0으로 채워 "베타 0.00", "펀드보수 연 0.000%", "외국인 비율
+    # 0.00%"처럼 **의미 있는 값**으로 보이게 출력했다. 0과 '없음'은 다르다.
+    def _num(key: str, fmt: str, suffix: str = "", *, signed: bool = False) -> str:
+        v = data.get(key)
+        if v is None:
+            return "데이터 없음"
+        s = format(v, fmt)
+        if signed and v > 0:
+            s = "+" + s
+        return s + suffix
+
     lines = [
         f"# {data['name']} ({code})",
         "",
         "## 기본 정보",
-        f"- 기초지수: {data.get('base_index', '-')}",
-        f"- 유형: {data.get('etf_type', '-')}",
-        f"- 자산운용사: {data.get('issuer', '-')}",
-        f"- 상장일: {data.get('listing_date', '-')}",
-        f"- 펀드보수: 연 {data.get('total_fee', 0):.3f}%",
-        f"- 펀드유형: {data.get('fund_type', '-')}",
+        f"- 기초지수: {data.get('base_index') or '-'}",
+        f"- 유형: {data.get('etf_type') or '-'}",
+        f"- 자산운용사: {data.get('issuer') or '-'}",
+        f"- 상장일: {data.get('listing_date') or '-'}",
+        f"- 펀드보수: 연 {_num('total_fee', '.3f', '%')}",
+        f"- 펀드유형: {data.get('fund_type') or '-'}",
     ]
 
     if data.get("dividend_base"):
@@ -1779,24 +1825,28 @@ async def get_etf_info(code: str) -> str:
 
     lines.append("")
     lines.append("## 시세 정보")
-    lines.append(f"- 현재가: {data.get('price', 0):,.0f}원")
+    lines.append(f"- 현재가: {_num('price', ',.0f', '원')}")
 
-    chg = data.get("price_change", 0)
-    chg_rate = data.get("price_change_rate", 0)
-    chg_sign = "+" if chg > 0 else ""
-    lines.append(f"- 전일대비: {chg_sign}{chg:,.0f}원 ({chg_sign}{chg_rate:.2f}%)")
-    lines.append(f"- 시가총액: {data.get('market_cap', 0):,.0f}억원")
-    lines.append(f"- 52주 최고/최저: {data.get('year_high', 0):,.0f} / {data.get('year_low', 0):,.0f}")
-    lines.append(f"- 베타: {data.get('beta', 0):.2f}")
-    lines.append(f"- 외국인 비율: {data.get('foreign_rate', 0):.2f}%")
+    chg = data.get("price_change")
+    chg_rate = data.get("price_change_rate")
+    if chg is None or chg_rate is None:
+        lines.append("- 전일대비: 데이터 없음")
+    else:
+        chg_sign = "+" if chg > 0 else ""
+        lines.append(f"- 전일대비: {chg_sign}{chg:,.0f}원 ({chg_sign}{chg_rate:.2f}%)")
+    lines.append(f"- 시가총액: {_num('market_cap', ',.0f', '억원')}")
+    lines.append(
+        f"- 52주 최고/최저: {_num('year_high', ',.0f', '원')} / "
+        f"{_num('year_low', ',.0f', '원')}"
+    )
+    lines.append(f"- 베타: {_num('beta', '.2f')}")
+    lines.append(f"- 외국인 비율: {_num('foreign_rate', '.2f', '%')}")
 
     lines.append("")
     lines.append("## 수익률")
     for period, key in [("1개월", "return_1m"), ("3개월", "return_3m"),
                         ("6개월", "return_6m"), ("1년", "return_1y")]:
-        val = data.get(key, 0)
-        sign = "+" if val > 0 else ""
-        lines.append(f"- {period}: {sign}{val:.2f}%")
+        lines.append(f"- {period}: {_num(key, '.2f', '%', signed=True)}")
 
     holdings = data.get("holdings", [])
     if holdings:
@@ -2020,7 +2070,24 @@ async def get_us_financials(ticker: str) -> str:
     if data is None:
         return f"티커 '{ticker}'의 재무 데이터를 가져올 수 없습니다."
 
-    lines = [f"**{data['ticker']}** 재무지표", "", "## Valuation"]
+    trade_ccy = data.get("currency") or "?"
+    fin_ccy = data.get("financial_currency") or "?"
+    mixed = trade_ccy != "?" and fin_ccy != "?" and trade_ccy != fin_ccy
+
+    lines = [f"**{data['ticker']}** 재무지표", ""]
+    lines.append(f"거래통화: {trade_ccy} / 재무제표 통화: {fin_ccy}")
+    if mixed:
+        # ADR은 주가와 재무제표의 통화가 달라 yfinance가 두 통화를 섞어 비율을
+        # 계산한다. 값을 임의로 고치지 않고 어떤 항목이 오염됐는지만 명시한다.
+        lines.append(
+            f"⚠️ **통화 불일치** — 주가는 {trade_ccy}, 재무제표는 {fin_ccy}입니다. "
+            f"주가와 재무를 함께 쓰는 항목(**P/B, P/S, PEG, Trailing/Forward P/E**)은 "
+            f"두 통화를 섞어 계산된 값이라 그대로 해석하면 안 됩니다. "
+            f"Per Share 항목도 EPS는 {trade_ccy}, Book Value·Revenue/Share는 "
+            f"{fin_ccy} 기준일 수 있습니다. 비율(%)·성장률은 통화 무관이라 유효합니다."
+        )
+    lines.append("")
+    lines.append("## Valuation" + (" ⚠️통화혼합" if mixed else ""))
     lines.append(f"- Trailing P/E: {_fmt_num(data.get('trailing_pe'))}")
     lines.append(f"- Forward P/E: {_fmt_num(data.get('forward_pe'))}")
     lines.append(f"- PEG Ratio: {_fmt_num(data.get('peg_ratio'))}")
@@ -2028,7 +2095,7 @@ async def get_us_financials(ticker: str) -> str:
     lines.append(f"- P/S (TTM): {_fmt_num(data.get('price_to_sales'))}")
 
     lines.append("")
-    lines.append("## Per Share")
+    lines.append("## Per Share" + (" ⚠️통화혼합" if mixed else f" ({trade_ccy}/{fin_ccy})"))
     lines.append(f"- EPS (Trailing): {_fmt_num(data.get('eps_trailing'))}")
     lines.append(f"- EPS (Forward): {_fmt_num(data.get('eps_forward'))}")
     lines.append(f"- Revenue/Share: {_fmt_num(data.get('revenue_per_share'))}")
@@ -2623,9 +2690,13 @@ async def get_us_news(ticker: str, limit: int = 10) -> str:
 @safe_tool
 @track_metrics("get_consensus")
 async def get_consensus(code: str) -> str:
-    """컨센서스 — 증권사 투자의견, 목표주가, 실적 추정치 (매출액/영업이익 컨센서스).
+    """컨센서스 — 증권사 투자의견·목표주가 + 어닝 서프라이즈(컨센서스 대비 잠정치).
 
-    "목표가 얼마야", "컨센서스", "증권사 의견", "적정가", "실적 전망" 같은 질문에 사용합니다.
+    "목표가 얼마야", "컨센서스", "증권사 의견", "적정가", "어닝 서프라이즈/쇼크" 같은
+    질문에 사용합니다.
+
+    어닝 서프라이즈 표는 **영업이익·당기순이익**만 다룹니다 (에프앤가이드 원표에
+    매출액이 없음). 매출 실적·전망은 `get_financial`을 쓰세요.
 
     Args:
         code: 종목코드 6자리 (예: "005930")
@@ -2651,49 +2722,62 @@ async def get_consensus(code: str) -> str:
     if opinion:
         total = sum(opinion.values())
         parts = [f"{k} {v}건" for k, v in opinion.items() if v > 0]
-        lines.append(f"투자의견: {', '.join(parts)} (총 {total}건)")
+        # 전 항목이 0이면 "투자의견:  (총 0건)"이라는 빈 라벨만 남았다.
+        if parts:
+            lines.append(f"투자의견: {', '.join(parts)} (총 {total}건)")
+        else:
+            lines.append("투자의견: 최근 집계 없음")
 
         ago = data.get("opinion_1m_ago", {})
         if ago:
             ago_parts = [f"{k} {v}건" for k, v in ago.items() if v > 0]
             lines.append(f"1개월 전: {', '.join(ago_parts)}")
 
-    # 실적 추정치
-    estimates = data.get("estimates", {})
-    periods = data.get("estimate_periods", [])
-    if estimates and periods:
-        lines.append("")
-        lines.append("### 실적 추정치 (컨센서스)")
-        lines.append("")
-
-        # 기간 헤더
+    # 어닝 서프라이즈 (컨센서스 vs 잠정치)
+    surprise = data.get("earnings_surprise", {})
+    periods = data.get("earnings_surprise_periods", [])
+    if surprise and periods:
         period_labels = [f"{p[:4]}.{p[4:]}" for p in periods]
-        lines.append("지표 | " + " | ".join(period_labels))
-        lines.append("---|" + "|".join(["---"] * len(periods)))
+        lines.append("")
+        lines.append("### 어닝 서프라이즈 (컨센서스 대비 잠정치)")
+        lines.append("")
+        lines.append("지표 | 구분 | " + " | ".join(period_labels))
+        lines.append("---|---|" + "|".join(["---:"] * len(periods)))
 
-        for label in ["매출액", "영업이익"]:
-            vals = estimates.get(label, {})
-            cells = []
-            for p in periods:
-                v = vals.get(p)
-                if v is not None:
-                    cells.append(f"{v:,.0f}")
-                else:
-                    cells.append("-")
-            lines.append(f"{label} | " + " | ".join(cells))
+        for metric in ("영업이익", "당기순이익"):
+            rows = surprise.get(metric)
+            if not rows:
+                continue
+            for field, field_label in (
+                ("consensus", "컨센서스(억원)"),
+                ("actual", "잠정치(억원)"),
+                ("surprise", "Surprise(%)"),
+            ):
+                cells = []
+                for p in periods:
+                    v = (rows.get(p) or {}).get(field)
+                    if v is None:
+                        cells.append("-")
+                    elif field == "surprise":
+                        cells.append(f"{v:+.1f}%")
+                    else:
+                        cells.append(f"{v:,.0f}")
+                lines.append(f"{metric} | {field_label} | " + " | ".join(cells))
 
-        # 영업이익률
-        opr = estimates.get("영업이익률", {})
-        if opr:
-            cells = []
-            for p in periods:
-                v = opr.get(p)
-                cells.append(f"{v:.1f}%" if v is not None else "-")
-            lines.append(f"영업이익률 | " + " | ".join(cells))
+        dates = data.get("earnings_surprise_dates") or []
+        if dates:
+            pairs = [f"{lab}: {d}" for lab, d in zip(period_labels, dates)]
+            lines.append("")
+            lines.append("잠정치 발표(예정)일 · 회계기준 — " + " / ".join(pairs))
+        lines.append("")
+        lines.append(
+            "※ 이 표는 **매출액이 아니라 영업이익·당기순이익**입니다. "
+            "`-`는 아직 발표 전이거나 미집계."
+        )
 
     lines.append("")
-    lines.append("※ 단위: 억원, 에프앤가이드 컨센서스 기준")
-    lines.append("※ 목표주가·투자의견·추정치는 증권사 전망치이며 미래 수익을 보장하지 않습니다.")
+    lines.append("※ 금액 단위: 억원, 에프앤가이드 기준")
+    lines.append("※ 목표주가·투자의견·컨센서스는 증권사 전망치이며 미래 수익을 보장하지 않습니다.")
 
     return "\n".join(lines)
 
