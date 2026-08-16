@@ -136,3 +136,71 @@ class ToolTests(_TmpHome, unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class FinancialBatchTests(_TmpHome, unittest.IsolatedAsyncioTestCase):
+    """재무 비교는 여러 종목을 나란히 보는 일이다.
+
+    실측: 5종목 비교 시 get_financial 5회가 전체 토큰의 78%(17,797자)를 먹었다.
+    비교에 필요한 건 그중 6개 지표뿐인데 19행을 다 뱉기 때문이다.
+    """
+
+    FIN = {
+        "name": "삼성전자",
+        "_periods": {"annual": ["2025.12", "2026.12(E)"], "quarterly": ["2026.03"]},
+        "PER(배)": ["10.0", "9.0", "13.51"],
+        "PBR(배)": ["2.0", "1.9", "2.33"],
+        "ROE(지배주주)": ["15.0", "16.0", "19.16"],
+        "영업이익률": ["30.0", "35.0", "42.75"],
+        "부채비율": ["28.0", "29.0", "30.15"],
+        "시가배당률(%)": ["0.3", "0.3", "0.22"],
+    }
+
+    async def test_uses_latest_confirmed_not_estimate(self):
+        """(E)가 붙은 추정치를 확정처럼 쓰면 안 된다."""
+        with patch.object(server, "get_financials", AsyncMock(return_value=self.FIN)):
+            out = await server.get_financial_batch(["005930"])
+        self.assertIn("13.51", out)          # 2026.03 확정
+        self.assertNotIn("9.0", out)         # 2026.12(E) 추정
+        self.assertIn("2026.03", out)        # 기준 기간 명시
+
+    async def test_units_are_declared(self):
+        with patch.object(server, "get_financials", AsyncMock(return_value=self.FIN)):
+            out = await server.get_financial_batch(["005930"])
+        self.assertIn("PER·PBR: 배", out)
+        self.assertIn("확정", out)
+
+    async def test_failed_stock_is_marked_not_dropped(self):
+        """조회 실패를 조용히 빼면 사용자는 그 종목이 없는 줄 안다."""
+        async def flaky(code):
+            if code == "999999":
+                raise RuntimeError("boom")
+            return self.FIN
+        with patch.object(server, "get_financials", AsyncMock(side_effect=flaky)):
+            out = await server.get_financial_batch(["005930", "999999"])
+        self.assertIn("999999", out)
+        self.assertIn("조회 실패", out)
+
+    async def test_watchlist_stocks_are_starred(self):
+        wl.add("005930", "삼성전자")
+        with patch.object(server, "get_financials", AsyncMock(return_value=self.FIN)):
+            out = await server.get_financial_batch(["005930"])
+        self.assertIn("⭐", out)
+
+    async def test_empty_input_guides(self):
+        self.assertIn("비어 있", await server.get_financial_batch([]))
+
+    async def test_caps_at_30(self):
+        with patch.object(server, "get_financials", AsyncMock(return_value=self.FIN)) as m:
+            await server.get_financial_batch([f"{i:06d}" for i in range(50)])
+        self.assertEqual(m.await_count, 30)
+
+    async def test_single_tool_points_to_batch(self):
+        """get_flow_batch가 11 vs 129로 진 이유가 단건 쪽 안내 부재였다."""
+        import inspect
+        for single, batch in [(server.get_financial, "get_financial_batch"),
+                              (server.get_flow, "get_flow_batch"),
+                              (server.get_price, "get_multi_stocks"),
+                              (server.get_chart, "get_multi_chart_stats")]:
+            doc = inspect.getdoc(single) or ""
+            self.assertIn(batch, doc, f"{single.__name__} 설명이 {batch}를 가리키지 않음")

@@ -273,6 +273,24 @@ payload 안 `_meta` 키로) 붙인다. **날짜를 말하기 전에 반드시 �
 - 사용자가 특정 종목을 반복해서 물어보면 관심종목 등록을 한 번 권해도 좋다.
   다만 매번 권하지는 마라.
 
+## 🔁 여러 종목을 다룰 때 — 같은 도구를 반복하지 마라
+
+**같은 도구를 2번 이상 연달아 부르게 되면 멈추고 배치 도구를 쓴다.**
+실측에서 한 사용자가 재무를 26종목·수급을 71종목에 대해 하나씩 불렀다.
+느리고, 토큰을 몇 배로 쓰고, 화면이 도구 호출로 도배되고, 중간에 끊기면 처음부터다.
+
+| 하나씩 부르지 말고 | 이걸로 |
+|---|---|
+| `get_price` × N | `get_multi_stocks` |
+| `get_chart` × N | `get_multi_chart_stats` (기간 통계만) |
+| `get_flow` × N | `get_flow_batch` |
+| `get_financial` × N | `get_financial_batch` |
+| `get_indicators` × N | `get_indicators_bulk` |
+| `get_us_price` × N | `get_us_multi_price` |
+
+랭킹·테마·스크리닝 결과로 종목 목록을 얻었다면 **그 목록을 통째로** 배치에 넘긴다.
+5종목 비교 실측: 단건 15회 7,367토큰·3.1초 → 배치 3회 1,441토큰·1.0초.
+
 ## 도구 역할 구분
 - `get_chart`: **OHLCV 시계열 데이터** (수치 분석·요약용, count 최소 120)
 - `get_indicators`: **기술지표 판정값** (RSI/MACD/Phase 등 숫자+라벨)
@@ -562,6 +580,8 @@ async def get_chart(
     count: int = 120,
 ) -> str:
     """캔들차트 OHLCV — 종목의 시계열 캔들 데이터(시가/고가/저가/종가/거래량, candlestick OHLCV).
+
+    ⚠️ **여러 종목의 기간 통계만 필요하면 `get_multi_chart_stats`를 쓰세요.**
     "삼성전자 일봉", "3개월 주봉", "월봉 데이터", "price history" 같은 질문에 사용. 시계열 진입점(US는 get_us_chart).
 
     보조지표(이평선·RSI·MACD 등)는 사용자가 명시 요청할 때만 get_indicators로 숫자만 받아 요약.
@@ -754,6 +774,8 @@ def _kr_meta(
 @track_metrics("get_price")
 async def get_price(code: str) -> str:
     """현재가 — 종목의 현재 시세 스냅샷 (오늘 하루치 OHLC + 거래량).
+
+    ⚠️ **종목이 2개 이상이면 `get_multi_stocks`를 쓰세요.**
     "삼성전자 지금 얼마", "현재가", "오늘 시세", "주가 알려줘" 같은 질문에 사용합니다.
 
     ⚠️ **단일 시점 스냅샷**. 과거 시계열 아님. 차트/히스토리 필요 시 get_chart 사용.
@@ -824,6 +846,8 @@ async def get_price(code: str) -> str:
 @track_metrics("get_flow")
 async def get_flow(code: str, days: int = 20) -> str:
     """투자자수급 — 투자자별 매매동향 (기관/외국인 순매매 주식 수)을 가져옵니다.
+
+    ⚠️ **종목이 2개 이상이면 이 도구를 반복하지 말고 `get_flow_batch`를 쓰세요.**
     네이버 증권 소스 특성상 **개인 순매매는 제공되지 않습니다** (기관·외국인만).
     "외국인 수급", "기관 순매수", "수급 분석", "누가 사고 있어" 같은 질문에 사용합니다.
 
@@ -1161,7 +1185,10 @@ async def screen_by_flow(
 @safe_tool
 @track_metrics("get_financial")
 async def get_financial(code: str) -> str:
-    """재무지표 — 종목의 주요 재무지표(PER, PBR, 시가총액 등)를 가져옵니다.
+    """재무지표 — 한 종목의 **전체** 재무지표(연간·분기 추이 19개 항목).
+
+    ⚠️ **여러 종목을 비교하려면 `get_financial_batch`를 쓰세요.** 이 도구는 종목당
+    3,500자를 뱉어서, 5종목만 비교해도 재무가 전체 토큰의 78%를 먹습니다.
     "PER", "PBR", "재무제표", "시가총액", "저평가" 같은 질문에 사용합니다.
 
     Args:
@@ -1235,6 +1262,88 @@ async def get_financial(code: str) -> str:
         data_period=f"{confirmed[-1]} 확정" if confirmed else None,
     )
     return _append_result_meta("\n".join(lines), meta)
+
+
+# 비교표에 쓰는 핵심 지표만. get_financial은 19행을 다 뱉어 종목당 3,559자인데,
+# 여러 종목을 나란히 볼 때 필요한 건 이 정도다(5종목 비교 시 재무가 토큰의 78%였다).
+_FIN_COMPARE_ROWS = [
+    ("PER(배)", "PER"),
+    ("PBR(배)", "PBR"),
+    ("ROE(지배주주)", "ROE%"),
+    ("영업이익률", "영업이익률%"),
+    ("부채비율", "부채비율%"),
+    ("시가배당률(%)", "배당률%"),
+]
+
+
+def _latest_confirmed(periods: dict, values: list[str]) -> tuple[str, str]:
+    """(E)가 안 붙은 마지막 기간의 값. 추정치를 확정처럼 쓰지 않는다."""
+    labels = list(periods.get("annual") or []) + list(periods.get("quarterly") or [])
+    pairs = [(p, v) for p, v in zip(labels, values) if p and "(E)" not in p and v]
+    return pairs[-1] if pairs else ("", "")
+
+
+@mcp.tool()
+@safe_tool
+@track_metrics("get_financial_batch")
+async def get_financial_batch(codes: list[str]) -> str:
+    """재무벌크 — 여러 종목의 핵심 재무지표(PER/PBR/ROE/영업이익률/부채비율/배당률)를 한 표로.
+
+    ⭐ **종목 비교의 기본 도구.** "A와 B를 PER·PBR로 비교", "이 5종목 중 저평가",
+    "업종 내 비교" 같은 요청에 get_financial을 종목마다 부르지 말고 이걸 쓰세요.
+    (실측: 5종목 비교 시 get_financial 5회가 전체 토큰의 78%를 차지했습니다.)
+
+    한 종목의 **전체** 지표(연간·분기 시계열, EPS/BPS/유보율 등)가 필요하면
+    그때만 get_financial을 쓰세요.
+
+    Args:
+        codes: 종목코드 6자리 리스트 (최대 30개)
+    """
+    if not codes:
+        return "종목코드 리스트가 비어 있습니다."
+    codes = [c.strip() for c in codes if c and c.strip()][:30]
+
+    async def one(code: str):
+        try:
+            return code, await get_financials(code)
+        except Exception as e:
+            return code, {"_error": f"{type(e).__name__}"}
+
+    results = await asyncio.gather(*(one(c) for c in codes))
+
+    header = "코드 | 종목명 | " + " | ".join(lbl for _, lbl in _FIN_COMPARE_ROWS) + " | 기준"
+    lines = [f"재무 비교 ({len(results)}종목)", "", header,
+             "---|---|" + "|".join(["---:"] * len(_FIN_COMPARE_ROWS)) + "|---"]
+    failed = 0
+    for code, data in results:
+        if not data or data.get("_error"):
+            failed += 1
+            lines.append(f"{code} | (조회 실패) | " + " | ".join(["-"] * len(_FIN_COMPARE_ROWS)) + " | -")
+            continue
+        periods = data.get("_periods") or {}
+        cells, basis = [], ""
+        for key, _ in _FIN_COMPARE_ROWS:
+            val = data.get(key)
+            if isinstance(val, list):
+                p, v = _latest_confirmed(periods, val)
+                cells.append(v or "-")
+                basis = basis or p
+            else:
+                cells.append(str(val) if val else "-")
+        star = "⭐ " if code in wl.codes() else ""
+        lines.append(f"{code} | {star}{data.get('name', code)} | " + " | ".join(cells) + f" | {basis or '-'}")
+
+    lines.append("")
+    lines.append("※ 단위 — PER·PBR: 배 / 나머지: % · 값은 **(E)가 붙지 않은 최신 확정 기간** 기준")
+    lines.append("※ 전체 지표(연간·분기 추이, EPS/BPS 등)가 필요하면 get_financial을 종목별로 쓰세요.")
+    if failed:
+        lines.append(f"※ {failed}종목 조회 실패 — 상장폐지·거래정지 등일 수 있습니다.")
+
+    return _append_result_meta(
+        "\n".join(lines),
+        _kr_meta(kind="filing",
+                 data_completeness=rmeta.PARTIAL if failed else rmeta.COMPLETE),
+    )
 
 
 @mcp.tool()
