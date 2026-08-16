@@ -80,7 +80,7 @@ class EnvelopeTests(unittest.TestCase):
     def test_meta_version_is_pinned(self):
         """세 Lens가 같은 규약을 쓰는지 확인하는 유일한 표식이다."""
         m = rmeta.build_meta(lens="stocklens", data_basis=rmeta.BASIS_FILING)
-        self.assertEqual(m["meta_v"], 1)
+        self.assertEqual(m["meta_v"], rmeta.META_VERSION)
 
 
 # ---------------------------------------------------------------------------
@@ -271,3 +271,75 @@ class KeyNamesStateTheirDefinitionTests(unittest.TestCase):
             "ratio_vs_avg_20b", "trade_value_est_krw", "volume_rank_252b",
         })
         self.assertTrue(all(val is None for val in v.values()))
+
+
+# ---------------------------------------------------------------------------
+# 6. 해외 사용자 — 시장 시각과 사용자 현지 시각의 분리
+# ---------------------------------------------------------------------------
+
+
+class OverseasViewerTests(unittest.TestCase):
+    """KRX 개장 시각은 어디서 보든 09:00 KST로 같지만, **날짜**는 다르게 읽힌다.
+
+    LA 사용자에게 '다음 개장 2026-08-18'은 현지로 8/17 17:00이다. 날짜만 주면
+    하루 뒤로 읽는다. 그래서 (1) 남은 시간(타임존 무관), (2) 현지 환산 시각,
+    (3) 메타의 viewer_tz 세 가지를 함께 낸다.
+    """
+
+    def _clock_from(self, tzname: str) -> dict:
+        from zoneinfo import ZoneInfo
+        from stock_mcp_server import market_clock as mc
+        original = mc.viewer_now
+        try:
+            mc.viewer_now = lambda: datetime.now(ZoneInfo(tzname))
+            return mc.get_market_clock()
+        finally:
+            mc.viewer_now = original
+
+    def test_countdown_is_timezone_independent(self):
+        """'개장까지 N시간'은 어디서 보든 같아야 한다 — 그게 이 필드의 존재 이유다."""
+        seoul = self._clock_from("Asia/Seoul")["krx"]
+        la = self._clock_from("America/Los_Angeles")["krx"]
+        for key in ("opens_in", "closes_in"):
+            self.assertEqual(seoul[key], la[key], f"{key}가 사용자 위치에 따라 달라짐")
+
+    def test_next_open_rendered_in_viewer_timezone(self):
+        la = self._clock_from("America/Los_Angeles")["krx"]
+        self.assertTrue(la["next_open_local"].endswith("+09:00"), la["next_open_local"])
+        self.assertIn("-0", la["next_open_viewer"][-6:])  # 서부는 음수 오프셋
+        # 같은 순간인데 날짜 표기가 하루 다를 수 있다 — 이게 원래 문제였다
+        self.assertNotEqual(la["next_open_local"][:10] + la["next_open_local"][11:16],
+                            la["next_open_viewer"][:10] + la["next_open_viewer"][11:16])
+
+    def test_domestic_viewer_marked_same_as_kst(self):
+        self.assertTrue(self._clock_from("Asia/Seoul")["viewer"]["same_as_kst"])
+        self.assertFalse(self._clock_from("America/New_York")["viewer"]["same_as_kst"])
+
+    def test_market_open_state_does_not_depend_on_viewer(self):
+        """개장 여부는 시장 시각으로만 정해진다. 사용자 위치로 바뀌면 버그다."""
+        seoul = self._clock_from("Asia/Seoul")
+        sydney = self._clock_from("Australia/Sydney")
+        for market in ("krx", "us"):
+            self.assertEqual(seoul[market]["is_open"], sydney[market]["is_open"])
+            self.assertEqual(seoul[market]["last_trading_day"], sydney[market]["last_trading_day"])
+
+    def test_viewer_tz_absent_for_domestic_user(self):
+        """국내 사용자에게 붙이면 순수 노이즈다."""
+        m = rmeta.build_meta(lens="stocklens", data_basis=rmeta.BASIS_LAST_CLOSE)
+        from datetime import datetime as _dt
+        if _dt.now().astimezone().utcoffset() == _dt.now(rmeta.KST).utcoffset():
+            self.assertNotIn("viewer_tz", m)
+
+    def test_viewer_tz_shape_when_overseas(self):
+        """LA 8/15 18:00 = KST 8/16 10:00. 같은 순간인데 '오늘'이 다른 날이다."""
+        from zoneinfo import ZoneInfo
+        la_evening = datetime(2026, 8, 15, 18, 0, tzinfo=ZoneInfo("America/Los_Angeles"))
+        v = rmeta.viewer_tz(la_evening)
+        self.assertIsNotNone(v)
+        self.assertEqual(v["local_date"], "2026-08-15")
+        self.assertEqual(la_evening.astimezone(rmeta.KST).date().isoformat(), "2026-08-16")
+        self.assertTrue(v["utc_offset"].startswith("-"))
+
+    def test_viewer_tz_none_for_same_offset(self):
+        seoul_now = datetime.now(rmeta.KST)
+        self.assertIsNone(rmeta.viewer_tz(seoul_now))

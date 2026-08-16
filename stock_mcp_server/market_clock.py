@@ -11,6 +11,32 @@ KST = ZoneInfo("Asia/Seoul")
 ET = ZoneInfo("America/New_York")
 
 
+def viewer_now() -> datetime:
+    """사용자 PC의 로컬 시각(타임존 포함).
+
+    해외 구매자가 있다. 개장 시각 자체는 KST로 고정이지만, "다음 개장 2026-08-18"만
+    보여주면 뉴욕 사용자에게는 현지 8/17 저녁이라 **날짜가 하루 어긋난다.**
+    그래서 시장 시각과 사용자 현지 시각을 같이 낸다.
+    """
+    return datetime.now().astimezone()
+
+
+def _fmt_duration(seconds: float | None) -> str | None:
+    """초 → '2일 3시간' / '5시간 20분' / '12분'. 남은 시간은 타임존과 무관해서
+    어디서 보든 그대로 읽힌다."""
+    if seconds is None or seconds < 0:
+        return None
+    total = int(seconds)
+    days, rem = divmod(total, 86400)
+    hours, rem = divmod(rem, 3600)
+    minutes = rem // 60
+    if days:
+        return f"{days}일 {hours}시간" if hours else f"{days}일"
+    if hours:
+        return f"{hours}시간 {minutes}분" if minutes else f"{hours}시간"
+    return f"{minutes}분"
+
+
 @dataclass(frozen=True)
 class SessionHours:
     pre_open: time | None
@@ -90,10 +116,18 @@ def get_market_clock(now: datetime | None = None) -> dict:
         hours=_us_hours(now_et.date()),
         holiday_name_func=_us_holiday_name,
     )
+    viewer = base.astimezone(viewer_now().tzinfo)
     return {
         "source": "stocklens.market_clock",
         "now_kst": now_kst.isoformat(timespec="seconds"),
         "now_et": now_et.isoformat(timespec="seconds"),
+        # 사용자가 어디서 보든 자기 시각을 기준으로 읽을 수 있게. 한국 사용자면
+        "viewer": {                       # KST와 같아서 표시할 때만 걸러낸다.
+            "now": viewer.isoformat(timespec="seconds"),
+            "tz": viewer.tzname() or "",
+            "utc_offset": viewer.strftime("%z"),
+            "same_as_kst": viewer.utcoffset() == now_kst.utcoffset(),
+        },
         "krx": krx,
         "us": us,
         "warnings": [
@@ -103,16 +137,35 @@ def get_market_clock(now: datetime | None = None) -> dict:
     }
 
 
+def _market_lines(label: str, state: dict, viewer: dict) -> list[str]:
+    out = [f"- {label}: {_status_label(state['status'])} ({state['reason']})"]
+    if state["is_open"] and state.get("closes_in"):
+        out.append(f"  마감까지 {state['closes_in']} 남음")
+    elif state.get("opens_in"):
+        out.append(f"  개장까지 {state['opens_in']} 남음")
+    line = f"  최근 거래일: {state['last_trading_day']} / 다음 개장: {state['next_open_local']} (현지 시장시각)"
+    out.append(line)
+    # 사용자 타임존이 시장과 다를 때만 환산을 덧붙인다. 같은 값을 두 번 쓰면 노이즈다.
+    if not viewer["same_as_kst"] or state["timezone"] != "Asia/Seoul":
+        if state["next_open_viewer"][:16] != state["next_open_local"][:16]:
+            out.append(f"  → 사용자 현지({viewer['tz'] or viewer['utc_offset']}) 기준 개장: {state['next_open_viewer']}")
+    return out
+
+
 def format_market_clock(clock: dict) -> str:
-    krx = clock["krx"]
-    us = clock["us"]
+    krx, us, viewer = clock["krx"], clock["us"], clock["viewer"]
     lines = [
         "시장 캘린더",
         f"- 기준: {clock['now_kst']} KST / {clock['now_et']} ET",
-        f"- 한국장: {_status_label(krx['status'])} ({krx['reason']})",
-        f"  최근 거래일: {krx['last_trading_day']} / 다음 개장일: {krx['next_trading_day']}",
-        f"- 미국장: {_status_label(us['status'])} ({us['reason']})",
-        f"  최근 거래일: {us['last_trading_day']} / 다음 개장일: {us['next_trading_day']}",
+    ]
+    if not viewer["same_as_kst"]:
+        lines.append(
+            f"- 사용자 현지: {viewer['now']} ({viewer['tz'] or viewer['utc_offset']})"
+            " — 아래 '개장까지 남은 시간'은 어디서 보든 동일합니다"
+        )
+    lines += _market_lines("한국장", krx, viewer)
+    lines += _market_lines("미국장", us, viewer)
+    lines += [
         "",
         "MARKET_CLOCK_JSON_START",
         json.dumps(clock, ensure_ascii=False, sort_keys=True),
@@ -142,11 +195,23 @@ def _build_market_state(
         next_trading_day = current_date
     else:
         next_trading_day = _shift_trading_day(current_date, 1, holiday_name_func)
+
+    is_open = status in {"regular"}
+    tz = now_local.tzinfo
+    next_open_dt = datetime.combine(next_trading_day, hours.regular_open, tzinfo=tz)
+    close_dt = datetime.combine(current_date, hours.regular_close, tzinfo=tz)
+    seconds_to_open = None if is_open else max(0.0, (next_open_dt - now_local).total_seconds())
+    seconds_to_close = max(0.0, (close_dt - now_local).total_seconds()) if is_open else None
+
+    # 사용자 현지 시각으로 환산한 개장 시점. 날짜가 하루 밀리는 경우가 흔하다.
+    viewer = viewer_now()
+    next_open_viewer = next_open_dt.astimezone(viewer.tzinfo)
+
     return {
         "market": market,
         "timezone": timezone,
         "status": status,
-        "is_open": status in {"regular"},
+        "is_open": is_open,
         "is_trading_day": is_trading_day,
         "is_weekend": is_weekend,
         "is_holiday": holiday_name is not None,
@@ -155,6 +220,11 @@ def _build_market_state(
         "next_trading_day": next_trading_day.isoformat(),
         "regular_open": hours.regular_open.strftime("%H:%M"),
         "regular_close": hours.regular_close.strftime("%H:%M"),
+        # 아래 4개가 해외 사용자용. 남은 시간은 타임존 무관, 개장 시점은 양쪽 표기.
+        "next_open_local": next_open_dt.isoformat(timespec="minutes"),
+        "next_open_viewer": next_open_viewer.isoformat(timespec="minutes"),
+        "opens_in": _fmt_duration(seconds_to_open),
+        "closes_in": _fmt_duration(seconds_to_close),
     }
 
 
