@@ -221,3 +221,59 @@ class StockStatusMarkerTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+# ---------------------------------------------------------------------------
+# 5. 미국 내부자 거래 — 비율을 정수로 자르지 않고, 거래 유형을 버리지 않는다
+# ---------------------------------------------------------------------------
+
+# yfinance 실제 응답 발췌 (NVDA, 2026-08-16 확인).
+# 요약 dict에는 **주식수 행과 비율 행이 섞여** 있고, 개별 거래는 transaction이
+# 빈 문자열인 대신 text에 진짜 유형이 들어 있다.
+_INSIDER = {
+    "purchases_last_6m": {
+        "Purchases": {"shares": 62275007.0, "trans": 26},
+        "% Buy Shares": {"shares": 0.069, "trans": None},
+        "% Sell Shares": {"shares": 0.003, "trans": None},
+    },
+    "recent_transactions": [
+        {"start_date": "2026-08-05T00:00:00", "insider": "COXE TENCH C",
+         "position": "Director", "transaction": "", "shares": 500000, "value": 0,
+         "text": "Stock Gift at price 0.00 per share."},
+        {"start_date": "2026-06-25T00:00:00", "insider": "HUDSON BEACH DAWN E",
+         "position": "Director", "transaction": "", "shares": 1211, "value": 0,
+         "text": "Stock Award(Grant) at price 0.00 per share."},
+    ],
+}
+
+
+class InsiderTradeDisplayTests(unittest.IsolatedAsyncioTestCase):
+    async def _render(self):
+        from unittest.mock import AsyncMock, patch
+        from stock_mcp_server import server
+        with patch.object(server.us, "get_insider", AsyncMock(return_value=dict(_INSIDER, ticker="NVDA"))), \
+             patch.object(server.us, "get_insider_roster", AsyncMock(return_value=[])):
+            return await server.get_us_insider("NVDA")
+
+    async def test_percent_rows_keep_decimals(self):
+        """0.069를 정수로 자르면 '0'이 되어 비율이 통째로 사라진다."""
+        out = await self._render()
+        self.assertIn("0.069", out)
+        self.assertIn("0.003", out)
+        self.assertNotIn("% Buy Shares: 0\n", out)
+
+    async def test_share_rows_stay_integers(self):
+        """주식수 행까지 소수로 바뀌면 안 된다 — 같은 dict에 섞여 있다."""
+        out = await self._render()
+        self.assertIn("62,275,007", out)
+
+    async def test_transaction_type_recovered_from_text(self):
+        """transaction이 비어도 text에 유형이 있다. 버리면 '$0'인 이유를 알 수 없다."""
+        out = await self._render()
+        self.assertIn("Stock Gift", out)
+        self.assertIn("Stock Award(Grant)", out)
+
+    async def test_zero_value_is_shown_as_zero_not_dash(self):
+        """증여·무상지급은 대금이 실제로 0이다. 결측이 아니므로 '-'가 아니다."""
+        out = await self._render()
+        self.assertIn("$0", out)

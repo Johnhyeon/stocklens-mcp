@@ -2831,7 +2831,12 @@ async def get_us_insider(ticker: str) -> str:
             trans = vals.get("trans")
             if shares is None and trans is None:
                 continue
-            sh_str = f"{shares:,.0f}" if isinstance(shares, (int, float)) else "-"
+            # 이 dict에는 주식수 행과 **비율 행**이 섞여 있다("% Buy Shares" 등).
+            # 둘 다 정수로 자르면 0.069가 "0"이 되어 비율이 통째로 사라진다.
+            if isinstance(shares, (int, float)):
+                sh_str = f"{shares:.3f}" if str(label).lstrip().startswith("%") else f"{shares:,.0f}"
+            else:
+                sh_str = "-"
             tr_str = f" ({int(trans)}건)" if isinstance(trans, (int, float)) else ""
             lines.append(f"- {label}: {sh_str}{tr_str}")
 
@@ -2845,11 +2850,16 @@ async def get_us_insider(ticker: str) -> str:
             date = str(t.get("start_date", ""))[:10]
             insider = (t.get("insider") or "-")[:25]
             pos = (t.get("position") or "-")[:20]
-            action = t.get("transaction") or "-"
+            # transaction이 빈 문자열인 경우가 많은데, text에 "Stock Gift at price
+            # 0.00 per share" 같은 진짜 유형이 들어 있다. 이걸 버리면 대금이 $0인
+            # 이유(증여·무상지급)를 알 수 없어 "왜 0원이지?"가 된다.
+            action = (t.get("transaction") or "").strip()
+            if not action:
+                action = (t.get("text") or "").split(" at price")[0].strip() or "-"
             shares = t.get("shares") or 0
             value = t.get("value")
             val_s = f"${value:,.0f}" if isinstance(value, (int, float)) else "-"
-            lines.append(f"{date} | {insider} | {pos} | {action} | {int(shares):,} | {val_s}")
+            lines.append(f"{date} | {insider} | {pos} | {action[:24]} | {int(shares):,} | {val_s}")
 
     if not summary and not tx:
         lines.append("")
