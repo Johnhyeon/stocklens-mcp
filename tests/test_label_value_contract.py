@@ -719,3 +719,65 @@ class MarketIndexValueTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(items[0]["change_value"], -164.6)
         self.assertEqual(items[0]["change_rate"], -2.42)
+
+
+# ---------------------------------------------------------------------------
+# 11. ETF·컨센서스·재무 — '자료 없음'과 '형식 변경'의 분리 (2026-08-17)
+# ---------------------------------------------------------------------------
+#
+# 이 셋은 JSON/JS 변수를 읽는다. 형식이 바뀌면 빈 dict 가 되어 화면엔 각각
+# 'ETF 없음' / '컨센서스 없음' / '재무지표 없음'으로 뜬다. 커버리지가 없는
+# 종목과 구분되지 않으므로, 원천이 통째로 안 읽히면 예외로 알린다.
+
+
+class SourceFormatChangeTests(unittest.IsolatedAsyncioTestCase):
+    def _serve_text(self, text: str):
+        async def _fetch(url, params=None, **kwargs):
+            return types.SimpleNamespace(text=text)
+
+        self._real = _naver.fetch
+        _naver.fetch = _fetch
+        clear_cache()
+
+    def tearDown(self):
+        if hasattr(self, "_real"):
+            _naver.fetch = self._real
+        clear_cache()
+
+    async def test_etf_list_empty_payload_raises(self):
+        class _Resp:
+            content = '{"result":{}}'.encode("euc-kr")
+
+        async def _fetch(url, params=None, **kwargs):
+            return _Resp()
+
+        self._real = _naver.fetch
+        _naver.fetch = _fetch
+        clear_cache()
+        with self.assertRaises(_naver.NaverParseError):
+            await _naver.get_etf_list()
+
+    async def test_consensus_without_js_vars_raises(self):
+        """커버리지 없는 종목도 chartData2/res '선언'은 있다 — 아예 없으면 형식 변경."""
+        self._serve_text("<html><body>no vars here</body></html>")
+        with self.assertRaises(_naver.NaverParseError):
+            await _naver.get_consensus("005930")
+
+    async def test_etf_detail_without_js_vars_raises(self):
+        self._serve_text("<html><body>no vars here</body></html>")
+        with self.assertRaises(_naver.NaverParseError):
+            await _naver.get_etf_detail("069500")
+
+    async def test_financials_missing_table_is_flagged_not_silent(self):
+        """종목명은 읽히는데 재무 표가 없으면 '자료 없음'이 아니라 파싱 실패다."""
+        self._serve_text(
+            '<div class="wrap_company"><h2><a>삼성전자</a></h2></div><body></body>'
+        )
+        data = await _naver.get_financials("005930")
+        self.assertEqual(data.get(_naver.PARSE_MISS_KEY), ["financial_table"])
+
+    async def test_financials_unknown_page_is_not_flagged(self):
+        """종목명조차 없으면 잘못된 코드일 수 있어 파싱 실패로 단정하지 않는다."""
+        self._serve_text("<html><body></body></html>")
+        data = await _naver.get_financials("999999")
+        self.assertNotIn(_naver.PARSE_MISS_KEY, data)

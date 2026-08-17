@@ -1244,6 +1244,13 @@ async def get_financial(code: str) -> str:
     data = await get_financials(code)
     if not data:
         return f"종목코드 {code}의 재무지표를 가져올 수 없습니다."
+    if PARSE_MISS_KEY in data:
+        return (
+            f"{data.get('name', code)}({code})의 재무 표를 읽지 못했습니다 "
+            f"(재무 자료가 없는 것이 아니라 **파싱 실패**입니다).\n"
+            f"네이버 증권 페이지 구조가 바뀌었을 수 있습니다. "
+            f"StockLens 업데이트를 확인해 주세요."
+        )
 
     periods = data.get("_periods") or {}
     annual = periods.get("annual", [])

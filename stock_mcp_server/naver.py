@@ -616,6 +616,11 @@ async def get_financials(code: str) -> dict:
     # 투자정보 테이블 (PER, PBR, 배당수익률 등)
     # 구조: thead[0]은 대분류(연간/분기 colspan), thead[1]은 실제 기간 라벨
     cop_info = soup.select("div.cop_analysis table")
+    if not cop_info and name_tag:
+        # 종목명은 읽혔는데 재무 표가 통째로 없다 — 페이지 구조가 바뀐 것이다.
+        # (종목명도 못 읽었으면 애초에 종목 페이지가 아닐 가능성이 높아 여기서
+        #  단정하지 않는다.) 그냥 두면 화면엔 '재무지표 없음'으로만 뜬다.
+        result[PARSE_MISS_KEY] = ["financial_table"]
     if cop_info:
         for table in cop_info:
             thead_rows = table.select("thead tr")
@@ -1566,7 +1571,12 @@ async def get_etf_list(
     data = _json.loads(resp.content.decode("euc-kr"))
     items = data.get("result", {}).get("etfItemList", [])
     if not items:
-        return {"items": [], "total": 0, "categories": _ETF_TAB_NAMES}
+        # 국내 상장 ETF 전체 목록이 진짜로 빈 적은 없다 — 비었다면 응답 형식이
+        # 바뀐 것이다. 빈 목록으로 돌려주면 화면엔 'ETF가 없습니다'로 뜬다.
+        raise NaverParseError(
+            "ETF 목록 응답에서 etfItemList 를 찾지 못했습니다 "
+            f"(응답 키: {sorted(data.get('result', {}).keys()) or sorted(data.keys())})."
+        )
 
     # 카테고리 필터
     if category:
@@ -1659,6 +1669,15 @@ async def get_etf_detail(code: str) -> dict:
     product = _extract_json_var("product_summary_data")
     status = _extract_json_var("status_data")
     cu_raw = _extract_json_var("CU_data")
+
+    if not any((summary, product, status)):
+        # 페이지는 받았는데 임베딩된 JS 변수를 하나도 못 읽었다 — 형식이 바뀐 것이다.
+        # 코드만 담긴 dict 를 돌려주면 화면엔 'ETF 정보 없음'으로 뜨고, 사용자는
+        # 상장폐지됐거나 ETF가 아닌 줄 안다.
+        raise NaverParseError(
+            f"ETF 상세 페이지에서 summary/product/status 데이터를 하나도 읽지 "
+            f"못했습니다 (code={code}). wisereport 페이지 형식 변경 가능성."
+        )
 
     if summary:
         result["name"] = summary.get("CMP_KOR", "")
@@ -1778,6 +1797,15 @@ async def get_consensus(code: str) -> dict:
         result["earnings_surprise"] = surprise
         result["earnings_surprise_periods"] = res_data["yymm"]
         result["earnings_surprise_dates"] = res_data.get("yymmdd") or []
+
+    if not any((chart2, chart3, res_data)):
+        # 애널리스트 커버리지가 없는 종목도 이 세 변수 '선언' 자체는 페이지에 있다
+        # (내용만 비어 있다). 셋 다 못 읽었다면 커버리지가 없는 게 아니라 페이지
+        # 형식이 바뀐 것이다 — '컨센서스 없음'으로 뭉개면 구분이 사라진다.
+        raise NaverParseError(
+            f"컨센서스 페이지에서 chartData2/chartData3/res 를 하나도 읽지 "
+            f"못했습니다 (code={code}). wisereport 형식 변경 가능성."
+        )
 
     return result
 
