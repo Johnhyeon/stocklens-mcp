@@ -45,6 +45,7 @@ from stock_mcp_server.naver import (
     get_consensus as naver_get_consensus,
     get_reports as naver_get_reports,
     get_report_detail as naver_get_report_detail,
+    REPORT_READ_URL as naver_report_read_url,
     get_disclosure_list as naver_get_disclosure_list,
 )
 from stock_mcp_server._excel import (
@@ -3327,21 +3328,25 @@ async def get_reports(code: str, count: int = 5) -> str:
 @mcp.tool()
 @safe_tool
 @track_metrics("get_report_content")
-async def get_report_content(nid: str, max_chars: int = 12000) -> str:
-    """리포트전문 — 증권사 리포트 **한 건**의 PDF 원문을 텍스트로 읽어옵니다.
+async def get_report_content(nid: str, max_chars: int = 4000) -> str:
+    """리포트발췌 — 증권사 리포트 **한 건**의 PDF 본문 앞부분을 읽어옵니다.
 
     ⚠️ **한 번에 한 건만.** 리포트 하나가 1만 자를 넘어서, 여러 건을 이어 부르면
     대화 토큰을 통째로 먹습니다. 목록·요약·목표가는 `get_reports`로 충분하고,
-    "이 리포트 자세히", "목표가 근거", "리포트 전문" 처럼 **한 건을 깊게** 볼 때만
-    쓰세요.
+    "이 리포트 자세히", "목표가 근거" 처럼 **한 건을 깊게** 볼 때만 쓰세요.
+
+    기본 4,000자만 가져옵니다. 실측해 보면 리포트는 앞쪽에 투자의견·목표가 산출
+    근거·실적 추정이 모이고, 뒤쪽은 재무제표 부록과 컴플라이언스 고지문입니다.
+    앞부분만으로 판단 근거는 대부분 확인됩니다. 더 필요하면 max_chars를 올리되,
+    **전문 열람은 원문 PDF 링크**로 안내하는 것이 낫습니다.
 
     증권사마다 PDF 만드는 방식이 달라, 글자가 아니라 이미지로 렌더링해 내는 곳은
     본문을 읽을 수 없습니다. 그 경우 억지로 몇 글자 내놓지 않고 못 읽었다고
-    알려드립니다.
+    알려주며 원문 링크로 안내합니다.
 
     Args:
         nid: 리포트 번호. `get_reports` 결과에 함께 표시됩니다.
-        max_chars: 본문 상한 (기본 12000). 넘으면 뒤를 자르고 알려줍니다.
+        max_chars: 본문 상한 (기본 4000). 넘으면 뒤를 자르고 알려줍니다.
     """
     import re as _re
 
@@ -3350,11 +3355,16 @@ async def get_report_content(nid: str, max_chars: int = 12000) -> str:
 
     detail = await naver_get_report_detail(str(nid))
     pdf_url = detail.get("pdf_url") or ""
+    # 사람이 열어 볼 자리는 원문 PDF보다 네이버 리포트 페이지가 낫다(요약·목표가가
+    # 같이 있고, PDF가 없는 리포트도 여기는 열린다).
+    page_url = f"{naver_report_read_url}?nid={nid}"
+
     if not pdf_url:
         return _append_result_meta(
-            f"리포트 {nid}에 PDF 원문 링크가 없습니다 "
-            f"(일부 증권사는 PDF를 제공하지 않습니다). "
-            f"`get_reports`의 요약을 참고하세요.",
+            f"리포트 {nid}에는 PDF 원문 링크가 없습니다 "
+            f"(일부 증권사는 PDF를 공개하지 않습니다).\n\n"
+            f"- 리포트 페이지에서 보기: {page_url}\n"
+            f"- 요약·목표가·투자의견은 `get_reports`로 확인하실 수 있습니다.",
             _kr_meta(kind="filing", data_completeness=rmeta.NONE,
                      warnings=["PDF 링크 없음 — 이 증권사는 원문을 공개하지 않습니다."]),
         )
@@ -3372,9 +3382,11 @@ async def get_report_content(nid: str, max_chars: int = 12000) -> str:
         return _append_result_meta(
             f"**{reason}.**\n\n"
             f"- 상세: {result.detail}\n"
-            f"- 원문 직접 보기: {pdf_url}\n\n"
+            f"- 리포트 페이지에서 보기: {page_url}\n"
+            f"- PDF 원문 직접 열기: {pdf_url}\n\n"
             f"본문이 없는 게 아니라 **우리가 못 읽은 것**입니다. "
-            f"요약·목표가는 `get_reports`로 확인하실 수 있습니다.",
+            f"위 링크로 직접 보시면 되고, 요약·목표가는 `get_reports`로 "
+            f"확인하실 수 있습니다.",
             _kr_meta(kind="filing", data_completeness=rmeta.NONE,
                      warnings=[f"PDF 본문 추출 실패({result.status}): {result.detail}"]),
         )
@@ -3385,11 +3397,11 @@ async def get_report_content(nid: str, max_chars: int = 12000) -> str:
         text = text[:max_chars]
 
     lines = [
-        f"# 리포트 원문 (nid={nid})",
+        f"# 리포트 발췌 (nid={nid})",
         "",
-        f"- PDF {result.pages}쪽 · 추출 {result.chars:,}자"
-        + (f" · **{max_chars:,}자까지만 표시**" if truncated else ""),
-        f"- 원문: {pdf_url}",
+        f"- **전문 보기: {page_url}** (PDF: {pdf_url})",
+        f"- PDF {result.pages}쪽 · 본문 {result.chars:,}자 중 "
+        + (f"앞 {max_chars:,}자 발췌" if truncated else "전체"),
         "",
         "---",
         "",
@@ -3398,13 +3410,19 @@ async def get_report_content(nid: str, max_chars: int = 12000) -> str:
     if truncated:
         lines.append("")
         lines.append(
-            f"_… 이후 {result.chars - max_chars:,}자 생략. 뒷부분이 필요하면 "
-            f"max_chars 를 올려 다시 부르세요._"
+            f"_… 이후 {result.chars - max_chars:,}자 생략. 리포트는 뒤쪽이 재무제표 "
+            f"부록과 고지문이라 판단 근거는 대개 위 발췌 안에 있습니다. "
+            f"그래도 더 필요하면 max_chars 를 올리시고, **전문 열람은 위 원문 링크**를 "
+            f"이용하세요._"
         )
     lines.append("")
     lines.append(
         "※ 증권사 리서치 자료입니다. 목표가·투자의견은 해당 증권사의 분석 의견이며 "
         "미래 수익을 보장하지 않습니다."
+    )
+    lines.append(
+        "※ 위 발췌는 해당 증권사에 저작권이 있습니다. 열람·분석 용도로만 쓰시고 "
+        "재배포하지 마세요. 인용하실 때는 원문 링크를 함께 표기해 주세요."
     )
 
     return _append_result_meta(
