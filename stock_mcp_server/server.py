@@ -3316,7 +3316,11 @@ async def get_reports(code: str, count: int = 5) -> str:
 
         pdf = detail.get("pdf_url", "")
         if pdf:
-            lines.append(f"[PDF 원문]({pdf}) · 전문이 필요하면 `get_report_content(nid=\"{report['nid']}\")`")
+            lines.append(
+                f"[PDF 원문]({pdf}) · 본문을 읽으려면 "
+                f"`get_report_content(nid=\"{report['nid']}\")` "
+                f"— 기본은 앞부분 발췌, `mode=\"full\"` 전체 / `mode=\"link\"` 링크만"
+            )
 
         lines.append("")
 
@@ -3328,17 +3332,27 @@ async def get_reports(code: str, count: int = 5) -> str:
 @mcp.tool()
 @safe_tool
 @track_metrics("get_report_content")
-async def get_report_content(nid: str, max_chars: int = 4000) -> str:
-    """리포트발췌 — 증권사 리포트 **한 건**의 PDF 본문 앞부분을 읽어옵니다.
+async def get_report_content(
+    nid: str, mode: str = "summary", max_chars: int | None = None
+) -> str:
+    """리포트읽기 — 증권사 리포트 **한 건**의 PDF 본문을 읽어옵니다.
 
     ⚠️ **한 번에 한 건만.** 리포트 하나가 1만 자를 넘어서, 여러 건을 이어 부르면
-    대화 토큰을 통째로 먹습니다. 목록·요약·목표가는 `get_reports`로 충분하고,
+    대화 토큰을 통째로 먹습니다. 목록·목표가·짧은 요약은 `get_reports`로 충분하고,
     "이 리포트 자세히", "목표가 근거" 처럼 **한 건을 깊게** 볼 때만 쓰세요.
 
-    기본 4,000자만 가져옵니다. 실측해 보면 리포트는 앞쪽에 투자의견·목표가 산출
-    근거·실적 추정이 모이고, 뒤쪽은 재무제표 부록과 컴플라이언스 고지문입니다.
-    앞부분만으로 판단 근거는 대부분 확인됩니다. 더 필요하면 max_chars를 올리되,
-    **전문 열람은 원문 PDF 링크**로 안내하는 것이 낫습니다.
+    **어느 모드를 고를지는 사용자 말에 맞춥니다.** 사용자가 따로 말하지 않으면
+    `summary`로 두세요.
+
+    | mode | 무엇을 주나 | 이렇게 말할 때 |
+    |---|---|---|
+    | `summary` (기본) | 앞 4,000자 발췌 | "리포트 봐줘", "목표가 근거가 뭐야" |
+    | `full` | 본문 전체 (상한 50,000자) | "전문 다 보여줘", "빠짐없이", "부록까지" |
+    | `link` | 본문 없이 링크만 | "링크만 줘", "내가 직접 볼게" |
+
+    `summary`로 충분한 이유: 실측상 리포트는 앞쪽에 투자의견·목표가 산출 근거·
+    실적 추정이 모이고, 뒤쪽은 재무제표 부록과 컴플라이언스 고지문입니다.
+    판단 근거는 대개 앞 3,000자 안에 다 있습니다.
 
     증권사마다 PDF 만드는 방식이 달라, 글자가 아니라 이미지로 렌더링해 내는 곳은
     본문을 읽을 수 없습니다. 그 경우 억지로 몇 글자 내놓지 않고 못 읽었다고
@@ -3346,18 +3360,52 @@ async def get_report_content(nid: str, max_chars: int = 4000) -> str:
 
     Args:
         nid: 리포트 번호. `get_reports` 결과에 함께 표시됩니다.
-        max_chars: 본문 상한 (기본 4000). 넘으면 뒤를 자르고 알려줍니다.
+        mode: "summary"(기본) / "full" / "link". 한글("요약"·"전문"·"링크")도 됩니다.
+        max_chars: 글자 수를 직접 지정하고 싶을 때만. 비우면 mode 기본값을 씁니다.
     """
     import re as _re
 
     if not _re.match(r"^\d{1,12}$", str(nid)):
         return f"⚠️ 리포트 번호 형식이 올바르지 않습니다: {nid}"
 
+    # 사용자가 한글로 말할 수도 있고 Claude가 영어로 넘길 수도 있다. 둘 다 받는다.
+    _MODES = {
+        "summary": "summary", "요약": "summary", "핵심": "summary", "발췌": "summary",
+        "full": "full", "전문": "full", "전체": "full", "원문": "full",
+        "link": "link", "링크": "link", "주소": "link",
+    }
+    mode_key = _MODES.get(str(mode).strip().lower())
+    if mode_key is None:
+        return (
+            f"⚠️ 알 수 없는 mode: {mode}\n"
+            f"summary(앞부분 발췌) / full(전체) / link(링크만) 중에서 골라 주세요."
+        )
+    cap = max_chars if max_chars else {"summary": 4000, "full": 50000, "link": 0}[mode_key]
+
     detail = await naver_get_report_detail(str(nid))
     pdf_url = detail.get("pdf_url") or ""
     # 사람이 열어 볼 자리는 원문 PDF보다 네이버 리포트 페이지가 낫다(요약·목표가가
     # 같이 있고, PDF가 없는 리포트도 여기는 열린다).
     page_url = f"{naver_report_read_url}?nid={nid}"
+
+    if mode_key == "link":
+        # 본문을 안 볼 거면 PDF를 받을 이유도 없다 — 내려받지 않고 링크만 준다.
+        lines = [
+            f"# 리포트 링크 (nid={nid})",
+            "",
+            f"- 리포트 페이지: {page_url}",
+        ]
+        lines.append(f"- PDF 원문: {pdf_url}" if pdf_url else "- PDF 원문: 제공되지 않는 리포트입니다")
+        lines += [
+            "",
+            "_본문은 가져오지 않았습니다(mode=\"link\"). 내용까지 읽으려면 "
+            "mode=\"summary\"(앞부분) 또는 mode=\"full\"(전체)로 다시 부르세요._",
+        ]
+        return _append_result_meta(
+            "\n".join(lines),
+            _kr_meta(kind="filing", data_completeness=rmeta.NONE,
+                     warnings=["mode=link — 본문을 읽지 않고 링크만 반환했습니다."]),
+        )
 
     if not pdf_url:
         return _append_result_meta(
@@ -3392,28 +3440,34 @@ async def get_report_content(nid: str, max_chars: int = 4000) -> str:
         )
 
     text = result.text
-    truncated = len(text) > max_chars
+    truncated = len(text) > cap
     if truncated:
-        text = text[:max_chars]
+        text = text[:cap]
 
+    heading = "리포트 전문" if mode_key == "full" else "리포트 발췌"
     lines = [
-        f"# 리포트 발췌 (nid={nid})",
+        f"# {heading} (nid={nid})",
         "",
         f"- **전문 보기: {page_url}** (PDF: {pdf_url})",
         f"- PDF {result.pages}쪽 · 본문 {result.chars:,}자 중 "
-        + (f"앞 {max_chars:,}자 발췌" if truncated else "전체"),
+        + (f"앞 {cap:,}자" if truncated else "전체"),
         "",
         "---",
         "",
         text,
     ]
-    if truncated:
+    if truncated and mode_key == "summary":
         lines.append("")
         lines.append(
-            f"_… 이후 {result.chars - max_chars:,}자 생략. 리포트는 뒤쪽이 재무제표 "
-            f"부록과 고지문이라 판단 근거는 대개 위 발췌 안에 있습니다. "
-            f"그래도 더 필요하면 max_chars 를 올리시고, **전문 열람은 위 원문 링크**를 "
-            f"이용하세요._"
+            f"_… 이후 {result.chars - cap:,}자 생략(앞부분 발췌). 리포트는 뒤쪽이 "
+            f"재무제표 부록과 고지문이라 판단 근거는 대개 위 안에 있습니다. "
+            f"전부 필요하면 `mode=\"full\"`, 직접 보시려면 위 원문 링크를 쓰세요._"
+        )
+    elif truncated:
+        lines.append("")
+        lines.append(
+            f"_… 이후 {result.chars - cap:,}자 생략. 상한({cap:,}자)을 넘겼습니다 — "
+            f"이만큼 긴 리포트는 위 원문 링크로 보시는 편이 낫습니다._"
         )
     lines.append("")
     lines.append(
@@ -3430,7 +3484,9 @@ async def get_report_content(nid: str, max_chars: int = 4000) -> str:
         _kr_meta(
             kind="filing",
             data_completeness=rmeta.PARTIAL if truncated else rmeta.COMPLETE,
-            warnings=[f"본문 {max_chars:,}자에서 잘렸습니다."] if truncated else None,
+            warnings=[
+                f"mode={mode_key} — 본문 {result.chars:,}자 중 앞 {cap:,}자만 실었습니다."
+            ] if truncated else None,
         ),
     )
 

@@ -70,3 +70,99 @@ class ExtractTextTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ReportContentModeTests(unittest.IsolatedAsyncioTestCase):
+    """mode 선택지 — 사용자가 발췌/전문/링크를 고를 수 있어야 한다."""
+
+    FAKE_PDF = "https://stock.pstatic.net/stock-research/company/38/fake.pdf"
+
+    def _patch(self, extract: pdfx.PdfExtract | None = None):
+        from unittest.mock import AsyncMock, patch
+
+        from stock_mcp_server import server
+
+        self._ctxs = [
+            patch.object(
+                server, "naver_get_report_detail",
+                AsyncMock(return_value={"nid": "1", "pdf_url": self.FAKE_PDF}),
+            ),
+        ]
+        if extract is not None:
+            self._ctxs.append(
+                patch.object(pdfx, "fetch_and_extract", AsyncMock(return_value=extract))
+            )
+        for c in self._ctxs:
+            c.start()
+
+    def tearDown(self):
+        for c in getattr(self, "_ctxs", []):
+            c.stop()
+
+    @staticmethod
+    def _body(out: str) -> str:
+        return out.split("RESULT_META_JSON_START")[0]
+
+    async def test_unknown_mode_is_rejected_with_choices(self):
+        from stock_mcp_server import server
+
+        out = await server.get_report_content("1", mode="아무거나")
+        self.assertIn("알 수 없는 mode", out)
+        for name in ("summary", "full", "link"):
+            self.assertIn(name, out)
+
+    async def test_link_mode_does_not_download_pdf(self):
+        """링크만 원하면 PDF를 받을 이유가 없다."""
+        from unittest.mock import AsyncMock, patch
+
+        from stock_mcp_server import server
+
+        self._patch()
+        with patch.object(pdfx, "fetch_and_extract", AsyncMock()) as fetcher:
+            out = await server.get_report_content("1", mode="link")
+        fetcher.assert_not_awaited()
+        body = self._body(out)
+        self.assertIn(self.FAKE_PDF, body)
+        self.assertIn("리포트 페이지", body)
+
+    async def test_korean_mode_aliases(self):
+        from stock_mcp_server import server
+
+        long_text = "가" * 12000
+        self._patch(pdfx.PdfExtract(status="ok", text=long_text, pages=5, chars=12000))
+
+        excerpt = self._body(await server.get_report_content("1", mode="요약"))
+        whole = self._body(await server.get_report_content("1", mode="전문"))
+
+        self.assertIn("리포트 발췌", excerpt)
+        self.assertIn("리포트 전문", whole)
+        self.assertLess(len(excerpt), len(whole))
+
+    async def test_summary_caps_and_says_so(self):
+        from stock_mcp_server import server
+
+        self._patch(pdfx.PdfExtract(status="ok", text="나" * 12000, pages=5, chars=12000))
+        body = self._body(await server.get_report_content("1"))  # 기본 = summary
+        self.assertIn("앞 4,000자", body)
+        self.assertIn('mode="full"', body)  # 더 보는 방법을 알려준다
+
+    async def test_full_mode_returns_whole_body(self):
+        from stock_mcp_server import server
+
+        self._patch(pdfx.PdfExtract(status="ok", text="다" * 12000, pages=5, chars=12000))
+        body = self._body(await server.get_report_content("1", mode="full"))
+        self.assertIn("전체", body)
+        # 고지문에도 '다'가 들어가므로 총 개수가 아니라 '끊기지 않은 12,000자 덩어리'를 본다.
+        self.assertIn("다" * 12000, body)
+        self.assertNotIn("생략", body)
+
+    async def test_image_pdf_tunnels_to_links_in_any_mode(self):
+        from stock_mcp_server import server
+
+        self._patch(
+            pdfx.PdfExtract(status="image_pdf", pages=9, chars=144, detail="이미지 PDF")
+        )
+        for mode in ("summary", "full"):
+            body = self._body(await server.get_report_content("1", mode=mode))
+            self.assertIn("우리가 못 읽은 것", body)
+            self.assertIn(self.FAKE_PDF, body)
