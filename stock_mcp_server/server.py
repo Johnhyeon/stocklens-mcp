@@ -2367,14 +2367,26 @@ def safe_us_tool(func):
     return wrapper
 
 
-def _fmt_num(v, unit: str = "", digits: int = 2) -> str:
+def _ccy_prefix(code: str | None) -> str:
+    """통화 코드 → 금액 접두사.
+
+    USD 만 `$` 를 쓰고 나머지는 코드를 그대로 붙인다. ADR 은 주가 통화(USD)와
+    재무제표 통화가 갈리는데(TSM: 거래 USD / 재무 TWD), TWD 금액에 `$` 를 붙이면
+    달러로 읽힌다 — TSM 분기 매출 추정이 `$1,454.96B`(약 31배)로 보였다.
+    """
+    if not code or str(code).upper() == "USD":
+        return "$"
+    return f"{str(code).upper()} "
+
+
+def _fmt_num(v, unit: str = "", digits: int = 2, currency: str = "$") -> str:
     if v is None:
         return "-"
     if isinstance(v, (int, float)):
         if abs(v) >= 1_000_000_000:
-            return f"${v/1_000_000_000:,.{digits}f}B"
+            return f"{currency}{v/1_000_000_000:,.{digits}f}B"
         if abs(v) >= 1_000_000:
-            return f"${v/1_000_000:,.{digits}f}M"
+            return f"{currency}{v/1_000_000:,.{digits}f}M"
         return f"{v:,.{digits}f}{unit}"
     return str(v)
 
@@ -2456,10 +2468,22 @@ async def get_us_info(ticker: str) -> str:
         f"거래소: {data.get('exchange') or '-'} ({data.get('quote_type') or '-'})",
         f"국가: {data.get('country') or '-'}",
     ]
+    # 시가총액은 주가(거래통화), EV·현금·부채는 재무제표(재무통화)에서 나온다.
+    # ADR은 둘이 갈리므로 각각 제 통화로 찍고, 다르면 나란히 비교하지 말라고 적는다.
+    trade_ccy = data.get("currency")
+    fin_ccy = data.get("financial_currency")
+    ccy_mixed = bool(trade_ccy and fin_ccy and trade_ccy != fin_ccy)
     if data.get("market_cap"):
-        lines.append(f"시가총액: {_fmt_num(data['market_cap'])}")
+        lines.append(f"시가총액: {_fmt_num(data['market_cap'], currency=_ccy_prefix(trade_ccy))}")
     if data.get("enterprise_value"):
-        lines.append(f"기업가치(EV): {_fmt_num(data['enterprise_value'])}")
+        lines.append(
+            f"기업가치(EV): {_fmt_num(data['enterprise_value'], currency=_ccy_prefix(fin_ccy))}"
+        )
+    if ccy_mixed:
+        lines.append(
+            f"⚠️ **통화 불일치** — 시가총액은 주가 통화({trade_ccy}), 기업가치(EV)는 "
+            f"재무제표 통화({fin_ccy}) 기준입니다. 두 값을 나눠 배수로 쓰면 안 됩니다."
+        )
     if data.get("shares_outstanding"):
         lines.append(f"발행주식수: {data['shares_outstanding']:,.0f}")
     if data.get("employees"):
@@ -2725,35 +2749,67 @@ async def get_us_analyst(ticker: str) -> str:
         eps_est = estimates.get("earnings_estimate") or []
         rev_est = estimates.get("revenue_estimate") or []
         eps_rev = estimates.get("eps_revisions") or []
+        # 추정치는 재무제표 통화로 나온다. ADR은 주가 통화와 갈리므로 그 통화로 찍는다.
+        est_ccy_code = estimates.get("financial_currency") or estimates.get("currency")
+        est_ccy = _ccy_prefix(est_ccy_code)
+        est_mixed = bool(
+            estimates.get("financial_currency")
+            and estimates.get("currency")
+            and estimates["financial_currency"] != estimates["currency"]
+        )
+
+        def _pick(e: dict, *keys):
+            """0을 결측으로 흘리지 않는다. `a or b`는 0을 falsy로 보고 넘겨버려서,
+            같은 0인데 평균은 '-', 낮음은 '0.00'으로 갈라져 나왔다(BRK.B 0q)."""
+            for k in keys:
+                if e.get(k) is not None:
+                    return e[k]
+            return None
+
         if eps_est or rev_est:
             lines.append("")
             lines.append("## 🔮 애널리스트 추정치")
+            if est_mixed:
+                lines.append(
+                    f"⚠️ 재무 통화 **{estimates['financial_currency']}** · 주가 통화 "
+                    f"{estimates['currency']} — 아래 금액은 재무 통화 기준입니다."
+                )
             if eps_est:
                 lines.append("### EPS Estimate")
-                lines.append("기간 | 평균 | 낮음 | 높음 | # 애널리스트 | YoY 성장")
+                lines.append(
+                    f"기간 | 평균 | 낮음 | 높음 | # 애널리스트 | YoY 성장 "
+                    f"(통화 {est_ccy_code or '?'})"
+                )
                 lines.append("---|---|---|---|---|---")
                 for e in eps_est:
-                    per = e.get("period") or e.get("index") or "-"
-                    avg = e.get("avg") or e.get("average")
+                    per = _pick(e, "period", "index") or "-"
+                    avg = _pick(e, "avg", "average")
                     lo = e.get("low")
                     hi = e.get("high")
-                    n = e.get("numberofanalysts") or e.get("numberofanalyst")
+                    n = _pick(e, "numberofanalysts", "numberofanalyst")
                     gr = e.get("growth")
                     gr_s = f"{gr*100:+.2f}%" if isinstance(gr, (int, float)) else "-"
-                    lines.append(f"{per} | {_fmt_num(avg)} | {_fmt_num(lo)} | {_fmt_num(hi)} | {int(n) if isinstance(n, (int, float)) else '-'} | {gr_s}")
+                    lines.append(
+                        f"{per} | {_fmt_num(avg, currency=est_ccy)} | "
+                        f"{_fmt_num(lo, currency=est_ccy)} | {_fmt_num(hi, currency=est_ccy)} | "
+                        f"{int(n) if isinstance(n, (int, float)) else '-'} | {gr_s}"
+                    )
             if rev_est:
                 lines.append("")
                 lines.append("### Revenue Estimate")
-                lines.append("기간 | 평균 | 낮음 | 높음 | YoY 성장")
+                lines.append(f"기간 | 평균 | 낮음 | 높음 | YoY 성장 (통화 {est_ccy_code or '?'})")
                 lines.append("---|---|---|---|---")
                 for e in rev_est:
-                    per = e.get("period") or e.get("index") or "-"
-                    avg = e.get("avg") or e.get("average")
+                    per = _pick(e, "period", "index") or "-"
+                    avg = _pick(e, "avg", "average")
                     lo = e.get("low")
                     hi = e.get("high")
                     gr = e.get("growth")
                     gr_s = f"{gr*100:+.2f}%" if isinstance(gr, (int, float)) else "-"
-                    lines.append(f"{per} | {_fmt_num(avg)} | {_fmt_num(lo)} | {_fmt_num(hi)} | {gr_s}")
+                    lines.append(
+                        f"{per} | {_fmt_num(avg, currency=est_ccy)} | "
+                        f"{_fmt_num(lo, currency=est_ccy)} | {_fmt_num(hi, currency=est_ccy)} | {gr_s}"
+                    )
         if eps_rev:
             lines.append("")
             lines.append("### 최근 EPS 추정 변경 (7일/30일 up/down)")
@@ -3653,6 +3709,8 @@ async def get_us_financial_statement(
         return f"**{data['ticker']}** {statement_type} ({period}) — 데이터 없음."
 
     name_map = {"income": "손익계산서", "balance": "재무상태표", "cash_flow": "현금흐름표"}
+    # 헤더에 통화를 적어 놓고 금액엔 '$'를 붙이면 한 화면 안에서 서로 모순된다.
+    stmt_ccy = _ccy_prefix(data.get("currency"))
     lines = [
         f"**{data['ticker']}** {name_map.get(statement_type, statement_type)} ({period})",
         f"통화: {data.get('currency', '-')}",
@@ -3672,7 +3730,7 @@ async def get_us_financial_statement(
             if v is None:
                 vals.append("-")
             elif isinstance(v, (int, float)):
-                vals.append(_fmt_num(v, digits=1))
+                vals.append(_fmt_num(v, digits=1, currency=stmt_ccy))
             else:
                 vals.append(str(v))
         lines.append(f"{r['item']} | " + " | ".join(vals))

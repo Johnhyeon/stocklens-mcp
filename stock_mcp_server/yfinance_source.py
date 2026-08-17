@@ -132,6 +132,11 @@ async def get_info(ticker: str) -> dict | None:
         "website": info.get("website"),
         "market_cap": _clean(info.get("marketCap")),
         "enterprise_value": _clean(info.get("enterpriseValue")),
+        # marketCap 은 주가에서, enterpriseValue 는 재무제표에서 나온다. ADR 은 이
+        # 둘의 통화가 갈려서(TSM: 시총 USD / EV TWD) 나란히 놓으면 EV가 시총의
+        # 6.8배로 보인다. 값을 고치지 않고 각 항목의 통화를 함께 실어 보낸다.
+        "currency": info.get("currency"),
+        "financial_currency": info.get("financialCurrency"),
         "shares_outstanding": _clean(info.get("sharesOutstanding")),
         "float_shares": _clean(info.get("floatShares")),
         "employees": _clean(info.get("fullTimeEmployees")),
@@ -827,6 +832,10 @@ async def get_analyst_estimates(ticker: str) -> dict | None:
 
         return {
             "ticker": info.get("symbol"),
+            # 추정치는 재무제표 통화로 나온다. ADR은 거래통화(USD)와 다를 수 있어
+            # (TSM: 거래 USD / 재무 TWD) 표시하는 쪽이 통화를 알아야 한다.
+            "currency": info.get("currency"),
+            "financial_currency": info.get("financialCurrency"),
             "earnings_estimate": _df("earnings_estimate"),
             "revenue_estimate": _df("revenue_estimate"),
             "eps_revisions": _df("eps_revisions"),
