@@ -103,13 +103,16 @@ async def get_ohlcv(
     # 네이버 fchart 응답은 JS 배열 형태 → 파싱
     text = text.strip()
     rows = []
+    candidates = 0  # 데이터 행처럼 생긴 줄의 수 — '없는 것'과 '못 읽은 것'의 구분자
     for line in text.split("\n"):
         line = line.strip().strip(",")
-        if not line or line.startswith("[") and "날짜" in line:
-            continue
-        if line == "]":
+        # 데이터 행처럼 생긴 줄만 후보로 센다. 헤더('날짜'...)와 대괄호만 있는 줄
+        # ('[' / ']')을 후보에 넣으면, 데이터가 진짜 없는 종목에서 빈 응답을
+        # '파싱 실패'로 오판한다.
+        if not line or "날짜" in line or not any(ch.isdigit() for ch in line):
             continue
         # ['20250401', 67800, 68200, 67100, 67500, 12345678]
+        candidates += 1
         line = line.strip("[]")
         parts = [p.strip().strip("'\"") for p in line.split(",")]
         if len(parts) >= 6:
@@ -124,6 +127,15 @@ async def get_ohlcv(
                 })
             except (ValueError, IndexError):
                 continue
+
+    # 데이터처럼 생긴 줄이 있었는데 단 하나도 못 읽었다면 형식이 바뀐 것이다.
+    # 그냥 빈 리스트를 돌려주면 화면엔 '차트 데이터 없음'으로 뜨고, 사용자는
+    # 상장폐지된 종목인 줄 안다. 행이 애초에 0줄이면 그건 진짜 '없음'이다.
+    if candidates and not rows:
+        raise NaverParseError(
+            f"차트 응답에서 {candidates}줄을 받았지만 한 줄도 해석하지 못했습니다 "
+            f"(네이버 fchart 형식 변경 가능성). code={code}, timeframe={timeframe}"
+        )
 
     return rows
 

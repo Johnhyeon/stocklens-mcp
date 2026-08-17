@@ -160,6 +160,17 @@ def safe_tool(func):
             )
         except httpx.HTTPError as e:
             return f"⚠️ 네트워크 오류가 발생했습니다: {type(e).__name__}\n(원인: {_cause_text(e)})"
+        except NaverParseError as e:
+            # 아래 일반 분기는 "종목코드가 올바른지 확인해주세요"라고 안내하는데,
+            # 파싱 실패에는 틀린 안내다 — 코드는 멀쩡하고 우리가 못 읽은 것이다.
+            # 사용자가 종목명을 바꿔가며 재시도하게 만들면 안 된다.
+            return (
+                "⚠️ 네이버 증권 페이지를 읽지 못했습니다 "
+                "(데이터가 없는 것이 아니라 **파싱 실패**입니다).\n"
+                f"(원인: {e})\n"
+                "페이지 구조가 바뀌었을 수 있습니다. StockLens 업데이트를 확인해 주세요."
+                + _support_hint()
+            )
         except Exception as e:
             return (
                 f"⚠️ 데이터 처리 중 오류가 발생했습니다: {type(e).__name__}\n"

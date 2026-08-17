@@ -484,3 +484,58 @@ class RateInfoMissingTests(unittest.TestCase):
         scope = BeautifulSoup(html, "lxml").select_one("#rate_info_krx")
         info, _ = _parse_rate_info(scope)
         self.assertEqual(info["change"], -6500)
+
+
+# ---------------------------------------------------------------------------
+# 8. 차트 응답 — 형식이 바뀌면 '상장폐지된 종목'처럼 보이던 것 (2026-08-17)
+# ---------------------------------------------------------------------------
+#
+# fchart 응답의 각 행은 int() 실패 시 조용히 skip 된다. 네이버가 숫자 표기를
+# 바꾸면 전 행이 버려져 빈 리스트가 되고, 화면엔 '차트 데이터 없음'이 뜬다.
+# 데이터가 없는 종목과 형식이 바뀐 경우가 같은 모양이 되면 안 된다.
+
+import types  # noqa: E402
+
+from stock_mcp_server import naver as _naver  # noqa: E402
+from stock_mcp_server._cache import clear_cache  # noqa: E402
+
+CHART_HEADER = "[['날짜', '시가', '고가', '저가', '종가', '거래량', '외국인소진율'],"
+CHART_ROW = '["20260810", 236000, 238500, 228500, 230000, 16327805, 46.53],'
+
+
+class ChartParseFailureTests(unittest.IsolatedAsyncioTestCase):
+    def _serve(self, text: str):
+        async def _fetch(url, params=None, **kwargs):
+            return types.SimpleNamespace(text=text)
+
+        self._real_fetch = _naver.fetch
+        _naver.fetch = _fetch
+        clear_cache()
+
+    def tearDown(self):
+        if hasattr(self, "_real_fetch"):
+            _naver.fetch = self._real_fetch
+        clear_cache()
+
+    async def test_normal_response_parses(self):
+        self._serve(f"{CHART_HEADER}\n{CHART_ROW}\n]")
+        rows = await _naver.get_ohlcv("005930", "day", 5)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["close"], 230000)
+
+    async def test_format_change_raises_instead_of_empty(self):
+        """숫자 표기가 바뀌어 전 행이 버려지면 '없음'이 아니라 파싱 실패다."""
+        broken = CHART_ROW.replace("236000", "약236000").replace("238500", "약238500")
+        broken = broken.replace("228500", "약228500").replace("230000", "약230000")
+        self._serve(f"{CHART_HEADER}\n{broken}\n]")
+        with self.assertRaises(_naver.NaverParseError):
+            await _naver.get_ohlcv("005930", "day", 5)
+
+    async def test_genuinely_empty_response_is_not_an_error(self):
+        """데이터가 진짜 없는 종목은 예외가 아니라 빈 리스트다(오탐 방지)."""
+        self._serve("[\n]")
+        self.assertEqual(await _naver.get_ohlcv("999999", "day", 5), [])
+
+    async def test_header_only_response_is_not_an_error(self):
+        self._serve(f"{CHART_HEADER}\n]")
+        self.assertEqual(await _naver.get_ohlcv("999999", "day", 5), [])
