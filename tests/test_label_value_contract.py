@@ -407,3 +407,80 @@ class StrictIntParsingTests(unittest.TestCase):
     def test_signed_values(self):
         self.assertEqual(_parse_int_strict("+625,055"), 625055)
         self.assertEqual(_parse_int_strict("-4,394,465"), -4394465)
+
+
+# ---------------------------------------------------------------------------
+# 7. 현재가 블록 — "값이 없음"과 "못 읽었음"이 같은 모양이던 것 (2026-08-17)
+# ---------------------------------------------------------------------------
+#
+# `_parse_rate_info` 는 `_parse_int`(실패 시 0)를 썼다. 네이버가 값 표기를 바꾸면
+# 거래량이 **0** 으로 나가는데, 거래정지 종목의 진짜 0과 구분되지 않는다.
+# 게다가 못 읽은 항목은 화면에서 줄째로 빠져서, 사용자는 그 항목이 원래 없는 건지
+# 우리가 못 읽은 건지 알 수 없었다.
+
+from stock_mcp_server.naver import _parse_rate_info  # noqa: E402
+
+
+def _rate_html(rows: str) -> str:
+    return f"""
+    <div id="rate_info_krx">
+      <p class="no_today"><span class="blind">274,500</span></p>
+      <p class="no_exday"><em class="no_up"><span class="blind">6,500</span></em></p>
+      <table class="no_info"><tr>{rows}</tr></table>
+    </div>
+    """
+
+
+def _cell(label: str, value: str) -> str:
+    return f'<td><span class="sptxt">{label}</span><em><span class="blind">{value}</span></em></td>'
+
+
+FULL_ROWS = (
+    _cell("시가", "275,000")
+    + _cell("고가", "275,500")
+    + _cell("저가", "266,000")
+    + _cell("거래량", "21,668,266")
+)
+
+
+def _parse(rows: str):
+    scope = BeautifulSoup(_rate_html(rows), "lxml").select_one("#rate_info_krx")
+    return _parse_rate_info(scope)
+
+
+class RateInfoMissingTests(unittest.TestCase):
+    def test_full_block_has_no_missing(self):
+        info, missing = _parse(FULL_ROWS)
+        self.assertEqual(missing, [])
+        self.assertEqual(info["volume"], 21668266)
+        self.assertEqual(info["price"], 274500)
+
+    def test_dropped_field_is_reported_not_zeroed(self):
+        """거래량 칸이 사라지면 0이 아니라 '못 읽음'으로 보고해야 한다."""
+        rows = FULL_ROWS.replace(_cell("거래량", "21,668,266"), "")
+        info, missing = _parse(rows)
+        self.assertIn("volume", missing)
+        self.assertNotIn("volume", info)  # 0으로 채우지 않는다
+
+    def test_unparseable_value_is_missing_not_zero(self):
+        """값이 '-' 로 바뀌어도 0으로 읽지 않는다."""
+        rows = FULL_ROWS.replace(
+            _cell("거래량", "21,668,266"), _cell("거래량", "-")
+        )
+        info, missing = _parse(rows)
+        self.assertIn("volume", missing)
+        self.assertNotIn("volume", info)
+
+    def test_real_zero_is_a_value_not_a_miss(self):
+        """거래정지 종목의 거래량 0은 실제 값이다 — 결측으로 밀면 안 된다."""
+        rows = FULL_ROWS.replace(_cell("거래량", "21,668,266"), _cell("거래량", "0"))
+        info, missing = _parse(rows)
+        self.assertEqual(info["volume"], 0)
+        self.assertNotIn("volume", missing)
+
+    def test_change_sign_uses_direction_icon(self):
+        """전일대비도 방향 아이콘(no_down)이 있으면 음수여야 한다."""
+        html = _rate_html(FULL_ROWS).replace('em class="no_up"', 'em class="no_down"')
+        scope = BeautifulSoup(html, "lxml").select_one("#rate_info_krx")
+        info, _ = _parse_rate_info(scope)
+        self.assertEqual(info["change"], -6500)

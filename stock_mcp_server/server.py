@@ -22,6 +22,7 @@ from mcp.server.fastmcp import FastMCP  # noqa: E402
 from stock_mcp_server.naver import (
     search_stock as naver_search_stock,
     NaverParseError,
+    PARSE_MISS_KEY,
     get_ohlcv,
     get_current_price,
     get_investor_flow,
@@ -787,12 +788,30 @@ async def get_price(code: str) -> str:
         code: 종목코드 6자리 (예: "005930")
     """
     data = await get_current_price(code)
+    # 파서가 실어 보낸 결측 목록과, 실제로 비어 있는 키를 합친다. 파서를 거치지 않고
+    # 만들어진 dict(테스트·다른 경로)에서도 '빠진 건 빠졌다'고 말할 수 있어야 한다.
+    _required = ("price", "change", "open", "high", "low", "volume")
+    missing = sorted(
+        set(data.get(PARSE_MISS_KEY) or []) | {k for k in _required if k not in data}
+    ) if data else list(_required)
     if not data or "price" not in data:
+        # 종목명은 읽혔는데 시세만 비었다면 '데이터 없음'이 아니라 '페이지를 못 읽음'이다.
+        # 종목명조차 없으면 애초에 종목 페이지가 아닐 가능성이 높다(잘못된 코드 등).
+        if data and data.get("name"):
+            text = (
+                f"{data['name']}({code})의 시세를 읽지 못했습니다 "
+                f"(데이터가 없는 것이 아니라 **파싱 실패**입니다).\n"
+                f"못 읽은 항목: {', '.join(missing) or '현재가'}\n"
+                f"네이버 증권 페이지 구조가 바뀌었을 수 있습니다. StockLens 업데이트를 확인해 주세요."
+            )
+            warns = [f"현재가 파싱 실패(구조 변경 의심): {', '.join(missing) or 'price'}"]
+        else:
+            text = f"종목코드 {code}의 현재가를 가져올 수 없습니다."
+            warns = ["현재가 데이터를 가져오지 못했습니다."]
         meta = _kr_meta(
-            kind="snapshot", code=code, data_completeness=rmeta.NONE,
-            warnings=["현재가 데이터를 가져오지 못했습니다."],
+            kind="snapshot", code=code, data_completeness=rmeta.NONE, warnings=warns,
         )
-        return _append_result_meta(f"종목코드 {code}의 현재가를 가져올 수 없습니다.", meta)
+        return _append_result_meta(text, meta)
 
     has_nxt = "nxt_price" in data
     price_label = "현재가 (KRX 정규장)" if has_nxt else "현재가"
@@ -809,14 +828,18 @@ async def get_price(code: str) -> str:
     if "change" in data:
         sign = "+" if data["change"] > 0 else ""
         lines.append(f"전일대비: {sign}{data['change']:,}원")
-    if "open" in data:
-        lines.append(f"시가: {data['open']:,}원")
-    if "high" in data:
-        lines.append(f"고가: {data['high']:,}원")
-    if "low" in data:
-        lines.append(f"저가: {data['low']:,}원")
-    if "volume" in data:
-        lines.append(f"거래량: {data['volume']:,}")
+    else:
+        lines.append("전일대비: 데이터 없음")
+    # 못 읽은 항목은 줄을 빼지 않고 '데이터 없음'으로 남긴다. 조용히 빠지면
+    # 사용자는 그 항목이 원래 없는 건지 우리가 못 읽은 건지 알 수 없다.
+    for key, label, unit in (
+        ("open", "시가", "원"), ("high", "고가", "원"),
+        ("low", "저가", "원"), ("volume", "거래량", ""),
+    ):
+        if key in data:
+            lines.append(f"{label}: {data[key]:,}{unit}")
+        else:
+            lines.append(f"{label}: 데이터 없음")
 
     if has_nxt:
         lines.append("")
@@ -829,15 +852,17 @@ async def get_price(code: str) -> str:
             lines.append(f"거래량: {data['nxt_volume']:,}")
         lines.append("※ NXT는 KRX와 별도 체결 시장으로, 위 정규장 수치에 포함되지 않습니다")
 
-    completeness = (
-        rmeta.COMPLETE
-        if all(k in data for k in ("price", "open", "high", "low", "volume"))
-        else rmeta.PARTIAL
-    )
+    completeness = rmeta.COMPLETE if not missing else rmeta.PARTIAL
+    warns = [f"시장경보/지정 종목: {' · '.join(flags)}"] if flags else []
+    if missing:
+        # 무엇이 빠졌는지 이름을 대지 않으면 'partial'은 아무 정보도 주지 못한다.
+        warns.append(
+            f"읽지 못한 항목: {', '.join(missing)} — 값이 0인 것이 아니라 결측입니다."
+        )
     meta = _kr_meta(
         kind="snapshot", code=code, name=data.get("name"),
         data_as_of=data.get("quote_date"), data_completeness=completeness,
-        warnings=[f"시장경보/지정 종목: {' · '.join(flags)}"] if flags else None,
+        warnings=warns or None,
     )
     return _append_result_meta("\n".join(lines), meta)
 

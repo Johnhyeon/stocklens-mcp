@@ -128,13 +128,30 @@ async def get_ohlcv(
     return rows
 
 
-def _parse_rate_info(scope) -> dict:
-    """rate_info 블록(KRX 또는 NXT) 하나에서 현재가/전일대비/시가/고가/저가/거래량을 추출합니다."""
+# 파싱 결과에 '무엇을 못 읽었나'를 실어 보내는 키. 소비자는 무시해도 되고,
+# 메타 봉투를 만드는 쪽이 읽어서 data_completeness / warnings 로 바꾼다.
+PARSE_MISS_KEY = "_parse_miss"
+
+# 정상 종목 페이지라면 반드시 읽혀야 하는 시세 항목.
+_RATE_INFO_REQUIRED = ("price", "change", "open", "high", "low", "volume")
+
+
+def _parse_rate_info(scope) -> tuple[dict, list[str]]:
+    """rate_info 블록(KRX 또는 NXT) 하나에서 현재가/전일대비/시가/고가/저가/거래량을 추출합니다.
+
+    Returns:
+        (읽어낸 값, 못 읽은 필드 이름 목록).
+
+    결측을 0으로 채우지 않는다 — 거래량 0은 거래정지 종목의 **실제 값**이라
+    '못 읽었다'와 같은 자리에 두면 둘을 영영 구분할 수 없다.
+    """
     info: dict = {}
 
     price_tag = scope.select_one("p.no_today span.blind")
     if price_tag:
-        info["price"] = _parse_int(price_tag.text)
+        price = _parse_int_strict(price_tag.text)
+        if price is not None:
+            info["price"] = price
 
     diff_tag = scope.select_one("p.no_exday em span.blind")
     if diff_tag:
@@ -142,7 +159,9 @@ def _parse_rate_info(scope) -> dict:
         icon = scope.select_one("p.no_exday em.no_up, p.no_exday em.no_down")
         if icon and "no_down" in icon.get("class", []):
             diff_text = "-" + diff_text
-        info["change"] = _parse_int(diff_text)
+        change = _parse_int_strict(diff_text)
+        if change is not None:
+            info["change"] = change
 
     # 네이버 no_info 테이블 구조: td마다 span.sptxt(라벨) + em > span.blind(값)
     for td in scope.select("table.no_info td"):
@@ -152,7 +171,9 @@ def _parse_rate_info(scope) -> dict:
             continue
 
         label = label_tag.text.strip()
-        value = _parse_int(value_tag.text)
+        value = _parse_int_strict(value_tag.text)
+        if value is None:
+            continue
 
         if "거래량" in label:
             info["volume"] = value
@@ -163,7 +184,7 @@ def _parse_rate_info(scope) -> dict:
         elif "저가" in label and "하한" not in label:
             info["low"] = value
 
-    return info
+    return info, [f for f in _RATE_INFO_REQUIRED if f not in info]
 
 
 @cached(ttl_market=30, ttl_closed=3600)  # 장중 30초, 장마감 1시간
@@ -217,13 +238,18 @@ async def get_current_price(code: str) -> dict:
 
     # KRX 블록이 없는(NXT 비대상) 종목은 페이지 전체를 그대로 스코프로 사용
     krx_scope = soup.select_one("#rate_info_krx") or soup
-    result.update(_parse_rate_info(krx_scope))
+    krx_info, krx_missing = _parse_rate_info(krx_scope)
+    result.update(krx_info)
 
     nxt_scope = soup.select_one("#rate_info_nxt")
     if nxt_scope:
-        for key, value in _parse_rate_info(nxt_scope).items():
+        # NXT는 부가 정보다. 여기 결측을 본 조회의 흠으로 세지 않는다.
+        nxt_info, _ = _parse_rate_info(nxt_scope)
+        for key, value in nxt_info.items():
             result[f"nxt_{key}"] = value
 
+    # 호출부가 '값이 없다'와 '우리가 못 읽었다'를 구분할 수 있게 실어 보낸다.
+    result[PARSE_MISS_KEY] = krx_missing
     return result
 
 

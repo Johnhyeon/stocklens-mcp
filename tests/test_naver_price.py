@@ -69,8 +69,10 @@ class ParseRateInfoTests(unittest.TestCase):
     def test_krx_and_nxt_blocks_stay_separate(self) -> None:
         soup = BeautifulSoup(NXT_TAB_HTML, "lxml")
 
-        krx = _parse_rate_info(soup.select_one("#rate_info_krx"))
-        nxt = _parse_rate_info(soup.select_one("#rate_info_nxt"))
+        krx, krx_missing = _parse_rate_info(soup.select_one("#rate_info_krx"))
+        nxt, _ = _parse_rate_info(soup.select_one("#rate_info_nxt"))
+
+        self.assertEqual(krx_missing, [])  # 정상 블록이면 못 읽은 항목이 없어야 한다
 
         self.assertEqual(
             krx,
@@ -103,7 +105,9 @@ class ParseRateInfoTests(unittest.TestCase):
 
         self.assertIsNone(soup.select_one("#rate_info_krx"))
 
-        result = _parse_rate_info(soup)
+        result, missing = _parse_rate_info(soup)
+
+        self.assertEqual(missing, [])
 
         self.assertEqual(
             result,
