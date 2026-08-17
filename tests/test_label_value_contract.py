@@ -539,3 +539,87 @@ class ChartParseFailureTests(unittest.IsolatedAsyncioTestCase):
     async def test_header_only_response_is_not_an_error(self):
         self._serve(f"{CHART_HEADER}\n]")
         self.assertEqual(await _naver.get_ohlcv("999999", "day", 5), [])
+
+
+# ---------------------------------------------------------------------------
+# 9. 테마·업종·리포트·공시 표 — 위치 기반 파싱 일괄 전환 (2026-08-17)
+# ---------------------------------------------------------------------------
+#
+# 수급 표와 같은 계열이 6곳 더 있었다. 특히 테마/업종 상세는 현재가·거래량을
+# cells[2]/cells[7] 처럼 자리로 읽고 있어서, 컬럼이 하나 끼면 주가 자리에
+# 호가가 들어가도 알 수 없었다. 아래는 그 표들의 실제 헤더 구조를 고정한다.
+
+from stock_mcp_server.naver import (  # noqa: E402
+    _DISCLOSURE_RULES,
+    _GROUP_STOCK_RULES,
+    _REPORT_RULES,
+    _SECTOR_LIST_RULES,
+    _THEME_LIST_RULES,
+    _resolve_columns,
+)
+
+
+def _table(html: str):
+    return BeautifulSoup(f"<table>{html}</table>", "lxml").select_one("table")
+
+
+# 2026-08-17 실측 헤더 구조 (rowspan/colspan 포함)
+THEME_LIST_HEAD = """
+<tr><th rowspan="2">테마명</th><th rowspan="2">전일대비</th>
+    <th rowspan="2">최근3일등락률(평균)</th><th colspan="3">전일대비 등락현황</th>
+    <th colspan="2">주도주</th></tr>
+<tr><th>상승</th><th>보합</th><th>하락</th></tr>
+"""
+SECTOR_LIST_HEAD = """
+<tr><th rowspan="2">업종명</th><th rowspan="2">전일대비</th>
+    <th colspan="4">전일대비 등락현황</th><th rowspan="2">등락그래프</th></tr>
+<tr><th>전체</th><th>상승</th><th>보합</th><th>하락</th></tr>
+"""
+# 테마 상세는 '종목명'이 colspan=2 — 편입사유 칸까지 헤더가 세어 준다.
+THEME_DETAIL_HEAD = """
+<tr><th colspan="2">종목명</th><th>현재가</th><th>전일비</th><th>등락률</th>
+    <th>매수호가</th><th>매도호가</th><th>거래량</th><th>거래대금</th>
+    <th>전일거래량</th><th>토론</th></tr>
+"""
+SECTOR_DETAIL_HEAD = THEME_DETAIL_HEAD.replace('<th colspan="2">종목명</th>', "<th>종목명</th>")
+REPORT_HEAD = "<tr><th>종목명</th><th>제목</th><th>증권사</th><th>첨부</th><th>작성일</th><th>조회수</th></tr>"
+DISCLOSURE_HEAD = "<tr><th>제목</th><th>정보제공</th><th>날짜</th></tr>"
+
+
+class GroupTableColumnTests(unittest.TestCase):
+    def test_theme_list_columns(self):
+        idx = _resolve_columns(_table(THEME_LIST_HEAD), _THEME_LIST_RULES, what="테마 목록")
+        self.assertEqual(idx["change_rate"], 1)  # '전일대비 등락현황'과 섞이면 안 된다
+        self.assertEqual(idx["up_count"], 3)
+        self.assertEqual(idx["down_count"], 5)
+
+    def test_sector_list_columns(self):
+        idx = _resolve_columns(_table(SECTOR_LIST_HEAD), _SECTOR_LIST_RULES, what="업종 목록")
+        self.assertEqual(idx["change_rate"], 1)
+        self.assertEqual(idx["total_count"], 2)
+        self.assertEqual(idx["down_count"], 5)
+
+    def test_theme_detail_offsets_by_reason_column(self):
+        """테마 상세는 편입사유 칸 때문에 업종 상세보다 한 칸씩 밀린다."""
+        idx = _resolve_columns(_table(THEME_DETAIL_HEAD), _GROUP_STOCK_RULES, what="테마 상세")
+        self.assertEqual((idx["price"], idx["change_rate"], idx["volume"]), (2, 4, 7))
+
+    def test_sector_detail_has_no_reason_column(self):
+        idx = _resolve_columns(_table(SECTOR_DETAIL_HEAD), _GROUP_STOCK_RULES, what="업종 상세")
+        self.assertEqual((idx["price"], idx["change_rate"], idx["volume"]), (1, 3, 6))
+
+    def test_volume_is_not_confused_with_previous_day_volume(self):
+        """'거래량'은 '전일거래량'에도 들어 있다 — must_not 이 빠지면 모호해진다."""
+        idx = _resolve_columns(_table(SECTOR_DETAIL_HEAD), _GROUP_STOCK_RULES, what="업종 상세")
+        self.assertNotEqual(idx["volume"], 8)  # 8번이 전일거래량
+
+    def test_report_and_disclosure_columns(self):
+        r = _resolve_columns(_table(REPORT_HEAD), _REPORT_RULES, what="리포트")
+        self.assertEqual((r["broker"], r["date"], r["views"]), (2, 4, 5))
+        d = _resolve_columns(_table(DISCLOSURE_HEAD), _DISCLOSURE_RULES, what="공시")
+        self.assertEqual((d["title"], d["source"], d["date"]), (0, 1, 2))
+
+    def test_renamed_column_raises(self):
+        head = THEME_DETAIL_HEAD.replace("<th>현재가</th>", "<th>체결가</th>")
+        with self.assertRaises(NaverParseError):
+            _resolve_columns(_table(head), _GROUP_STOCK_RULES, what="테마 상세")

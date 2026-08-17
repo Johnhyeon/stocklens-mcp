@@ -343,37 +343,99 @@ def _flatten_header_labels(table) -> list[str]:
     return [" ".join(grid.get(i, [])) for i in range(max(grid) + 1)]
 
 
-# (필드명, 라벨에 반드시 들어가야 하는 키워드들)
+# 컬럼 규칙: (필드명, 라벨에 반드시 있어야 할 키워드들, 있으면 안 되는 키워드들)
+#
 # 위치가 아니라 '이름'으로 컬럼을 찾는다 — 네이버가 컬럼을 추가하거나 순서를 바꿔도
 # 값이 엉뚱한 자리로 들어가지 않는다. 이름을 못 찾으면 조용히 넘어가지 않고 예외를 던진다.
-_FLOW_COLUMN_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("date", ("날짜",)),
-    ("close", ("종가",)),
-    ("change", ("전일비",)),
-    ("change_rate", ("등락률",)),
-    ("volume", ("거래량",)),
-    ("institutional", ("기관", "순매매")),
-    ("foreign", ("외국인", "순매매")),
-)
+# must_not 은 '거래량' vs '전일거래량'처럼 한쪽이 다른 쪽을 포함할 때 필요하다.
+ColumnRule = tuple[str, tuple[str, ...], tuple[str, ...]]
 
 
-def _resolve_flow_columns(table) -> dict[str, int]:
-    """수급 표 헤더를 읽어 '필드 → 컬럼 인덱스'를 만든다. 특정 실패 시 NaverParseError."""
+def _resolve_columns(table, rules: tuple[ColumnRule, ...], *, what: str) -> dict[str, int]:
+    """표 헤더를 읽어 '필드 → 컬럼 인덱스'를 만든다. 특정 실패 시 NaverParseError.
+
+    후보가 0개면 컬럼이 사라졌거나 이름이 바뀐 것이고, 2개 이상이면 규칙이 모호한
+    것이다. 둘 다 '아무 값이나 집어서 계속 진행'하면 안 되는 상황이다.
+    """
     labels = _flatten_header_labels(table)
     if not labels:
         raise NaverParseError(
-            "수급 표의 헤더 행을 찾지 못했습니다 (네이버 페이지 구조 변경 가능성)."
+            f"{what}의 헤더 행을 찾지 못했습니다 (네이버 페이지 구조 변경 가능성)."
         )
     mapping: dict[str, int] = {}
-    for field, keywords in _FLOW_COLUMN_RULES:
-        hits = [i for i, lab in enumerate(labels) if all(k in lab for k in keywords)]
+    for field, must, must_not in rules:
+        hits = [
+            i
+            for i, lab in enumerate(labels)
+            if all(k in lab for k in must) and not any(k in lab for k in must_not)
+        ]
         if len(hits) != 1:
             raise NaverParseError(
-                f"수급 표에서 '{field}' 컬럼을 특정하지 못했습니다 "
+                f"{what}에서 '{field}' 컬럼을 특정하지 못했습니다 "
                 f"(일치 {len(hits)}개, 기대 1개). 실제 헤더: {labels}"
             )
         mapping[field] = hits[0]
     return mapping
+
+
+_FLOW_COLUMN_RULES: tuple[ColumnRule, ...] = (
+    ("date", ("날짜",), ()),
+    ("close", ("종가",), ()),
+    ("change", ("전일비",), ()),
+    ("change_rate", ("등락률",), ()),
+    ("volume", ("거래량",), ()),
+    ("institutional", ("기관", "순매매"), ()),
+    ("foreign", ("외국인", "순매매"), ()),
+)
+
+# 테마 목록(sise/theme.naver) — 2단 헤더. '전일대비'는 등락현황 묶음에도 들어 있어
+# must_not 으로 갈라야 한다.
+_THEME_LIST_RULES: tuple[ColumnRule, ...] = (
+    ("name", ("테마명",), ()),
+    ("change_rate", ("전일대비",), ("등락현황",)),
+    ("recent_3d_rate", ("최근3일",), ()),
+    ("up_count", ("등락현황", "상승"), ()),
+    ("flat_count", ("등락현황", "보합"), ()),
+    ("down_count", ("등락현황", "하락"), ()),
+)
+
+# 업종 목록(sise/sise_group.naver) — 테마와 같은 꼴에 '전체' 칸이 하나 더 있다.
+_SECTOR_LIST_RULES: tuple[ColumnRule, ...] = (
+    ("name", ("업종명",), ()),
+    ("change_rate", ("전일대비",), ("등락현황",)),
+    ("total_count", ("등락현황", "전체"), ()),
+    ("up_count", ("등락현황", "상승"), ()),
+    ("flat_count", ("등락현황", "보합"), ()),
+    ("down_count", ("등락현황", "하락"), ()),
+)
+
+# 테마/업종 상세의 종목 표 — 헤더가 동일하다. 테마 쪽은 '종목명'이 colspan=2라
+# 편입사유 칸까지 헤더가 이미 세어 주므로 인덱스가 저절로 맞는다.
+# '거래량'은 '전일거래량'에도 들어 있어 must_not 이 필요하다.
+_GROUP_STOCK_RULES: tuple[ColumnRule, ...] = (
+    ("price", ("현재가",), ()),
+    ("change_rate", ("등락률",), ()),
+    ("volume", ("거래량",), ("전일",)),
+)
+
+_REPORT_RULES: tuple[ColumnRule, ...] = (
+    ("stock", ("종목명",), ()),
+    ("title", ("제목",), ()),
+    ("broker", ("증권사",), ()),
+    ("date", ("작성일",), ()),
+    ("views", ("조회수",), ()),
+)
+
+_DISCLOSURE_RULES: tuple[ColumnRule, ...] = (
+    ("title", ("제목",), ()),
+    ("source", ("정보제공",), ()),
+    ("date", ("날짜",), ()),
+)
+
+
+def _resolve_flow_columns(table) -> dict[str, int]:
+    """수급 표 헤더를 읽어 '필드 → 컬럼 인덱스'를 만든다."""
+    return _resolve_columns(table, _FLOW_COLUMN_RULES, what="수급 표")
 
 
 def _parse_int_strict(text: str | None) -> int | None:
@@ -612,41 +674,46 @@ async def list_themes(page: int = 1) -> list[dict]:
 
     table = soup.select_one("table.type_1.theme")
     if not table:
-        return []
+        raise NaverParseError(
+            "테마 목록 표(table.type_1.theme)를 찾지 못했습니다 (네이버 구조 변경 가능성)."
+        )
+
+    idx = _resolve_columns(table, _THEME_LIST_RULES, what="테마 목록")
+    max_idx = max(idx.values())
 
     results = []
     for row in table.select("tr"):
         cells = row.select("td")
-        if len(cells) != 8:
+        if len(cells) <= max_idx:
             continue
 
-        name_tag = cells[0].find("a")
+        # 테마명 링크(no=…)가 있는 칸을 행 안에서 찾는다. 첫 칸으로 못박으면
+        # 앞에 칸이 하나 끼는 순간 전 행이 조용히 버려진다.
+        name_tag = row.select_one('td a[href*="no="]')
         if not name_tag:
             continue
 
-        href = name_tag.get("href", "")
-        theme_id_match = re.search(r"no=(\d+)", href)
+        theme_id_match = re.search(r"no=(\d+)", name_tag.get("href", ""))
         if not theme_id_match:
             continue
 
+        # 주도주는 종목 링크(code=…)로 찾는다 — 자리 대신 내용으로.
         leaders = []
-        for leader_cell in cells[6:8]:
-            leader_a = leader_cell.find("a")
-            if leader_a:
-                code_match = re.search(r"code=([A-Za-z0-9]{6})", leader_a.get("href", ""))
-                leaders.append({
-                    "name": leader_a.text.strip(),
-                    "code": code_match.group(1) if code_match else "",
-                })
+        for leader_a in row.select('td a[href*="code="]'):
+            code_match = re.search(r"code=([A-Za-z0-9]{6})", leader_a.get("href", ""))
+            leaders.append({
+                "name": leader_a.text.strip(),
+                "code": code_match.group(1) if code_match else "",
+            })
 
         results.append({
             "name": name_tag.text.strip(),
             "theme_id": theme_id_match.group(1),
-            "change_rate": cells[1].text.strip(),
-            "recent_3d_rate": cells[2].text.strip(),
-            "up_count": _parse_int(cells[3].text),
-            "flat_count": _parse_int(cells[4].text),
-            "down_count": _parse_int(cells[5].text),
+            "change_rate": cells[idx["change_rate"]].text.strip(),
+            "recent_3d_rate": cells[idx["recent_3d_rate"]].text.strip(),
+            "up_count": _parse_int(cells[idx["up_count"]].text),
+            "flat_count": _parse_int(cells[idx["flat_count"]].text),
+            "down_count": _parse_int(cells[idx["down_count"]].text),
             "leaders": leaders,
         })
 
@@ -685,16 +752,13 @@ async def get_theme_stocks(
             continue
 
         for row in table.select("tr"):
-            cells = row.select("td")
-            if len(cells) != 8:
-                continue
-            name_tag = cells[0].find("a")
+            # 테마 링크(no=…)를 자리가 아니라 내용으로 찾는다.
+            name_tag = row.select_one('td a[href*="no="]')
             if not name_tag:
                 continue
             name = name_tag.text.strip()
-            if theme_name in name or name_tag.text.strip().lower() == theme_name.lower():
-                href = name_tag.get("href", "")
-                m = re.search(r"no=(\d+)", href)
+            if theme_name in name or name.lower() == theme_name.lower():
+                m = re.search(r"no=(\d+)", name_tag.get("href", ""))
                 if m:
                     theme_id = m.group(1)
                     matched_name = name
@@ -714,38 +778,48 @@ async def get_theme_stocks(
 
     # table.type_5가 종목 리스트
     tables = soup.select("table.type_5")
+    if not tables:
+        raise NaverParseError(
+            f"테마 상세의 종목 표(table.type_5)를 찾지 못했습니다 (theme_id={theme_id})."
+        )
+
+    # 테마 상세는 '종목명' 헤더가 colspan=2라 편입사유 칸까지 헤더가 세어 준다.
+    # 덕분에 업종 상세와 같은 규칙으로 인덱스가 각각 맞게 풀린다.
+    idx = _resolve_columns(tables[0], _GROUP_STOCK_RULES, what="테마 상세 종목 표")
+    max_idx = max(idx.values())
+
     stocks = []
-    if tables:
-        for row in tables[0].select("tr"):
-            cells = row.select("td")
-            if len(cells) < 11:
-                continue
+    for row in tables[0].select("tr"):
+        cells = row.select("td")
+        if len(cells) <= max_idx:
+            continue
 
-            name_a = cells[0].find("a")
-            if not name_a:
-                continue
-            code_match = re.search(r"code=([A-Za-z0-9]{6})", name_a.get("href", ""))
-            if not code_match:
-                continue
+        name_a = row.select_one('td a[href*="code="]')
+        if not name_a:
+            continue
+        code_match = re.search(r"code=([A-Za-z0-9]{6})", name_a.get("href", ""))
+        if not code_match:
+            continue
 
-            stock_info = {
-                "code": code_match.group(1),
-                "name": name_a.text.strip().rstrip("*").strip(),
-                "price": _parse_int(cells[2].text),
-                "change_rate": cells[4].text.strip(),
-                "volume": _parse_int(cells[7].text),
-            }
+        stock_info = {
+            "code": code_match.group(1),
+            "name": name_a.text.strip().rstrip("*").strip(),
+            "price": _parse_int(cells[idx["price"]].text),
+            "change_rate": cells[idx["change_rate"]].text.strip(),
+            "volume": _parse_int(cells[idx["volume"]].text),
+        }
 
-            if include_reason:
-                reason_tag = cells[1].select_one("p.info_txt")
-                reason = reason_tag.text.strip() if reason_tag else ""
-                if len(reason) > 80:
-                    reason = reason[:78] + ".."
-                stock_info["reason"] = reason
+        if include_reason:
+            # 편입사유는 헤더가 없는 칸이라 자리로 찾을 수 없다 — 클래스로 찾는다.
+            reason_tag = row.select_one("td p.info_txt")
+            reason = reason_tag.text.strip() if reason_tag else ""
+            if len(reason) > 80:
+                reason = reason[:78] + ".."
+            stock_info["reason"] = reason
 
-            stocks.append(stock_info)
-            if len(stocks) >= count:
-                break
+        stocks.append(stock_info)
+        if len(stocks) >= count:
+            break
 
     return {
         "theme_name": matched_name,
@@ -769,31 +843,35 @@ async def list_sectors() -> list[dict]:
 
     table = soup.select_one("table.type_1")
     if not table:
-        return []
+        raise NaverParseError(
+            "업종 목록 표(table.type_1)를 찾지 못했습니다 (네이버 구조 변경 가능성)."
+        )
+
+    idx = _resolve_columns(table, _SECTOR_LIST_RULES, what="업종 목록")
+    max_idx = max(idx.values())
 
     results = []
     for row in table.select("tr"):
         cells = row.select("td")
-        if len(cells) < 6:
+        if len(cells) <= max_idx:
             continue
 
-        name_tag = cells[0].find("a")
+        name_tag = row.select_one('td a[href*="no="]')
         if not name_tag:
             continue
 
-        href = name_tag.get("href", "")
-        sector_id_match = re.search(r"no=(\d+)", href)
+        sector_id_match = re.search(r"no=(\d+)", name_tag.get("href", ""))
         if not sector_id_match:
             continue
 
         results.append({
             "name": name_tag.text.strip(),
             "sector_id": sector_id_match.group(1),
-            "change_rate": cells[1].text.strip(),
-            "total_count": _parse_int(cells[2].text),
-            "up_count": _parse_int(cells[3].text),
-            "flat_count": _parse_int(cells[4].text),
-            "down_count": _parse_int(cells[5].text),
+            "change_rate": cells[idx["change_rate"]].text.strip(),
+            "total_count": _parse_int(cells[idx["total_count"]].text),
+            "up_count": _parse_int(cells[idx["up_count"]].text),
+            "flat_count": _parse_int(cells[idx["flat_count"]].text),
+            "down_count": _parse_int(cells[idx["down_count"]].text),
         })
 
     return results
@@ -829,30 +907,39 @@ async def get_sector_stocks(sector_name: str, count: int = 30) -> dict:
     soup = BeautifulSoup(resp.text, "lxml")
 
     tables = soup.select("table.type_5")
+    if not tables:
+        raise NaverParseError(
+            f"업종 상세의 종목 표(table.type_5)를 찾지 못했습니다 "
+            f"(sector_id={matched['sector_id']})."
+        )
+
+    # 업종 상세는 편입사유 칸이 없어 테마 상세보다 한 칸 짧다. 헤더로 풀면
+    # 두 경우가 각각 맞게 잡히므로 표별로 상수를 따로 둘 필요가 없다.
+    idx = _resolve_columns(tables[0], _GROUP_STOCK_RULES, what="업종 상세 종목 표")
+    max_idx = max(idx.values())
+
     stocks = []
-    if tables:
-        for row in tables[0].select("tr"):
-            cells = row.select("td")
-            # 업종 상세는 10 cells (테마와 달리 편입사유 없음)
-            if len(cells) < 10:
-                continue
+    for row in tables[0].select("tr"):
+        cells = row.select("td")
+        if len(cells) <= max_idx:
+            continue
 
-            name_a = cells[0].find("a")
-            if not name_a:
-                continue
-            code_match = re.search(r"code=([A-Za-z0-9]{6})", name_a.get("href", ""))
-            if not code_match:
-                continue
+        name_a = row.select_one('td a[href*="code="]')
+        if not name_a:
+            continue
+        code_match = re.search(r"code=([A-Za-z0-9]{6})", name_a.get("href", ""))
+        if not code_match:
+            continue
 
-            stocks.append({
-                "code": code_match.group(1),
-                "name": name_a.text.strip().rstrip("*").strip(),
-                "price": _parse_int(cells[1].text),
-                "change_rate": cells[3].text.strip(),
-                "volume": _parse_int(cells[6].text),
-            })
-            if len(stocks) >= count:
-                break
+        stocks.append({
+            "code": code_match.group(1),
+            "name": name_a.text.strip().rstrip("*").strip(),
+            "price": _parse_int(cells[idx["price"]].text),
+            "change_rate": cells[idx["change_rate"]].text.strip(),
+            "volume": _parse_int(cells[idx["volume"]].text),
+        })
+        if len(stocks) >= count:
+            break
 
     return {
         "sector_name": matched["name"],
@@ -1720,30 +1807,34 @@ async def get_reports(code: str, count: int = 5) -> list[dict]:
 
     table = soup.select_one("table.type_1")
     if not table:
-        return []
+        raise NaverParseError(
+            "리서치 리포트 표(table.type_1)를 찾지 못했습니다 (네이버 구조 변경 가능성)."
+        )
+
+    idx = _resolve_columns(table, _REPORT_RULES, what="리서치 리포트 목록")
+    max_idx = max(idx.values())
 
     results = []
     for row in table.select("tr"):
         cells = row.select("td")
-        if len(cells) < 5:
+        if len(cells) <= max_idx:
             continue
 
-        title_a = cells[1].find("a")
+        title_a = row.select_one('td a[href*="nid="]')
         if not title_a:
             continue
 
-        href = title_a.get("href", "")
-        nid_match = re.search(r"nid=(\d+)", href)
+        nid_match = re.search(r"nid=(\d+)", title_a.get("href", ""))
         if not nid_match:
             continue
 
         results.append({
             "nid": nid_match.group(1),
-            "stock": cells[0].get_text(strip=True),
+            "stock": cells[idx["stock"]].get_text(strip=True),
             "title": title_a.get_text(strip=True),
-            "broker": cells[2].get_text(strip=True),
-            "date": cells[4].get_text(strip=True),
-            "views": _parse_int(cells[5].get_text(strip=True)) if len(cells) > 5 else 0,
+            "broker": cells[idx["broker"]].get_text(strip=True),
+            "date": cells[idx["date"]].get_text(strip=True),
+            "views": _parse_int(cells[idx["views"]].get_text(strip=True)),
         })
         if len(results) >= count:
             break
@@ -1801,13 +1892,32 @@ async def get_disclosure_list(code: str, page: int = 1) -> list[dict]:
     resp = await fetch(DISCLOSURE_URL, params={"code": code, "page": page})
     soup = BeautifulSoup(resp.text, "lxml")
 
+    # 페이지에 표가 여럿이라 '제목·정보제공·날짜' 헤더가 풀리는 표를 골라 쓴다.
+    # 아무 표나 훑으면서 앞 세 칸을 집으면, 다른 표가 끼어들 때 조용히 섞인다.
+    table = None
+    idx: dict[str, int] = {}
+    for candidate in soup.select("table"):
+        try:
+            idx = _resolve_columns(candidate, _DISCLOSURE_RULES, what="공시 목록")
+        except NaverParseError:
+            continue
+        table = candidate
+        break
+
+    if table is None:
+        raise NaverParseError(
+            "공시 목록 표를 찾지 못했습니다 — '제목·정보제공·날짜' 헤더를 가진 표가 "
+            "페이지에 없습니다 (네이버 구조 변경 가능성)."
+        )
+
+    max_idx = max(idx.values())
     results = []
-    for row in soup.select("table tr"):
+    for row in table.select("tr"):
         cells = row.select("td")
-        if len(cells) < 3:
+        if len(cells) <= max_idx:
             continue
 
-        title_a = cells[0].find("a")
+        title_a = cells[idx["title"]].find("a")
         if not title_a:
             continue
 
@@ -1817,8 +1927,8 @@ async def get_disclosure_list(code: str, page: int = 1) -> list[dict]:
 
         results.append({
             "title": title,
-            "source": cells[1].get_text(strip=True),
-            "date": cells[2].get_text(strip=True),
+            "source": cells[idx["source"]].get_text(strip=True),
+            "date": cells[idx["date"]].get_text(strip=True),
             "link": title_a.get("href", ""),
         })
 
