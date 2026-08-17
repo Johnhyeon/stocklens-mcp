@@ -1405,15 +1405,27 @@ async def get_index() -> str:
         return "시장 지수를 가져올 수 없습니다."
 
     lines = ["시장 지수:"]
+    warns: list[str] = []
     for item in data:
-        value = item.get("value", "-")
-        if isinstance(value, float):
-            value = f"{value:,.2f}"
+        miss = item.get(PARSE_MISS_KEY) or []
+        value = item.get("value")
+        # 못 읽은 지수를 '-'로만 두면 휴장인지 파싱 실패인지 구분이 안 된다.
+        value_str = f"{value:,.2f}" if isinstance(value, float) else "데이터 없음"
         change = item.get("change_raw") or ""
         rate = item.get("change_rate")
         rate_str = f" ({rate:+.2f}%)" if rate is not None else ""
-        lines.append(f"  {item['index']}: {value}{rate_str} {change}".rstrip())
-    return _append_result_meta("\n".join(lines), _kr_meta(kind="snapshot"))
+        lines.append(f"  {item['index']}: {value_str}{rate_str} {change}".rstrip())
+        if miss:
+            warns.append(f"{item['index']} 읽지 못한 항목: {', '.join(miss)}")
+
+    completeness = rmeta.PARTIAL if warns else rmeta.COMPLETE
+    if warns and all(item.get(PARSE_MISS_KEY) for item in data):
+        completeness = rmeta.NONE
+        warns.append("모든 지수를 읽지 못했습니다 — 네이버 페이지 구조 변경 가능성.")
+    return _append_result_meta(
+        "\n".join(lines),
+        _kr_meta(kind="snapshot", data_completeness=completeness, warnings=warns or None),
+    )
 
 
 @mcp.tool()

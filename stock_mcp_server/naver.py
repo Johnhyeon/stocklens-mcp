@@ -418,6 +418,20 @@ _GROUP_STOCK_RULES: tuple[ColumnRule, ...] = (
     ("volume", ("거래량",), ("전일",)),
 )
 
+# 랭킹 표(거래량/상승률/하락률) — 6번 칸부터 페이지마다 구성이 달라서 공용 위치를
+# 쓰면 안 된다. 여기서 쓰는 다섯 칸은 어느 페이지에나 같은 이름으로 있다.
+_RANKING_RULES: tuple[ColumnRule, ...] = (
+    ("rank", ("N",), ()),
+    ("name", ("종목명",), ()),
+    ("price", ("현재가",), ()),
+    ("change_rate", ("등락률",), ()),
+    ("volume", ("거래량",), ()),
+)
+
+_MARKET_CAP_RULES: tuple[ColumnRule, ...] = _RANKING_RULES + (
+    ("market_cap", ("시가총액",), ()),
+)
+
 _REPORT_RULES: tuple[ColumnRule, ...] = (
     ("stock", ("종목명",), ()),
     ("title", ("제목",), ()),
@@ -1251,34 +1265,41 @@ async def _fetch_ranking_page(url: str, sosok: str | None, page: int = 1) -> lis
 
     table = soup.select_one("table.type_2")
     if not table:
-        return []
+        raise NaverParseError(
+            f"랭킹 표(table.type_2)를 찾지 못했습니다 (url={url}, page={page})."
+        )
+
+    # 거래량 페이지와 상승/하락률 페이지는 6번 칸부터 컬럼 구성이 서로 다르다
+    # (거래대금 vs 매수호가). 자리를 공용으로 가정하면 안 되는 구조라 헤더로 푼다.
+    idx = _resolve_columns(table, _RANKING_RULES, what="랭킹 표")
+    max_idx = max(idx.values())
 
     results = []
     for row in table.select("tr"):
         cells = row.select("td")
-        if len(cells) < 12:
+        if len(cells) <= max_idx:
             continue
 
         # 순위 숫자 확인 (헤더/광고 행 걸러냄)
-        rank_text = cells[0].text.strip()
+        rank_text = cells[idx["rank"]].text.strip()
         if not rank_text.isdigit():
             continue
 
-        name_a = cells[1].find("a")
+        name_a = cells[idx["name"]].find("a")
         if not name_a:
             continue
         code_match = re.search(r"code=([A-Za-z0-9]{6})", name_a.get("href", ""))
         if not code_match:
             continue
 
-        price = _parse_int(cells[2].text)
-        volume = _parse_int(cells[5].text)
+        price = _parse_int(cells[idx["price"]].text)
+        volume = _parse_int(cells[idx["volume"]].text)
         results.append({
             "rank": int(rank_text),
             "code": code_match.group(1),
             "name": name_a.text.strip(),
             "price": price,
-            "change_rate": cells[4].text.strip(),
+            "change_rate": cells[idx["change_rate"]].text.strip(),
             "volume": volume,
             # 현재가 × 거래량 추산. 실제 거래대금은 체결가 가중이라 살짝 다르다.
             "trade_value_est_krw": price * volume,
@@ -1384,19 +1405,24 @@ async def _fetch_market_cap_page(sosok: str, page: int = 1) -> list[dict]:
 
     table = soup.select_one("table.type_2")
     if not table:
-        return []
+        raise NaverParseError(
+            f"시가총액 표(table.type_2)를 찾지 못했습니다 (sosok={sosok}, page={page})."
+        )
+
+    idx = _resolve_columns(table, _MARKET_CAP_RULES, what="시가총액 랭킹")
+    max_idx = max(idx.values())
 
     results = []
     for row in table.select("tr"):
         cells = row.select("td")
-        if len(cells) < 13:
+        if len(cells) <= max_idx:
             continue
 
-        rank_text = cells[0].text.strip()
+        rank_text = cells[idx["rank"]].text.strip()
         if not rank_text.isdigit():
             continue
 
-        name_a = cells[1].find("a")
+        name_a = cells[idx["name"]].find("a")
         if not name_a:
             continue
         code_match = re.search(r"code=([A-Za-z0-9]{6})", name_a.get("href", ""))
@@ -1407,10 +1433,10 @@ async def _fetch_market_cap_page(sosok: str, page: int = 1) -> list[dict]:
             "rank": int(rank_text),
             "code": code_match.group(1),
             "name": name_a.text.strip(),
-            "price": _parse_int(cells[2].text),
-            "change_rate": cells[4].text.strip(),
-            "market_cap_billion": _parse_int(cells[6].text),  # 단위: 억원
-            "volume": _parse_int(cells[9].text),
+            "price": _parse_int(cells[idx["price"]].text),
+            "change_rate": cells[idx["change_rate"]].text.strip(),
+            "market_cap_billion": _parse_int(cells[idx["market_cap"]].text),  # 단위: 억원
+            "volume": _parse_int(cells[idx["volume"]].text),
         })
 
     return results
@@ -1451,28 +1477,46 @@ async def get_market_index() -> list[dict]:
         soup = BeautifulSoup(resp.text, "lxml")
 
         item: dict = {"index": code}
+        missing: list[str] = []
 
         now_val = soup.select_one("#now_value")
-        if now_val:
-            try:
-                item["value"] = float(now_val.text.strip().replace(",", ""))
-            except ValueError:
-                item["value"] = now_val.text.strip()
+        parsed = _parse_float(now_val.text, default=None) if now_val else None
+        if parsed is None:
+            # 예전엔 파싱 실패 시 원문 문자열을 그대로 value 에 넣었다. 숫자 자리에
+            # 문자열이 앉으면 소비자는 그게 지수인 줄 알고 그대로 쓴다.
+            missing.append("value")
+        else:
+            item["value"] = parsed
 
         change_val = soup.select_one("#change_value_and_rate")
-        if change_val:
-            # 구조: <span class="fluc">...<span>값</span> +X.XX%<span class="blind">상승/하락</span></span>
+        if change_val is None:
+            missing.extend(["change_rate", "change_value"])
+        else:
+            # 구조: <span class="fluc"><span>164.60</span> +2.42%<span class="blind">상승</span></span>
             raw = change_val.get_text(" ", strip=True)
             item["change_raw"] = raw
-            # 수치 분리 시도
-            parts = raw.replace("상승", "+").replace("하락", "-").split()
-            for p in parts:
-                if "%" in p:
-                    try:
-                        item["change_rate"] = float(p.replace("%", "").replace("+", ""))
-                    except ValueError:
-                        pass
 
+            # 퍼센트에는 네이버가 부호를 직접 붙여 준다('+2.42%' / '-2.42%').
+            rate_m = re.search(r"([-+]?\d+(?:\.\d+)?)\s*%", raw)
+            if rate_m:
+                item["change_rate"] = float(rate_m.group(1))
+            else:
+                missing.append("change_rate")
+
+            # 포인트 변화는 절댓값으로만 온다 — 방향은 .blind(상승/하락)에만 있다.
+            blind = change_val.select_one("span.blind")
+            word = blind.text.strip() if blind else ""
+            point_tag = next(
+                (s for s in change_val.select("span") if s is not blind), None
+            )
+            point = _parse_float(point_tag.get_text(strip=True), default=None) if point_tag else None
+            if point is None:
+                missing.append("change_value")
+            else:
+                item["change_value"] = -abs(point) if "하락" in word else abs(point)
+
+        if missing:
+            item[PARSE_MISS_KEY] = missing
         return item
 
     results = await asyncio.gather(fetch_one("KOSPI"), fetch_one("KOSDAQ"))

@@ -623,3 +623,99 @@ class GroupTableColumnTests(unittest.TestCase):
         head = THEME_DETAIL_HEAD.replace("<th>현재가</th>", "<th>체결가</th>")
         with self.assertRaises(NaverParseError):
             _resolve_columns(_table(head), _GROUP_STOCK_RULES, what="테마 상세")
+
+
+# ---------------------------------------------------------------------------
+# 10. 랭킹·시장지수 (2026-08-17)
+# ---------------------------------------------------------------------------
+#
+# 랭킹 표는 페이지마다 6번 칸부터 구성이 다르다(거래량 페이지는 '거래대금',
+# 상승률 페이지는 '매수호가'). 공용 파서가 자리를 가정하고 있었다.
+# 시장지수는 파싱 실패 시 원문 문자열을 그대로 value 에 넣어, 숫자 자리에
+# 문자열이 앉았다.
+
+from stock_mcp_server.naver import (  # noqa: E402
+    _MARKET_CAP_RULES,
+    _RANKING_RULES,
+)
+
+QUANT_HEAD = (
+    "<tr><th>N</th><th>종목명</th><th>현재가</th><th>전일비</th><th>등락률</th>"
+    "<th>거래량</th><th>거래대금</th><th>매수호가</th><th>매도호가</th>"
+    "<th>시가총액</th><th>PER</th><th>ROE</th></tr>"
+)
+RISE_HEAD = (
+    "<tr><th>N</th><th>종목명</th><th>현재가</th><th>전일비</th><th>등락률</th>"
+    "<th>거래량</th><th>매수호가</th><th>매도호가</th><th>매수총잔량</th>"
+    "<th>매도총잔량</th><th>PER</th><th>ROE</th></tr>"
+)
+MARKET_CAP_HEAD = (
+    "<tr><th>N</th><th>종목명</th><th>현재가</th><th>전일비</th><th>등락률</th>"
+    "<th>액면가</th><th>시가총액</th><th>상장주식수</th><th>외국인비율</th>"
+    "<th>거래량</th><th>PER</th><th>ROE</th><th>토론</th></tr>"
+)
+
+
+class RankingColumnTests(unittest.TestCase):
+    def test_quant_and_rise_pages_share_first_columns(self):
+        q = _resolve_columns(_table(QUANT_HEAD), _RANKING_RULES, what="거래량 랭킹")
+        r = _resolve_columns(_table(RISE_HEAD), _RANKING_RULES, what="상승률 랭킹")
+        self.assertEqual(q, r)  # 쓰는 다섯 칸은 두 페이지가 같아야 한다
+        self.assertEqual(q["volume"], 5)
+
+    def test_market_cap_columns(self):
+        idx = _resolve_columns(_table(MARKET_CAP_HEAD), _MARKET_CAP_RULES, what="시가총액")
+        self.assertEqual(idx["market_cap"], 6)
+        self.assertEqual(idx["volume"], 9)  # 액면가·상장주식수 뒤로 밀려 있다
+
+    def test_ranking_rules_fail_loudly_on_rename(self):
+        head = QUANT_HEAD.replace("<th>거래량</th>", "<th>체결량</th>")
+        with self.assertRaises(NaverParseError):
+            _resolve_columns(_table(head), _RANKING_RULES, what="거래량 랭킹")
+
+
+class MarketIndexValueTests(unittest.IsolatedAsyncioTestCase):
+    async def test_unparseable_index_value_is_missing_not_string(self):
+        """예전엔 float 실패 시 원문 문자열을 value 에 넣었다."""
+        html = (
+            '<em id="now_value">N/A</em>'
+            '<span class="fluc" id="change_value_and_rate">'
+            '<span>164.60</span> +2.42%<span class="blind">상승</span></span>'
+        )
+
+        async def _fetch(url, params=None, **kwargs):
+            return types.SimpleNamespace(text=html)
+
+        real, _naver.fetch = _naver.fetch, _fetch
+        clear_cache()
+        try:
+            items = await _naver.get_market_index()
+        finally:
+            _naver.fetch = real
+            clear_cache()
+
+        for item in items:
+            self.assertNotIn("value", item)
+            self.assertIn("value", item[_naver.PARSE_MISS_KEY])
+            self.assertEqual(item["change_value"], 164.6)  # 부호 복원까지 확인
+
+    async def test_down_day_index_change_value_is_negative(self):
+        html = (
+            '<em id="now_value">6,977.94</em>'
+            '<span class="fluc" id="change_value_and_rate">'
+            '<span>164.60</span> -2.42%<span class="blind">하락</span></span>'
+        )
+
+        async def _fetch(url, params=None, **kwargs):
+            return types.SimpleNamespace(text=html)
+
+        real, _naver.fetch = _naver.fetch, _fetch
+        clear_cache()
+        try:
+            items = await _naver.get_market_index()
+        finally:
+            _naver.fetch = real
+            clear_cache()
+
+        self.assertEqual(items[0]["change_value"], -164.6)
+        self.assertEqual(items[0]["change_rate"], -2.42)
