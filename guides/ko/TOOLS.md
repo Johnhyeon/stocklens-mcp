@@ -1,16 +1,16 @@
 # StockLens 도구 레퍼런스
 
-총 **48개 도구** — 시장 캘린더 1 + 한국 주식 27 + 미국 주식 20.
+총 **56개 도구** — 한국 주식 35(시장 캘린더 포함) + 미국 주식 21.
 
 [🇺🇸 English](../en/TOOLS.md) | [USAGE](USAGE.md) | [INSTALL](INSTALL.md)
 
 ---
 
-## 🇰🇷 한국 주식 (27)
+## 🇰🇷 한국 주식 (35)
 
 데이터 소스: 네이버 증권 (공개 데이터, API 키 불필요).
 
-### 기본 조회 (7)
+### 기본 조회 (10)
 
 #### `get_market_clock`
 한국장/미국장 현재 상태, 주말/휴장 여부, 최근 거래일, 다음 개장일을 한 번에 조회.
@@ -54,6 +54,16 @@ KOSPI / KOSDAQ 지수 현재값.
 - 파라미터 없음
 - 예: `"오늘 코스피 어때?"`
 
+#### `watchlist`
+'내 종목'(관심종목) 보기·추가·삭제. **DartLens·TelegramLens와 같은 목록**을 씁니다.
+- `action` (`list|add|remove`), `query` (str, 종목명 또는 코드)
+- 예: `"디오 관심종목에 넣어줘"`, `"내 종목 뭐뭐 있지?"`
+
+#### `stocklens_status`
+자가진단 — 버전·라이선스·국내/미국 장 상태·최근 성공·실패·캐시 상태를 한 번에.
+- 파라미터 없음
+- 다른 도구가 막힐 때 원인 확인용
+
 ---
 
 ### 기술지표 (2)
@@ -73,7 +83,7 @@ KOSPI / KOSDAQ 지수 현재값.
 
 ---
 
-### 스크리닝 (7)
+### 스크리닝 (8)
 
 #### `list_themes`
 네이버 증권 테마 목록 (등락률 순, 페이지당 40개).
@@ -97,9 +107,14 @@ KOSPI / KOSDAQ 지수 현재값.
 - `market` (`KOSPI|KOSDAQ|ALL`), `count` (int, 기본 50, 최대 500), `direction` (`change_ranking`만, `up|down`)
 - 예: `"오늘 거래량 TOP 50"`, `"코스닥 하락률 20위"`
 
+#### `screen_by_flow`
+거래대금·거래량 상위 중 **외국인·기관이 며칠 연속 순매수**한 종목만 추립니다.
+- `top_n`, `market`, `foreign_days`, `inst_days`, `exclude_etf` (bool), `sort_by`
+- 예: `"외국인 5일 연속 순매수 종목"`
+
 ---
 
-### 벌크 조회 (2)
+### 벌크 조회 (4)
 
 #### `get_multi_stocks`
 여러 종목 기본 정보 병렬 조회 (현재가·거래량).
@@ -110,6 +125,16 @@ KOSPI / KOSDAQ 지수 현재값.
 여러 종목 차트 통계 (52주 고점/저점/낙폭·수익률·평균 거래량).
 - `codes` (list, 최대 100), `days` (int, 기본 260)
 - 반환: `current_price`, `high`, `high_date`, `low`, `low_date`, `drawdown_pct`, `recovery_pct`, `period_return_pct`, `avg_volume`
+
+#### `get_flow_batch`
+여러 종목 수급(기관·외국인 순매매) 병렬 조회.
+- `codes` (list), `days` (int)
+- 종목마다 `get_flow`를 반복하는 것보다 훨씬 가볍습니다.
+
+#### `get_financial_batch`
+여러 종목 핵심 재무(PER·PBR·ROE·영업이익률·부채비율·배당률)를 한 표로.
+- `codes` (list)
+- ⚠️ 비교 목적이면 `get_financial`을 반복하지 말고 이걸 쓰세요 (토큰 대폭 절감).
 
 ---
 
@@ -126,7 +151,7 @@ ETF 1,000+ 목록 + 카테고리 필터·정렬.
 
 ---
 
-### 분석·공시 (3)
+### 분석·공시 (5)
 
 #### `get_consensus`
 증권사 컨센서스 (목표주가·투자의견 분포·실적 추정치).
@@ -138,9 +163,22 @@ ETF 1,000+ 목록 + 카테고리 필터·정렬.
 - `code` (str), `limit` (int)
 - 예: `"LG에너지솔루션 최근 리포트"`
 
+#### `get_report_content`
+리포트 **한 건**의 PDF 본문. 목표주가 산출 근거·실적 추정까지 읽습니다.
+- `nid` (str) — `get_reports` 결과에 표시되는 리포트 번호
+- `mode` (str) — `summary` 앞부분(기본) / `full` 전문 / `link` 링크만
+- 예: `"이 리포트 자세히 봐줘"`, `"목표가 근거가 뭐야"`, `"전문 다 보여줘"`
+- 이미지로 만들어진 PDF는 읽을 수 없어 원문 링크로 안내합니다.
+
 #### `get_disclosure`
 DART 공시 목록 (제목·날짜·출처).
 - `code` (str), `limit`
+
+#### `get_event_reaction`
+특정 날짜(공시일 등) **전후 주가·거래량·수급 반응**을 정렬해 보여줍니다.
+- `code`, `event_date` (YYYY-MM-DD), `before` (int), `after` (int)
+- 예: `"이 공시 난 날 주가가 어떻게 반응했어?"`
+- 거래정지 등으로 잴 수 없는 구간은 0%가 아니라 "분석 불가"로 표시합니다.
 
 ---
 
@@ -170,7 +208,7 @@ DART 공시 목록 (제목·날짜·출처).
 
 ---
 
-## 🇺🇸 미국 주식 (20)
+## 🇺🇸 미국 주식 (21)
 
 데이터 소스: **Yahoo Finance (yfinance)**. API 키 불필요, 최대 15분 지연.
 티커 자동 감지 (1~5자 알파벳 + `.`/`-` 특수 = US). BRK.B 등 dot 티커는 `BRK-B`로 내부 변환.
@@ -226,7 +264,7 @@ Valuation (P/E, Forward P/E, PEG, P/B) + Profitability (ROE, margin) + Dividend 
 
 ---
 
-### US 고유 정보 (10)
+### US 고유 정보 (11)
 
 #### `get_us_earnings`
 다음 실적 발표일 + 최근 EPS 서프라이즈 8분기.
@@ -264,6 +302,10 @@ SEC 공시 목록 (10-K, 10-Q, 8-K) + EDGAR URL.
 #### `get_us_etf_info`
 ETF 전용 상세 (top holdings, 섹터 비중, 자산 배분, 보수율, YTD 수익률).
 - `ticker`: SPY, QQQ, SCHD, VTI 등
+
+#### `export_us_to_excel`
+미국 주식 장기 데이터를 Excel 파일로 저장 (대화 토큰 소비 없음).
+- `ticker`, `period`, `interval`, `filename`
 
 ---
 
