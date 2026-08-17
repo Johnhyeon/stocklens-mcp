@@ -258,14 +258,168 @@ async def get_alert_codes() -> dict[str, list[str]]:
     return out
 
 
+class NaverParseError(RuntimeError):
+    """네이버 페이지 구조가 예상과 달라 파싱에 실패했다.
+
+    '데이터가 없다'(빈 리스트)와 '우리가 못 읽었다'(이 예외)를 구분하기 위해 존재한다.
+    둘을 섞으면 사용자는 구조 변경을 '데이터 없음'으로 읽고, 조용히 틀린 결론에 도달한다.
+    """
+
+
+def _flatten_header_labels(table) -> list[str]:
+    """헤더 행들의 rowspan/colspan을 펼쳐 '컬럼 인덱스 → 라벨'을 만든다.
+
+    네이버 수급표는 2단 헤더다(<thead>가 아니라 <tr><th> 로 들어 있다):
+
+        1단: 날짜 종가 전일비 등락률 거래량 │ 기관    │ 외국인(colspan=3)
+        2단:  (rowspan=2 로 1단이 점유)     │ 순매매량 │ 순매매량 보유주수 지분율
+
+    상위·하위를 합쳐 `외국인 순매매량` / `외국인 보유주수` 처럼 구분 가능한 라벨을 만든다.
+    이래야 '외국인' 컬럼이 셋인 표에서 순매매량만 정확히 집어낼 수 있다.
+    """
+    header_rows = [tr for tr in table.select("tr") if tr.select("th")]
+    if not header_rows:
+        return []
+
+    grid: dict[int, list[str]] = {}
+    occupied: dict[int, int] = {}  # 컬럼 → 위 행의 rowspan이 점유하는 마지막 행 인덱스(배타)
+    for r, tr in enumerate(header_rows[:2]):
+        c = 0
+        for th in tr.select("th"):
+            while occupied.get(c, 0) > r:  # 위 행이 rowspan 으로 잡고 있는 자리는 건너뛴다
+                c += 1
+            label = " ".join(th.text.split())
+            try:
+                colspan = max(1, int(th.get("colspan") or 1))
+                rowspan = max(1, int(th.get("rowspan") or 1))
+            except (TypeError, ValueError):
+                colspan = rowspan = 1
+            for k in range(colspan):
+                grid.setdefault(c + k, []).append(label)
+                if rowspan > 1:
+                    occupied[c + k] = r + rowspan
+            c += colspan
+
+    if not grid:
+        return []
+    return [" ".join(grid.get(i, [])) for i in range(max(grid) + 1)]
+
+
+# (필드명, 라벨에 반드시 들어가야 하는 키워드들)
+# 위치가 아니라 '이름'으로 컬럼을 찾는다 — 네이버가 컬럼을 추가하거나 순서를 바꿔도
+# 값이 엉뚱한 자리로 들어가지 않는다. 이름을 못 찾으면 조용히 넘어가지 않고 예외를 던진다.
+_FLOW_COLUMN_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("date", ("날짜",)),
+    ("close", ("종가",)),
+    ("change", ("전일비",)),
+    ("change_rate", ("등락률",)),
+    ("volume", ("거래량",)),
+    ("institutional", ("기관", "순매매")),
+    ("foreign", ("외국인", "순매매")),
+)
+
+
+def _resolve_flow_columns(table) -> dict[str, int]:
+    """수급 표 헤더를 읽어 '필드 → 컬럼 인덱스'를 만든다. 특정 실패 시 NaverParseError."""
+    labels = _flatten_header_labels(table)
+    if not labels:
+        raise NaverParseError(
+            "수급 표의 헤더 행을 찾지 못했습니다 (네이버 페이지 구조 변경 가능성)."
+        )
+    mapping: dict[str, int] = {}
+    for field, keywords in _FLOW_COLUMN_RULES:
+        hits = [i for i, lab in enumerate(labels) if all(k in lab for k in keywords)]
+        if len(hits) != 1:
+            raise NaverParseError(
+                f"수급 표에서 '{field}' 컬럼을 특정하지 못했습니다 "
+                f"(일치 {len(hits)}개, 기대 1개). 실제 헤더: {labels}"
+            )
+        mapping[field] = hits[0]
+    return mapping
+
+
+def _parse_int_strict(text: str | None) -> int | None:
+    """숫자로 못 읽으면 None. `_parse_int`는 실패 시 0을 돌려주는데, 수급에서 0은
+    '순매매 0주'라는 실제 의미가 있어서 결측과 섞이면 안 된다."""
+    if text is None:
+        return None
+    cleaned = text.strip().replace(",", "").replace("+", "")
+    if not cleaned or cleaned == "-":
+        return None
+    try:
+        return int(cleaned)
+    except ValueError:
+        return None
+
+
+def _parse_rate(text: str | None) -> float | None:
+    """'+2.43%' → 2.43, '-0.43%' → -0.43. 못 읽으면 None."""
+    if text is None:
+        return None
+    cleaned = text.strip().replace("%", "").replace("+", "").replace(",", "")
+    if not cleaned or cleaned == "-":
+        return None
+    try:
+        return float(cleaned)
+    except ValueError:
+        return None
+
+
+def _signed_change(change_td, rate: float | None) -> int | None:
+    """전일비에 부호를 붙인다.
+
+    네이버는 전일비를 **절댓값**으로만 주고 방향은 따로 표시한다
+    (`<em class="bu_pup|bu_pdn">` + `<span class="blind">상승|하락</span>`).
+    그대로 숫자만 뽑으면 하락일도 양수가 되므로, 방향을 반드시 복원해야 한다.
+
+    부호 출처는 등락률 텍스트('-0.43%')를 1순위로 쓴다 — CSS 클래스명보다 덜 바뀐다.
+    방향 단서가 전혀 없고 값이 0도 아니면 추측하지 않고 None(결측)을 돌려준다.
+    """
+    if change_td is None:
+        return None
+
+    em = change_td.select_one("em")
+    marker = " ".join(em.get("class", [])) if em is not None else ""
+    blind = em.select_one("span.blind") if em is not None else None
+    word = blind.text.strip() if blind is not None else ""
+
+    # 방향 마커('상승'/'하락')를 걷어낸 뒤 숫자만 집는다. 태그 사이 공백 유무에
+    # 기대지 않으려고 get_text(구분자)와 정규식을 쓴다 — 네이버가 공백을 없애도
+    # 값이 결측으로 떨어지지 않아야 한다.
+    text = change_td.get_text(" ", strip=True)
+    if word:
+        text = text.replace(word, " ")
+    matched = re.search(r"[-+]?[\d,]+", text)
+    magnitude = _parse_int_strict(matched.group()) if matched else None
+    if magnitude is None:
+        return None
+    magnitude = abs(magnitude)
+    if magnitude == 0:
+        return 0
+
+    if rate is not None and rate != 0:
+        return -magnitude if rate < 0 else magnitude
+
+    if "하락" in word or "하한" in word or "bu_pdn" in marker or "bu_pd" in marker:
+        return -magnitude
+    if "상승" in word or "상한" in word or "bu_pup" in marker or "bu_pu" in marker:
+        return magnitude
+    return None  # 방향을 모른 채 양수로 단정하지 않는다
+
+
 @cached(ttl_market=300, ttl_closed=7200)  # 장중 5분, 장마감 2시간
 async def get_investor_flow(code: str, days: int = 20) -> list[dict]:
     """투자자별 매매동향 (기관/외국인 순매매)을 가져옵니다.
 
     네이버 증권 frgn.naver 페이지 기준:
     - 두 번째 table.type2가 수급 데이터 테이블
-    - 컬럼 순서: 날짜 | 종가 | 전일비 | 등락률 | 거래량 | 기관 순매매 | 외국인 순매매 | 보유주수 | 지분율
+    - 컬럼은 **헤더 이름으로 찾는다** (`_resolve_flow_columns`). 자리 번호로 읽으면
+      네이버가 컬럼을 추가·재배치했을 때 기관 값이 외국인 자리로 들어가도 아무도 모른다.
     - 개인 순매매 컬럼은 이 페이지에 없음
+
+    Raises:
+        NaverParseError: 헤더에서 필요한 컬럼을 특정하지 못한 경우(구조 변경).
+            '데이터 없음'(빈 리스트)과 구분하기 위해 예외로 알린다.
     """
     url = f"{BASE_URL}/item/frgn.naver"
     results = []
@@ -282,32 +436,42 @@ async def get_investor_flow(code: str, days: int = 20) -> list[dict]:
             break
 
         table = tables[1]
+        idx = _resolve_flow_columns(table)  # 구조 검증 — 실패 시 NaverParseError
+        max_idx = max(idx.values())
         rows = table.select("tr")
         found_in_page = 0
         for row in rows:
             cols = row.select("td")
-            # 수급 데이터 행은 정확히 9개 td를 가짐
-            if len(cols) != 9:
+            # 필요한 컬럼까지 있으면 된다. 총 개수를 고정하지 않으므로 네이버가
+            # 컬럼을 덧붙여도 깨지지 않는다(위치는 헤더가 정해준다).
+            if len(cols) <= max_idx:
                 continue
 
-            date_text = cols[0].text.strip()
+            date_text = cols[idx["date"]].text.strip()
             # 날짜 형식(YYYY.MM.DD) 체크 — 헤더/빈 행 필터링
             if not date_text or "." not in date_text:
                 continue
 
-            try:
-                result = {
-                    "date": date_text,
-                    "close": _parse_int(cols[1].text),
-                    "change": _parse_int(cols[2].text.split()[-1] if cols[2].text.strip() else "0"),
-                    "volume": _parse_int(cols[4].text),
-                    "institutional": _parse_int(cols[5].text),
-                    "foreign": _parse_int(cols[6].text),
-                }
-                results.append(result)
-                found_in_page += 1
-            except (ValueError, IndexError):
+            rate = _parse_rate(cols[idx["change_rate"]].text)
+            close = _parse_int_strict(cols[idx["close"]].text)
+            volume = _parse_int_strict(cols[idx["volume"]].text)
+            institutional = _parse_int_strict(cols[idx["institutional"]].text)
+            foreign = _parse_int_strict(cols[idx["foreign"]].text)
+            # 핵심 값이 하나라도 결측이면 0으로 메우지 않고 행을 버린다.
+            # 수급에서 0은 '순매매 0주'라는 실제 의미라 결측과 섞이면 안 된다.
+            if None in (close, volume, institutional, foreign):
                 continue
+
+            results.append({
+                "date": date_text,
+                "close": close,
+                "change": _signed_change(cols[idx["change"]], rate),
+                "change_rate": rate,
+                "volume": volume,
+                "institutional": institutional,
+                "foreign": foreign,
+            })
+            found_in_page += 1
 
         if found_in_page == 0:
             break  # 더 이상 데이터 없음

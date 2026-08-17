@@ -21,6 +21,7 @@ import httpx  # noqa: E402
 from mcp.server.fastmcp import FastMCP  # noqa: E402
 from stock_mcp_server.naver import (
     search_stock as naver_search_stock,
+    NaverParseError,
     get_ohlcv,
     get_current_price,
     get_investor_flow,
@@ -856,7 +857,17 @@ async def get_flow(code: str, days: int = 20) -> str:
         days: 조회할 일수 (기본 20일)
     """
     days = min(days, 60)
-    data = await get_investor_flow(code, days)
+    try:
+        data = await get_investor_flow(code, days)
+    except NaverParseError as e:
+        # 구조 변경은 '데이터 없음'과 다르다 — 없는 척하면 사용자가 조용히 오해한다.
+        return _append_result_meta(
+            f"수급 표를 읽지 못했습니다 (데이터가 없는 것이 아니라 **파싱 실패**입니다).\n"
+            f"원인: {e}\n"
+            f"네이버 증권 페이지 구조가 바뀌었을 수 있습니다. StockLens 업데이트를 확인해 주세요.",
+            _kr_meta(kind="bars", code=code, data_completeness=rmeta.NONE,
+                     warnings=[f"수급 표 파싱 실패(구조 변경 의심): {e}"]),
+        )
     if not data:
         return _append_result_meta(
             f"종목코드 {code}의 수급 데이터를 가져올 수 없습니다.",
@@ -1872,7 +1883,13 @@ async def export_to_excel(
         sheet = "OHLCV"
 
     elif data_type == "flow":
-        data = await get_investor_flow(code, days)
+        try:
+            data = await get_investor_flow(code, days)
+        except NaverParseError as e:
+            return (
+                f"수급 표를 읽지 못했습니다 (데이터 없음이 아니라 파싱 실패): {code}\n"
+                f"원인: {e}"
+            )
         if not data:
             return f"수급 데이터를 가져올 수 없습니다: {code}"
         df = pd.DataFrame(data)

@@ -277,3 +277,133 @@ class InsiderTradeDisplayTests(unittest.IsolatedAsyncioTestCase):
         """증여·무상지급은 대금이 실제로 0이다. 결측이 아니므로 '-'가 아니다."""
         out = await self._render()
         self.assertIn("$0", out)
+
+
+# ---------------------------------------------------------------------------
+# 6. 투자자 수급 — 컬럼을 위치로 읽던 결함 (2026-08-17)
+# ---------------------------------------------------------------------------
+#
+# 예전 코드는 `cols[5]=기관`, `cols[6]=외국인` 처럼 자리 번호로 읽었다. 네이버가
+# 컬럼을 하나 끼워 넣으면 기관 값이 외국인 자리로 들어가는데, 숫자는 여전히
+# 그럴듯해서 아무도 눈치채지 못한다(= 조용히 틀린다). 그래서 헤더 '이름'으로 찾고,
+# 이름을 못 찾으면 빈 결과 대신 예외를 던진다.
+#
+# 전일비도 같은 계열이었다. 네이버는 전일비를 절댓값으로만 주고 방향은
+# <em class="bu_pup|bu_pdn"> 로 따로 준다 — 숫자만 뽑으면 하락일도 양수가 된다.
+
+from stock_mcp_server.naver import (  # noqa: E402
+    NaverParseError,
+    _flatten_header_labels,
+    _parse_int_strict,
+    _resolve_flow_columns,
+    _signed_change,
+)
+
+# 네이버 frgn.naver 두 번째 table.type2 구조(2026-08-17 실측). 헤더가 2단이고
+# 앞 5개는 rowspan=2, '외국인'은 colspan=3 이다.
+FLOW_HTML = """
+<table class="type2">
+  <tr>
+    <th rowspan="2">날짜</th><th rowspan="2">종가</th><th rowspan="2">전일비</th>
+    <th rowspan="2">등락률</th><th rowspan="2">거래량</th>
+    <th>기관</th><th colspan="3">외국인</th>
+  </tr>
+  <tr><th>순매매량</th><th>순매매량</th><th>보유주수</th><th>보유율</th></tr>
+  <tr>
+    <td>2026.08.10</td><td>230,000</td>
+    <td><em class="bu_p bu_pdn"><span class="blind">하락</span></em><span>1,000</span></td>
+    <td><span>-0.43%</span></td>
+    <td>19,000,000</td><td>+625,055</td><td>-4,394,465</td>
+    <td>2,730,000,000</td><td>46.70%</td>
+  </tr>
+</table>
+"""
+
+
+def _flow_table(html: str = FLOW_HTML):
+    return BeautifulSoup(html, "lxml").select("table.type2")[0]
+
+
+class InvestorFlowColumnTests(unittest.TestCase):
+    def test_header_flattens_with_rowspan_colspan(self):
+        """2단 헤더를 펼쳐 '외국인 순매매량'처럼 구분 가능한 라벨이 나와야 한다."""
+        labels = _flatten_header_labels(_flow_table())
+        self.assertEqual(labels[5], "기관 순매매량")
+        self.assertEqual(labels[6], "외국인 순매매량")
+        self.assertEqual(labels[7], "외국인 보유주수")
+
+    def test_resolves_to_known_positions(self):
+        """현재 구조에서는 기존 위치 매핑과 같은 결과여야 한다(회귀 방지)."""
+        idx = _resolve_flow_columns(_flow_table())
+        self.assertEqual(idx["institutional"], 5)
+        self.assertEqual(idx["foreign"], 6)
+
+    def test_inserted_column_shifts_indices_instead_of_swapping(self):
+        """핵심 회귀 — 컬럼이 끼어들면 인덱스가 따라 움직여야 한다.
+
+        위치로 읽던 예전 코드는 여기서 '개인' 값을 기관으로, 기관을 외국인으로
+        읽었다. 에러 없이 값만 한 칸씩 밀리는 게 가장 위험한 실패다.
+        """
+        table = _flow_table()
+        header = [tr for tr in table.select("tr") if tr.select("th")][0]
+        new_th = BeautifulSoup('<th rowspan="2">개인</th>', "lxml").th
+        header.select("th")[5].insert_before(new_th)
+
+        idx = _resolve_flow_columns(table)
+        self.assertEqual(idx["institutional"], 6)
+        self.assertEqual(idx["foreign"], 7)
+
+    def test_renamed_column_raises_instead_of_silent_empty(self):
+        """이름을 못 찾으면 '데이터 없음'이 아니라 파싱 실패로 알려야 한다."""
+        table = _flow_table(FLOW_HTML.replace("<th>기관</th>", "<th>기타법인</th>"))
+        with self.assertRaises(NaverParseError):
+            _resolve_flow_columns(table)
+
+    def test_missing_header_raises(self):
+        table = _flow_table()
+        for tr in table.select("tr"):
+            if tr.select("th"):
+                tr.decompose()
+        with self.assertRaises(NaverParseError):
+            _resolve_flow_columns(table)
+
+
+class InvestorFlowChangeSignTests(unittest.TestCase):
+    def _change_cell(self, table=None):
+        table = table or _flow_table()
+        idx = _resolve_flow_columns(table)
+        row = [tr for tr in table.select("tr") if tr.select("td")][0]
+        return row.select("td")[idx["change"]]
+
+    def test_down_day_change_is_negative(self):
+        """전일비 절댓값 1,000 + 등락률 -0.43% → -1,000. 예전엔 +1,000이었다."""
+        self.assertEqual(_signed_change(self._change_cell(), -0.43), -1000)
+
+    def test_up_day_change_is_positive(self):
+        self.assertEqual(_signed_change(self._change_cell(), 2.43), 1000)
+
+    def test_falls_back_to_marker_when_rate_missing(self):
+        """등락률을 못 읽어도 bu_pdn 마커로 방향을 복원한다."""
+        self.assertEqual(_signed_change(self._change_cell(), None), -1000)
+
+    def test_no_direction_signal_is_missing_not_positive(self):
+        """방향 단서가 없으면 양수로 단정하지 않고 결측으로 둔다."""
+        html = FLOW_HTML.replace(
+            '<em class="bu_p bu_pdn"><span class="blind">하락</span></em>', ""
+        )
+        self.assertIsNone(_signed_change(self._change_cell(_flow_table(html)), None))
+
+
+class StrictIntParsingTests(unittest.TestCase):
+    def test_dash_is_missing_not_zero(self):
+        """수급에서 0은 '순매매 0주'라는 실제 값이라 결측과 섞이면 안 된다."""
+        self.assertIsNone(_parse_int_strict("-"))
+        self.assertIsNone(_parse_int_strict(""))
+        self.assertIsNone(_parse_int_strict("N/A"))
+
+    def test_real_zero_stays_zero(self):
+        self.assertEqual(_parse_int_strict("0"), 0)
+
+    def test_signed_values(self):
+        self.assertEqual(_parse_int_strict("+625,055"), 625055)
+        self.assertEqual(_parse_int_strict("-4,394,465"), -4394465)
