@@ -1940,6 +1940,10 @@ async def get_report_detail(nid: str) -> dict:
         if len(text) > 500:
             text = text[:500] + "..."
         result["summary"] = text
+    else:
+        # 본문 칸(td.view_cnt)이 없으면 요약을 조용히 빼지 않고 못 읽었다고 남긴다.
+        # 여러 리포트를 한 번에 묶어 보여주는 자리라 예외 대신 표시로 알린다.
+        result[PARSE_MISS_KEY] = ["summary"]
 
     # PDF 링크
     for a in soup.select("a"):

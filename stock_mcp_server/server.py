@@ -3309,6 +3309,8 @@ async def get_reports(code: str, count: int = 5) -> str:
         summary = detail.get("summary", "")
         if summary:
             lines.append(f"> {summary[:300]}")
+        elif PARSE_MISS_KEY in detail:
+            lines.append("> _(본문을 읽지 못했습니다 — 요약이 없는 게 아니라 파싱 실패)_")
 
         pdf = detail.get("pdf_url", "")
         if pdf:
