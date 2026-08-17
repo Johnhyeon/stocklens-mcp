@@ -19,6 +19,7 @@ _tls_bootstrap.apply()
 import httpx  # noqa: E402
 
 from mcp.server.fastmcp import FastMCP  # noqa: E402
+from stock_mcp_server import _pdf as pdfx  # noqa: E402
 from stock_mcp_server.naver import (
     search_stock as naver_search_stock,
     NaverParseError,
@@ -3314,13 +3315,106 @@ async def get_reports(code: str, count: int = 5) -> str:
 
         pdf = detail.get("pdf_url", "")
         if pdf:
-            lines.append(f"[PDF 원문]({pdf})")
+            lines.append(f"[PDF 원문]({pdf}) · 전문이 필요하면 `get_report_content(nid=\"{report['nid']}\")`")
 
         lines.append("")
 
     lines.append("※ 목표가·투자의견은 각 증권사 분석 의견이며 미래 수익을 보장하지 않습니다.")
 
     return _append_result_meta("\n".join(lines), _kr_meta(kind="filing", code=code))
+
+
+@mcp.tool()
+@safe_tool
+@track_metrics("get_report_content")
+async def get_report_content(nid: str, max_chars: int = 12000) -> str:
+    """리포트전문 — 증권사 리포트 **한 건**의 PDF 원문을 텍스트로 읽어옵니다.
+
+    ⚠️ **한 번에 한 건만.** 리포트 하나가 1만 자를 넘어서, 여러 건을 이어 부르면
+    대화 토큰을 통째로 먹습니다. 목록·요약·목표가는 `get_reports`로 충분하고,
+    "이 리포트 자세히", "목표가 근거", "리포트 전문" 처럼 **한 건을 깊게** 볼 때만
+    쓰세요.
+
+    증권사마다 PDF 만드는 방식이 달라, 글자가 아니라 이미지로 렌더링해 내는 곳은
+    본문을 읽을 수 없습니다. 그 경우 억지로 몇 글자 내놓지 않고 못 읽었다고
+    알려드립니다.
+
+    Args:
+        nid: 리포트 번호. `get_reports` 결과에 함께 표시됩니다.
+        max_chars: 본문 상한 (기본 12000). 넘으면 뒤를 자르고 알려줍니다.
+    """
+    import re as _re
+
+    if not _re.match(r"^\d{1,12}$", str(nid)):
+        return f"⚠️ 리포트 번호 형식이 올바르지 않습니다: {nid}"
+
+    detail = await naver_get_report_detail(str(nid))
+    pdf_url = detail.get("pdf_url") or ""
+    if not pdf_url:
+        return _append_result_meta(
+            f"리포트 {nid}에 PDF 원문 링크가 없습니다 "
+            f"(일부 증권사는 PDF를 제공하지 않습니다). "
+            f"`get_reports`의 요약을 참고하세요.",
+            _kr_meta(kind="filing", data_completeness=rmeta.NONE,
+                     warnings=["PDF 링크 없음 — 이 증권사는 원문을 공개하지 않습니다."]),
+        )
+
+    result = await pdfx.fetch_and_extract(pdf_url)
+
+    if result.status != "ok":
+        # 못 읽은 이유를 그대로 말한다. '내용 없음'으로 뭉개면 사용자는 리포트가
+        # 부실한 줄 안다.
+        reason = {
+            "image_pdf": "이미지로 렌더링된 PDF라 본문 글자를 읽을 수 없습니다",
+            "too_large": "PDF가 너무 커서 받지 않았습니다",
+            "failed": "PDF를 받거나 여는 데 실패했습니다",
+        }.get(result.status, "본문을 읽지 못했습니다")
+        return _append_result_meta(
+            f"**{reason}.**\n\n"
+            f"- 상세: {result.detail}\n"
+            f"- 원문 직접 보기: {pdf_url}\n\n"
+            f"본문이 없는 게 아니라 **우리가 못 읽은 것**입니다. "
+            f"요약·목표가는 `get_reports`로 확인하실 수 있습니다.",
+            _kr_meta(kind="filing", data_completeness=rmeta.NONE,
+                     warnings=[f"PDF 본문 추출 실패({result.status}): {result.detail}"]),
+        )
+
+    text = result.text
+    truncated = len(text) > max_chars
+    if truncated:
+        text = text[:max_chars]
+
+    lines = [
+        f"# 리포트 원문 (nid={nid})",
+        "",
+        f"- PDF {result.pages}쪽 · 추출 {result.chars:,}자"
+        + (f" · **{max_chars:,}자까지만 표시**" if truncated else ""),
+        f"- 원문: {pdf_url}",
+        "",
+        "---",
+        "",
+        text,
+    ]
+    if truncated:
+        lines.append("")
+        lines.append(
+            f"_… 이후 {result.chars - max_chars:,}자 생략. 뒷부분이 필요하면 "
+            f"max_chars 를 올려 다시 부르세요._"
+        )
+    lines.append("")
+    lines.append(
+        "※ 증권사 리서치 자료입니다. 목표가·투자의견은 해당 증권사의 분석 의견이며 "
+        "미래 수익을 보장하지 않습니다."
+    )
+
+    return _append_result_meta(
+        "\n".join(lines),
+        _kr_meta(
+            kind="filing",
+            data_completeness=rmeta.PARTIAL if truncated else rmeta.COMPLETE,
+            warnings=[f"본문 {max_chars:,}자에서 잘렸습니다."] if truncated else None,
+        ),
+    )
 
 
 @mcp.tool()
