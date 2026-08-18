@@ -74,3 +74,72 @@ def test_check_mcp_config_valid_labels_codex():
     result = diagnostics._check_mcp_config_valid(["codex"])
     assert result.status == "ok"
     assert "Codex CLI" in result.summary
+
+
+# ── 텍스트 doctor 경로 + auto 타겟 ──────────────────────────────────────────
+# 위 테스트들은 JSON(diagnostics) 경로를 지킨다. 텍스트 doctor 와 `--target auto` 는
+# 같은 사실을 따로 판정하고 있었고, 둘 다 codex 를 몰랐다 — ChatGPT 만 쓰는 사람이
+# "등록 완료"를 보고도 도구가 없거나, 잘 되는데 "어디에도 등록 안 됨" FAIL 을 봤다.
+
+
+def test_text_doctor_sees_codex_registration(tmp_path):
+    from stock_mcp_server import doctor
+
+    codex_path = tmp_path / "config.toml"
+    fake_exe = tmp_path / "stocklens.exe"
+    fake_exe.write_text("", encoding="utf-8")
+    doc = tomlkit.document()
+    servers = tomlkit.table()
+    entry = tomlkit.table()
+    entry["command"] = str(fake_exe)
+    servers[setup_claude.SERVER_KEY] = entry
+    doc["mcp_servers"] = servers
+    codex_path.write_text(tomlkit.dumps(doc), encoding="utf-8")
+
+    with patch.object(doctor, "get_codex_config_path", return_value=codex_path):
+        check = doctor.check_config_codex()
+    assert check.status == "ok"
+
+    # Claude 쪽이 둘 다 없어도 codex 하나로 종합 판정이 통과해야 한다.
+    missing = doctor.Check("Config — Claude Desktop")
+    missing.status = "info-skip"
+    summary = doctor.check_at_least_one_config(missing, missing, check)
+    assert summary.status == "ok"
+
+
+def test_text_doctor_fails_only_when_no_target_at_all():
+    from stock_mcp_server import doctor
+
+    missing = doctor.Check("Config — x")
+    missing.status = "info-skip"
+    summary = doctor.check_at_least_one_config(missing, missing, missing)
+    assert summary.status == "fail"
+    # 고칠 방법에 codex 가 빠져 있으면, ChatGPT 만 쓰는 사람은 갈 곳이 없다.
+    assert "codex" in (summary.fix or "")
+
+
+def test_auto_target_picks_codex_when_no_claude_present(tmp_path):
+    """ChatGPT 만 쓰는 PC. 예전에는 무조건 claude-desktop 으로 떨어져서 없는 앱의
+    설정 파일을 만들고 "완료"라고 말했다."""
+    def which(name):
+        return None if name == "claude" else str(tmp_path / "codex.exe")
+
+    with patch.object(setup_claude.shutil, "which", side_effect=which), \
+         patch.object(
+             setup_claude, "get_claude_desktop_config_path",
+             return_value=tmp_path / "nope" / "claude_desktop_config.json",
+         ):
+        assert setup_claude._resolve_targets("auto") == ["codex"]
+
+
+def test_auto_target_keeps_claude_desktop_fallback_when_nothing_found(tmp_path):
+    with patch.object(setup_claude.shutil, "which", return_value=None), \
+         patch.object(
+             setup_claude, "get_claude_desktop_config_path",
+             return_value=tmp_path / "nope" / "claude_desktop_config.json",
+         ), \
+         patch.object(
+             setup_claude, "get_codex_config_path",
+             return_value=tmp_path / "nope" / ".codex" / "config.toml",
+         ):
+        assert setup_claude._resolve_targets("auto") == ["claude-desktop"]

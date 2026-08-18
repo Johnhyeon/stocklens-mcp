@@ -24,6 +24,7 @@ try:
     from stock_mcp_server.setup_claude import (
         get_claude_desktop_config_path,
         get_claude_code_config_path,
+        get_codex_config_path,
         SERVER_KEY,
         LEGACY_KEYS,
         _uv_tool_bin_dirs,
@@ -34,6 +35,7 @@ except ImportError:
     from stock_mcp_server.setup_claude import (
         get_claude_desktop_config_path,
         get_claude_code_config_path,
+        get_codex_config_path,
         SERVER_KEY,
         LEGACY_KEYS,
         _uv_tool_bin_dirs,
@@ -293,6 +295,80 @@ def check_config_code() -> Check:
     )
 
 
+def check_config_codex() -> Check:
+    return _check_config_toml_file("Codex CLI", get_codex_config_path(), required=False)
+
+
+def _check_config_toml_file(label: str, config_path: Path, *, required: bool) -> Check:
+    """TOML 기반 클라이언트(`~/.codex/config.toml` 의 `[mcp_servers.<key>]`) config 점검.
+
+    JSON 쪽 `_check_config_file` 과 같은 계약(entry 유무 · command 유효성)을 TOML 구조로
+    다시 쓴 것이고, `setup_claude._configure_toml_target()` 이 쓰는 구조를 읽기만 한다.
+
+    이 검사가 없던 동안 ChatGPT 만 쓰는 사람은 도구가 정상 동작하는데도 아래 종합 판정이
+    "어디에도 등록 안 됨" FAIL 로 떨어졌다. 지원 번들에도 그 줄이 들어가서 원인을 찾는
+    쪽까지 엉뚱한 곳을 보게 된다."""
+    c = Check(f"Config — {label}")
+    c.info(f"Path:       {config_path}")
+
+    if not config_path.exists():
+        if required:
+            c.fail("Config file does not exist", fix="stocklens-setup --target codex")
+        else:
+            c.info("Config file does not exist (target not in use — OK)")
+            c.status = "info-skip"
+            c.summary = "Config file does not exist (target not in use — OK)"
+        return c
+
+    try:
+        import tomlkit
+
+        cfg = tomlkit.parse(config_path.read_text(encoding="utf-8"))
+    except Exception as e:
+        c.fail(f"Cannot read config: {e}")
+        return c
+
+    entry = (cfg.get("mcp_servers", {}) or {}).get(SERVER_KEY)
+    if not entry:
+        if required:
+            c.fail(
+                f"'{SERVER_KEY}' entry missing in mcp_servers",
+                fix="stocklens-setup --target codex",
+            )
+        else:
+            c.info(f"'{SERVER_KEY}' entry not present (target not in use — OK)")
+            c.status = "info-skip"
+            c.summary = f"'{SERVER_KEY}' entry not present (target not in use — OK)"
+        return c
+
+    cmd = entry.get("command")
+    args = list(entry.get("args") or [])
+    c.info(f"Command:    {cmd}")
+    if args:
+        c.info(f"Args:       {args}")
+
+    if not cmd:
+        c.fail("Entry has no 'command' field")
+        return c
+
+    if Path(cmd).is_absolute():
+        if Path(cmd).exists():
+            c.ok("Command points to existing file")
+        else:
+            c.fail(f"Command file missing: {cmd}", fix="stocklens-setup --target codex")
+        return c
+
+    resolved = shutil.which(cmd)
+    if resolved:
+        c.ok(f"Command resolvable via PATH: {resolved}")
+    else:
+        c.fail(
+            f"Command '{cmd}' not in PATH — client will fail to launch the server",
+            fix="stocklens-setup --target codex",
+        )
+    return c
+
+
 def check_at_least_one_config(*configs: Check) -> Check:
     c = Check("Registered targets")
     registered = [
@@ -303,8 +379,8 @@ def check_at_least_one_config(*configs: Check) -> Check:
         c.ok(f"{len(registered)} target(s) configured")
         return c
     c.fail(
-        "stocklens not registered in any MCP client (Claude Desktop / Code)",
-        fix="stocklens-setup --target {claude-desktop|claude-code|both}",
+        "stocklens not registered in any MCP client (Claude Desktop / Code / ChatGPT·Codex)",
+        fix="stocklens-setup --target {claude-desktop|claude-code|both|codex}",
     )
     return c
 
@@ -438,6 +514,7 @@ def main():
 
     desktop_check = _safe(check_config_desktop)
     code_check = _safe(check_config_code)
+    codex_check = _safe(check_config_codex)
 
     checks = [
         _safe(check_uv),
@@ -445,7 +522,8 @@ def main():
         _safe(check_stocklens_command),
         desktop_check,
         code_check,
-        _safe(check_at_least_one_config, desktop_check, code_check),
+        codex_check,
+        _safe(check_at_least_one_config, desktop_check, code_check, codex_check),
         _safe(check_license),
     ]
 
