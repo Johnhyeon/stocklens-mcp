@@ -39,8 +39,8 @@ def resolve_server_entry(preferred_command: str = "stocklens") -> dict:
 
     우선순위:
     1. 절대 경로가 명시되면 그대로 사용
-    2. PATH 탐색 (shutil.which)
-    3. uv tool bin 디렉토리 직접 탐색 (`~/.local/bin` 등)
+    2. uv tool bin 디렉토리 (`~/.local/bin` 등) — Manager 가 갱신하는 대상
+    3. PATH 탐색 (shutil.which)
     4. sysconfig scripts 디렉토리 직접 탐색
     5. 최후 fallback: sys.executable + `-m stock_mcp_server.server`
 
@@ -50,17 +50,24 @@ def resolve_server_entry(preferred_command: str = "stocklens") -> dict:
     if os.path.isabs(preferred_command) and Path(preferred_command).exists():
         return {"command": preferred_command}
 
-    # 2) PATH 탐색
-    found = shutil.which(preferred_command)
-    if found:
-        return {"command": found}
-
-    # 3) uv tool bin 디렉토리 — `uv tool install` 직후 PATH 미반영 상태에서도 잡힘
+    # 2) uv tool bin 디렉토리를 **PATH 보다 먼저** 본다.
+    #
+    # 실기기에서 확인한 사고: 옛 `pip install` 잔재가 시스템 Python 의 Scripts\ 에 남아
+    # 있으면 PATH 순서상 그게 먼저 잡혀서, 설정 파일에 옛 실행 파일 경로가 박힌다. 그러면
+    # Manager 로 최신 버전을 올려도 호스트 앱(Claude·ChatGPT)은 계속 옛 버전을 띄운다 —
+    # "업데이트했는데 그대로다" 가 되고, 원인이 설정 파일 안에 있어서 찾기도 어렵다.
+    # uv 가 관리하는 쪽이 Manager 가 실제로 갱신하는 대상이므로 그쪽을 먼저 쓴다.
+    # (uv 없이 pip 로만 설치한 환경은 이 디렉토리가 없어 아래 PATH 탐색으로 내려간다.)
     for bin_dir in _uv_tool_bin_dirs():
         for candidate_name in (f"{preferred_command}.exe", preferred_command):
             candidate = bin_dir / candidate_name
             if candidate.exists():
                 return {"command": str(candidate)}
+
+    # 3) PATH 탐색
+    found = shutil.which(preferred_command)
+    if found:
+        return {"command": found}
 
     # 4) sysconfig scripts 디렉토리 직접 탐색 (pip 호환)
     try:
@@ -464,7 +471,8 @@ def _build_parser():
         help=(
             "MCP 등록 대상. claude-desktop=Claude Desktop 앱, "
             "claude-code=Claude Code CLI, both=둘 다, auto=환경 자동 감지 "
-            "(기본: auto), codex=Codex CLI(명시적 선택만 지원, auto 감지 대상 아님). "
+            "(기본: auto), codex=ChatGPT 앱·Codex CLI(같은 ~/.codex/config.toml 을 읽는다. "
+            "auto 는 Claude 가 하나도 없을 때 이쪽을 고른다). "
             "STOCKLENS_TARGET 환경변수로도 지정 가능."
         ),
     )

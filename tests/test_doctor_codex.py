@@ -143,3 +143,36 @@ def test_auto_target_keeps_claude_desktop_fallback_when_nothing_found(tmp_path):
              return_value=tmp_path / "nope" / ".codex" / "config.toml",
          ):
         assert setup_claude._resolve_targets("auto") == ["claude-desktop"]
+
+
+def test_registered_command_prefers_uv_managed_binary(tmp_path):
+    """설정 파일에 적히는 실행 파일은 uv 관리본이어야 한다.
+
+    실기기에서 확인한 사고: 옛 `pip install` 잔재가 시스템 Python 의 Scripts 에 남아
+    있으면 PATH 순서상 그게 먼저 잡혀서, 설정 파일에 옛 실행 파일 경로가 박힌다. 그러면
+    Manager 로 최신 버전을 올려도 호스트 앱은 계속 옛 버전을 띄운다 — 실제로 이 PC 의
+    Claude Desktop·Claude Code·ChatGPT 세 곳 모두 0.5.0 을 가리키고 있었다.
+    """
+    uv_bin = tmp_path / "uv" / "bin"
+    uv_bin.mkdir(parents=True)
+    uv_exe = uv_bin / "stocklens.exe"
+    uv_exe.write_text("", encoding="utf-8")
+    pip_exe = tmp_path / "Scripts" / "stocklens.exe"
+    pip_exe.parent.mkdir(parents=True)
+    pip_exe.write_text("", encoding="utf-8")
+
+    with patch.object(setup_claude, "_uv_tool_bin_dirs", return_value=[uv_bin]), \
+         patch.object(setup_claude.shutil, "which", return_value=str(pip_exe)):
+        entry = setup_claude.resolve_server_entry("stocklens")
+    assert entry["command"] == str(uv_exe)
+
+
+def test_registered_command_falls_back_to_path_without_uv(tmp_path):
+    """uv 없이 pip 로만 설치한 환경은 예전 그대로 동작해야 한다."""
+    pip_exe = tmp_path / "Scripts" / "stocklens.exe"
+    pip_exe.parent.mkdir(parents=True)
+    pip_exe.write_text("", encoding="utf-8")
+    with patch.object(setup_claude, "_uv_tool_bin_dirs", return_value=[]), \
+         patch.object(setup_claude.shutil, "which", return_value=str(pip_exe)):
+        entry = setup_claude.resolve_server_entry("stocklens")
+    assert entry["command"] == str(pip_exe)
