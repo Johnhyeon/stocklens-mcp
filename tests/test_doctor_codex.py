@@ -176,3 +176,19 @@ def test_registered_command_falls_back_to_path_without_uv(tmp_path):
          patch.object(setup_claude.shutil, "which", return_value=str(pip_exe)):
         entry = setup_claude.resolve_server_entry("stocklens")
     assert entry["command"] == str(pip_exe)
+
+
+def test_registered_command_prefers_uv_binary_with_unix_naming(tmp_path):
+    """맥·리눅스의 uv 실행 파일은 확장자가 없다(`stocklens`). 후보 이름이 `.exe` 만
+    맞으면 맥에서는 uv 관리본을 못 찾고 그대로 옛 경로로 떨어진다."""
+    uv_bin = tmp_path / ".local" / "bin"
+    uv_bin.mkdir(parents=True)
+    uv_cmd = uv_bin / "stocklens"          # 확장자 없음 = Unix
+    uv_cmd.write_text("", encoding="utf-8")
+    other = tmp_path / "usr" / "local" / "bin" / "stocklens"
+    other.parent.mkdir(parents=True)
+    other.write_text("", encoding="utf-8")
+
+    with patch.object(setup_claude, "_uv_tool_bin_dirs", return_value=[uv_bin]), \
+         patch.object(setup_claude.shutil, "which", return_value=str(other)):
+        assert setup_claude.resolve_server_entry("stocklens")["command"] == str(uv_cmd)
