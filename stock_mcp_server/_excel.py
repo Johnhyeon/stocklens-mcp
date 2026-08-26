@@ -273,7 +273,9 @@ def add_detail_sheet(wb, sheet_title: str, summary: list[tuple], data: dict) -> 
 
     for col, w in (("A", 16), ("B", 15), ("C", 14), ("D", 15), ("E", 14), ("F", 12)):
         ws.column_dimensions[col].width = w
-    for col in "HIJKL":
+    for col in "HIJKLMNO":
+        ws.column_dimensions[col].width = 12
+    for col in ("P", "Q", "R"):
         ws.column_dimensions[col].width = 13
     ws.row_dimensions[1].height = 26
     ws.row_dimensions[4].height = 30
@@ -389,6 +391,28 @@ def add_detail_sheet(wb, sheet_title: str, summary: list[tuple], data: dict) -> 
                 c.font = Font(bold=True, color=RED if c.value > 0 else BLUE)
         r += 1
 
+    peers = data.get("peers") or []
+    if peers:
+        r = section(r, "같은 업종 주요 종목")
+        hdr = ("종목", "등락률(%)", "현재가", "")
+        for i, h in enumerate(hdr):
+            hc = ws.cell(row=r, column=1 + i, value=h)
+            hc.font = Font(bold=True, size=9, color=GREY)
+            hc.fill = PatternFill("solid", fgColor=SKY)
+            hc.border = box
+        r += 1
+        for pr in peers[:6]:
+            nc = ws.cell(row=r, column=1, value=str(pr.get("종목", ""))[:12])
+            nc.border = box
+            nc.font = Font(bold=bool(pr.get("본인")), size=10)
+            for i, key in enumerate(("등락률", "현재가")):
+                vc = ws.cell(row=r, column=2 + i, value=pr.get(key))
+                vc.border = box
+                if isinstance(pr.get(key), (int, float)):
+                    vc.number_format = _SIGNED_FMT if key == "등락률" else "#,##0"
+            r += 1
+        r += 1
+
     news = data.get("news") or []
     if news:
         r = section(r, "최근 공시·리포트")
@@ -408,76 +432,128 @@ def add_detail_sheet(wb, sheet_title: str, summary: list[tuple], data: dict) -> 
                         break
                 title = title.lstrip()
             c = ws.cell(row=r, column=2, value=title[:56])
-            c.font = Font(size=10)
             c.border = box
             c.alignment = Alignment(horizontal="left")
+            # 원문 링크가 있으면 셀에서 바로 열리게 한다 — 제목만 보고는
+            # 무슨 내용인지 알 수 없어 결국 다시 찾아야 한다.
+            url = item.get("url")
+            if url:
+                c.hyperlink = url
+                c.font = Font(size=10, color="0563C1", underline="single")
+            else:
+                c.font = Font(size=10)
             ws.merge_cells(start_row=r, start_column=2, end_row=r, end_column=6)
             r += 1
+            brief = str(item.get("brief") or "").strip()
+            if brief:
+                bc = ws.cell(row=r, column=2, value="  " + brief[:90])
+                bc.font = Font(size=9, color=GREY)
+                bc.alignment = Alignment(horizontal="left")
+                ws.merge_cells(start_row=r, start_column=2, end_row=r, end_column=6)
+                r += 1
 
     qs = data.get("quarters") or []
     if len(qs) >= 2:
         top = 3
         for i, cname in enumerate(("분기", "매출액(억)", "영업이익(억)")):
-            c = ws.cell(row=top, column=8 + i, value=cname)
+            c = ws.cell(row=top, column=16 + i, value=cname)
             c.font = Font(bold=True, size=10)
             c.fill = PatternFill("solid", fgColor=SKY)
             c.border = box
             c.alignment = Alignment(horizontal="center")
         for i, q in enumerate(qs):
             rr = top + 1 + i
-            ws.cell(row=rr, column=8, value=q.get("기간")).border = box
-            a = ws.cell(row=rr, column=9, value=q.get("매출액"))
+            ws.cell(row=rr, column=16, value=q.get("기간")).border = box
+            a = ws.cell(row=rr, column=17, value=q.get("매출액"))
             a.number_format = "#,##0"
             a.border = box
-            b = ws.cell(row=rr, column=10, value=q.get("영업이익"))
+            b = ws.cell(row=rr, column=18, value=q.get("영업이익"))
             b.number_format = _SIGNED_INT_FMT
             b.border = box
         last = top + len(qs)
         ws.conditional_formatting.add(
-            "I" + str(top + 1) + ":I" + str(last),
+            "Q" + str(top + 1) + ":Q" + str(last),
             DataBarRule(start_type="min", end_type="max", color="8EA9DB"))
         ch = BarChart()
         ch.type = "col"
         ch.title = "분기 매출·영업이익 (억원)"
         ch.height, ch.width = 7.2, 14.5
-        ch.add_data(Reference(ws, min_col=9, max_col=10, min_row=top, max_row=last),
+        ch.add_data(Reference(ws, min_col=17, max_col=18, min_row=top, max_row=last),
                     titles_from_data=True)
-        ch.set_categories(Reference(ws, min_col=8, min_row=top + 1, max_row=last))
+        ch.set_categories(Reference(ws, min_col=16, min_row=top + 1, max_row=last))
         ch.y_axis.majorGridlines = None
         for s_, color in zip(ch.series, ("4472C4", "ED7D31")):
             s_.graphicalProperties.solidFill = color
             s_.graphicalProperties.line.noFill = True
-        ws.add_chart(ch, "H" + str(last + 2))
+        ws.add_chart(ch, "H3")
+
+    daily = data.get("flow_daily") or []
+    if len(daily) >= 5:
+        base = 28
+        for i, cname in enumerate(("날짜", "기관", "외국인")):
+            c = ws.cell(row=base, column=16 + i, value=cname)
+            c.font = Font(bold=True, size=10)
+            c.fill = PatternFill("solid", fgColor=SKY)
+            c.border = box
+            c.alignment = Alignment(horizontal="center")
+        for i, d in enumerate(daily):
+            rr = base + 1 + i
+            ws.cell(row=rr, column=16, value=d.get("날짜")).border = box
+            for j, key in enumerate(("기관", "외국인")):
+                v = ws.cell(row=rr, column=17 + j, value=d.get(key))
+                v.number_format = _SIGNED_INT_FMT
+                v.border = box
+        lastd = base + len(daily)
+        fc = BarChart()
+        fc.type = "col"
+        fc.grouping = "clustered"
+        fc.overlap = -10
+        fc.gapWidth = 50
+        fc.title = "일별 순매매 — 기관 vs 외국인 (주)"
+        fc.height, fc.width = 7.2, 14.5
+        fc.add_data(Reference(ws, min_col=17, max_col=18, min_row=base, max_row=lastd),
+                    titles_from_data=True)
+        fc.set_categories(Reference(ws, min_col=16, min_row=base + 1, max_row=lastd))
+        fc.y_axis.majorGridlines = None
+        fc.x_axis.tickLblSkip = max(1, len(daily) // 6)
+        fc.x_axis.tickMarkSkip = max(1, len(daily) // 6)
+        for s_, color in zip(fc.series, (RED, BLUE)):
+            s_.graphicalProperties.solidFill = color
+            s_.graphicalProperties.line.noFill = True
+        ws.add_chart(fc, "H18")
+        target_base = lastd + 2
+    else:
+        target_base = 28
 
     tg = data.get("target") or []
     if len(tg) >= 2:
-        base = 28
+        base = target_base
         for i, cname in enumerate(("기준월", "목표주가")):
-            c = ws.cell(row=base, column=8 + i, value=cname)
+            c = ws.cell(row=base, column=16 + i, value=cname)
             c.font = Font(bold=True, size=10)
             c.fill = PatternFill("solid", fgColor=SKY)
             c.border = box
             c.alignment = Alignment(horizontal="center")
         for i, tp in enumerate(tg):
             rr = base + 1 + i
-            ws.cell(row=rr, column=8, value=tp.get("월")).border = box
-            v = ws.cell(row=rr, column=9, value=tp.get("목표주가"))
+            ws.cell(row=rr, column=16, value=tp.get("월")).border = box
+            v = ws.cell(row=rr, column=17, value=tp.get("목표주가"))
             v.number_format = "#,##0"
             v.border = box
         last2 = base + len(tg)
         lc = LineChart()
         lc.title = "증권사 목표주가 추이 (원)"
         lc.height, lc.width = 7.2, 14.5
-        lc.add_data(Reference(ws, min_col=9, min_row=base, max_row=last2),
+        lc.add_data(Reference(ws, min_col=17, min_row=base, max_row=last2),
                     titles_from_data=True)
-        lc.set_categories(Reference(ws, min_col=8, min_row=base + 1, max_row=last2))
+        lc.set_categories(Reference(ws, min_col=16, min_row=base + 1, max_row=last2))
         lc.legend = None
         lc.y_axis.majorGridlines = None
         s0 = lc.series[0]
         s0.smooth = False
         s0.graphicalProperties.line.solidFill = RED
         s0.graphicalProperties.line.width = 22000
-        ws.add_chart(lc, "H" + str(last2 + 2))
+        ws.add_chart(lc, "H33")
 
 
 def save_dataframe_to_excel(

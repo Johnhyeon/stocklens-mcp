@@ -2777,6 +2777,8 @@ async def save_analysis_to_excel(
                 pass
             try:
                 sec = await naver_get_stock_sector(c)
+                if sec.get("sector_name"):
+                    out.setdefault("valuation", {})["_업종"] = sec["sector_name"]
                 if sec.get("sector_per_naver"):
                     out.setdefault("valuation", {})["업종PER"] = sec["sector_per_naver"]
                     p_ = (out.get("valuation") or {}).get("PER")
@@ -2788,11 +2790,45 @@ async def save_analysis_to_excel(
             except Exception:
                 pass
             try:
+                sec_name = (out.get("valuation") or {}).get("_업종")
+                if sec_name:
+                    # 목록이 등락률 순이라 12개만 받으면 기준 종목이 밀려난다.
+                    # 업종 전체를 받아 본인 + 상위 몇 개를 고른다.
+                    peer_raw = await naver_get_sector_stocks(sec_name, count=200)
+                    stocks = peer_raw.get("stocks") if isinstance(peer_raw, dict) else None
+                    rows_ = list(stocks or [])
+                    mine = [x for x in rows_ if x.get("code") == c]
+                    others = [x for x in rows_ if x.get("code") != c]
+                    # 같은 업종을 보여주는데 정작 본인이 빠지면 비교가 안 된다.
+                    rows_ = (mine + others)[:6] if mine else others[:5]
+                    if not mine:
+                        rows_ = others[:5]
+                    peers = []
+                    for pr in rows_:
+                        rate = str(pr.get("change_rate", "")).replace("%", "").replace("+", "")
+                        try:
+                            rate_v = float(rate)
+                        except ValueError:
+                            rate_v = None
+                        peers.append({"종목": pr.get("name"), "등락률": rate_v,
+                                      "현재가": pr.get("price"),
+                                      "본인": pr.get("code") == c})
+                    out["peers"] = peers
+            except Exception:
+                pass
+            try:
                 fl = await get_investor_flow(c, 20)
                 inst = [d.get("institutional") for d in fl if d.get("institutional") is not None]
                 forg = [d.get("foreign") for d in fl if d.get("foreign") is not None]
                 out["flow"] = {"기관": int(sum(inst)) if inst else None,
                                "외국인": int(sum(forg)) if forg else None}
+                # 누적만으로는 '언제' 들어왔는지 안 보인다 — 일별도 담는다.
+                daily = []
+                for d in list(fl)[:15][::-1]:
+                    daily.append({"날짜": str(d.get("date", "")).replace(".", "-"),
+                                  "기관": d.get("institutional"),
+                                  "외국인": d.get("foreign")})
+                out["flow_daily"] = daily
             except Exception:
                 pass
             try:
@@ -2837,14 +2873,25 @@ async def save_analysis_to_excel(
             news = []
             try:
                 for it in (await naver_get_disclosure_list(c))[:4]:
-                    news.append({"date": it.get("date"), "title": it.get("title")})
+                    link = it.get("link") or ""
+                    if link.startswith("/"):
+                        link = "https://finance.naver.com" + link
+                    news.append({"date": it.get("date"), "title": it.get("title"),
+                                 "url": link or None})
             except Exception:
                 pass
             try:
                 reps = await naver_get_reports(c)
                 for it in (reps or [])[:3]:
-                    news.append({"date": it.get("date"),
-                                 "title": f"[리포트] {it.get('broker','')} {it.get('title','')}"})
+                    nid = it.get("nid")
+                    url = (f"https://finance.naver.com/research/company_read.naver?nid={nid}"
+                           if nid else None)
+                    news.append({
+                        "date": it.get("date"),
+                        "title": "[리포트] " + str(it.get("broker", "")) + " " + str(it.get("title", "")),
+                        "url": url,
+                        "brief": (it.get("summary") or "")[:90],
+                    })
             except Exception:
                 pass
             out["news"] = news
