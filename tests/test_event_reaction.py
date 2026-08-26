@@ -620,5 +620,165 @@ class PriceAdjustmentBasisTests(unittest.TestCase):
         self.assertIn("액면분할", text)
 
 
+class EventReactionMetaTests(unittest.IsolatedAsyncioTestCase):
+    """SL-08: 본문의 검증 상태가 meta v3 봉투에도 똑같이 실려야 한다.
+
+    실측(두산에너빌리티 2026-08-21): D+5·D+20 부족을 본문은 partial 과
+    INSUFFICIENT_POST_EVENT_HISTORY 로 정확히 표시했지만, RESULT_META_JSON
+    봉투가 아예 없어 프로그램이 그 상태를 구조적으로 읽을 수 없었다.
+    """
+
+    _CLOCK = {"krx": {"is_open": False, "status": "closed_weekend",
+                      "last_trading_day": "2026-08-26"},
+              "us": {"is_open": False, "status": "closed_weekend",
+                     "last_trading_day": "2026-08-26"}}
+
+    @staticmethod
+    def _meta(text):
+        import stock_mcp_server._result_meta as rmeta
+
+        assert rmeta.MARKER_START in text, "메타 봉투가 없다"
+        payload = text.split(rmeta.MARKER_START, 1)[1].split(rmeta.MARKER_END, 1)[0]
+        return json.loads(payload.strip())
+
+    async def _run(self, ohlcv, flows=None, event_date="2026-08-20",
+                   before=5, after=20):
+        from stock_mcp_server import server
+
+        with patch.object(server, "get_ohlcv", AsyncMock(return_value=ohlcv)), \
+             patch.object(server, "get_investor_flow",
+                          AsyncMock(return_value=flows or [])), \
+             patch.object(server, "build_market_clock", return_value=self._CLOCK):
+            return await server.get_event_reaction(
+                code="034020", event_date=event_date, before=before, after=after)
+
+    # 8월 거래일(월-금)만 나열
+    AUG = ["20260803", "20260804", "20260805", "20260806", "20260807",
+           "20260810", "20260811", "20260812", "20260813", "20260814",
+           "20260817", "20260818", "20260819", "20260820", "20260821",
+           "20260824", "20260825", "20260826"]
+
+    def _bars(self, dates, volume=1000):
+        return [_bar(d, 1000 + i, volume) for i, d in enumerate(dates)]
+
+    async def test_short_post_history_is_partial_with_named_reason(self):
+        """수용 1: D+20 이력이 나흘뿐이면 partial + insufficient_post_event_history."""
+        text = await self._run(self._bars(self.AUG), event_date="2026-08-20", after=20)
+        meta = self._meta(text)
+        self.assertEqual(meta["data_completeness"], "partial")
+        cov = meta["coverage"]
+        self.assertEqual(cov["reason"], "insufficient_post_event_history")
+        self.assertFalse(cov["coverage_complete"])
+        self.assertEqual(cov["requested"], {"unit": "trading_day", "before": 5, "after": 20})
+        self.assertEqual(cov["effective"]["after"], 4)   # 08-21, 24, 25, 26
+        self.assertTrue(cov["truncated"])
+        ew = meta["event_window"]
+        self.assertEqual(ew["requested"], {"before": 5, "after": 20})
+        self.assertEqual(ew["actual"], {"before": 5, "after": 4})
+        self.assertEqual(ew["basis_trading_date"], "2026-08-20")
+        self.assertEqual(ew["last_usable_trading_date"], "2026-08-26")
+
+    async def test_sufficient_history_is_complete(self):
+        """수용 2: 사건창이 다 차고 수급도 있는 과거 사건은 complete."""
+        flows = [{"date": f"{d[:4]}.{d[4:6]}.{d[6:]}", "institutional": 1, "foreign": 2}
+                 for d in self.AUG]
+        text = await self._run(self._bars(self.AUG), flows=flows,
+                               event_date="2026-08-05", before=2, after=5)
+        meta = self._meta(text)
+        self.assertEqual(meta["data_completeness"], "complete")
+        self.assertTrue(meta["coverage"]["coverage_complete"])
+        self.assertIsNone(meta["coverage"]["reason"])
+        self.assertEqual(meta["event_window"]["actual"], {"before": 2, "after": 5})
+
+    async def test_holiday_alignment_vs_resumption_are_distinguished(self):
+        """수용 3: 휴장일 다음 거래일 정렬과 거래정지 재개일 정렬이 메타에서 갈린다."""
+        flows = [{"date": f"{d[:4]}.{d[4:6]}.{d[6:]}", "institutional": 1, "foreign": 2}
+                 for d in self.AUG]
+        # 토요일(2026-08-08) 사건 -> 다음 거래일 8/10 정렬
+        text = await self._run(self._bars(self.AUG), flows=flows,
+                               event_date="2026-08-08", before=2, after=3)
+        ew = self._meta(text)["event_window"]
+        self.assertEqual(ew["basis_selection"], "next_trading_session")
+        self.assertEqual(ew["basis_trading_date"], "2026-08-10")
+
+        # 사건일부터 이틀 거래정지(거래량 0) 후 재개 -> first_tradable
+        bars = self._bars(self.AUG[:10])
+        halted = (bars
+                  + [_bar("20260817", 1010, 0), _bar("20260818", 1010, 0)]
+                  + [_bar(d, 1020, 900) for d in ("20260819", "20260820", "20260821")])
+        text = await self._run(halted, flows=flows, event_date="2026-08-17",
+                               before=2, after=3)
+        ew = self._meta(text)["event_window"]
+        self.assertEqual(ew["basis_selection"], "first_tradable_session_after_event")
+        self.assertEqual(ew["basis_trading_date"], "2026-08-19")
+
+    async def test_flow_window_is_a_separate_field(self):
+        """요구 3: 수급 사건창 완전성은 가격과 별도 필드다."""
+        text = await self._run(self._bars(self.AUG), flows=[],
+                               event_date="2026-08-12", before=2, after=3)
+        meta = self._meta(text)
+        fw = meta["flow_window"]
+        self.assertFalse(fw["post_complete"])
+        self.assertEqual(meta["data_completeness"], "partial")
+        # 가격 조정 상태도 별도 필드로 (기존 price_adjustment 재사용)
+        self.assertEqual(meta["price_adjustment"]["status"], "unknown")
+
+    async def test_unavailable_event_is_none_not_silent(self):
+        """분석 불가로 끝나도 봉투는 있어야 한다."""
+        text = await self._run(self._bars(self.AUG), event_date="2020-01-05")
+        meta = self._meta(text)
+        self.assertEqual(meta["data_completeness"], "none")
+        self.assertFalse(meta["coverage"]["coverage_complete"])
+
+    async def test_body_and_meta_never_disagree(self):
+        """요구 4: 본문 판정과 메타 상태의 불일치는 이 테스트가 잡는다."""
+        flows = [{"date": f"{d[:4]}.{d[4:6]}.{d[6:]}", "institutional": 1, "foreign": 2}
+                 for d in self.AUG]
+        cases = [
+            (self._bars(self.AUG), flows, "2026-08-20", 5, 20),   # partial
+            (self._bars(self.AUG), flows, "2026-08-05", 2, 5),    # complete
+            (self._bars(self.AUG), flows, "2020-01-05", 5, 20),   # unavailable
+        ]
+        for ohlcv, fl, ev, b, a in cases:
+            text = await self._run(ohlcv, flows=fl, event_date=ev, before=b, after=a)
+            meta = self._meta(text)
+            body = text.split("RESULT_META_JSON_START")[0]
+            if "unavailable" in body:
+                self.assertEqual(meta["data_completeness"], "none", ev)
+            elif "INSUFFICIENT_POST_EVENT_HISTORY" in body or "FLOW_UNAVAILABLE" in body:
+                self.assertEqual(meta["data_completeness"], "partial", ev)
+            else:
+                self.assertEqual(meta["data_completeness"], "complete", ev)
+
+
+class EventReactionsBatchMetaTests(unittest.IsolatedAsyncioTestCase):
+    """get_event_reactions 도 사건별 상태 집계를 메타에 싣는다."""
+
+    _CLOCK = EventReactionMetaTests._CLOCK
+
+    async def test_batch_with_short_event_is_partial(self):
+        from stock_mcp_server import server
+
+        items = [{"date": "2026-08-20", "title": "수주 공시"},
+                 {"date": "2026-08-05", "title": "실적 공시"}]
+        bars = [_bar(d, 1000 + i, 1000)
+                for i, d in enumerate(EventReactionMetaTests.AUG)]
+        flows = [{"date": f"{d[:4]}.{d[4:6]}.{d[6:]}", "institutional": 1, "foreign": 2}
+                 for d in EventReactionMetaTests.AUG]
+        with patch.object(server, "naver_get_disclosure_list",
+                          AsyncMock(return_value=items)), \
+             patch.object(server, "get_ohlcv", AsyncMock(return_value=bars)), \
+             patch.object(server, "get_investor_flow", AsyncMock(return_value=flows)), \
+             patch.object(server, "build_market_clock", return_value=self._CLOCK):
+            text = await server.get_event_reactions(code="034020", max_events=2, after=10)
+        meta = EventReactionMetaTests._meta(text)
+        ec = meta["event_coverage"]
+        self.assertEqual(ec["events"], 2)
+        self.assertGreaterEqual(ec["partial"], 1)
+        self.assertEqual(meta["data_completeness"], "partial")
+        self.assertEqual(meta["coverage"]["reason"],
+                         "insufficient_post_event_history")
+
+
 if __name__ == "__main__":
     unittest.main()

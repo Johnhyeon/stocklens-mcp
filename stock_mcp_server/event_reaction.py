@@ -292,7 +292,9 @@ def _unavailable(
         "code": code,
         "event_date": event_date,
         "basis_trading_date": None,
-        "window": {"before": before, "after": after, "start_date": None, "end_date": None},
+        "window": {"before": before, "after": after,
+                   "actual_before": None, "actual_after": None,
+                   "start_date": None, "end_date": None},
         "points": {},
         "volume": {"pre_avg": None, "basis": None, "post_avg": None},
         "flow": {"pre": dict(blocked_flow), "post": dict(blocked_flow)},
@@ -480,6 +482,10 @@ def _reaction_core(
         "window": {
             "before": before,
             "after": after,
+            # 요청 창과 실제로 채운 창은 다르다. D+20 을 물었는데 이력이 나흘이면
+            # actual_after=4 다. 이 숫자가 메타 coverage 로 나간다.
+            "actual_before": len(pre_bars),
+            "actual_after": len(post_bars) - 1,
             "start_date": start_date,
             "end_date": end_date,
         },
@@ -595,6 +601,85 @@ def _format_unavailable(reaction: dict) -> str:
             "_이 도구가 보는 주가는 일봉 500개(약 2년)까지입니다._"
         )
     return "\n".join(lines)
+
+
+def reaction_meta_fields(reaction: dict) -> dict:
+    """반응 dict 의 검증 상태를 meta v3 필드로 옮긴다.
+
+    본문(format_event_reaction)과 **같은 validation 을 근거로** 만들기 때문에
+    본문과 메타가 어긋날 수 없다. 실측(두산에너빌리티 2026-08-21): 본문은
+    partial 과 INSUFFICIENT_POST_EVENT_HISTORY 를 정확히 표시했지만 봉투가
+    없어 프로그램이 그 상태를 구조적으로 읽지 못했다.
+    """
+    validation = reaction.get("validation") or {}
+    window = reaction.get("window") or {}
+    codes = validation.get("codes") or []
+    status = validation.get("status")
+
+    if status == "usable":
+        completeness = "complete"
+    elif status == "partial":
+        completeness = "partial"
+    else:
+        completeness = "none"
+
+    if INSUFFICIENT_POST_EVENT_HISTORY in codes:
+        reason = "insufficient_post_event_history"
+    elif completeness == "complete":
+        reason = None
+    else:
+        reason = "source_limit"
+
+    requested = {"before": window.get("before"), "after": window.get("after")}
+    actual = {"before": window.get("actual_before"), "after": window.get("actual_after")}
+    after_req, after_act = window.get("after"), window.get("actual_after")
+    truncated = bool(
+        after_req is not None and after_act is not None and after_act < after_req
+    )
+
+    coverage = {
+        "requested": {"unit": "trading_day", **requested},
+        "effective": {"unit": "trading_day", **actual},
+        "truncated": truncated,
+        "coverage_complete": completeness == "complete",
+        "reason": reason,
+    }
+
+    flow = reaction.get("flow") or {}
+    pre_status = (flow.get("pre") or {}).get("status")
+    post_status = (flow.get("post") or {}).get("status")
+    flow_window = {
+        "pre_status": pre_status,
+        "post_status": post_status,
+        # not_applicable(before=0 등)은 결측이 아니라 구간 부재다.
+        "pre_complete": pre_status in ("available", "not_applicable"),
+        "post_complete": post_status == "available",
+    }
+
+    event_window = {
+        "requested": requested,
+        "actual": actual,
+        "basis_trading_date": reaction.get("basis_trading_date"),
+        # exact(당일) / next_trading_session(휴장일 다음 거래일) /
+        # first_tradable_session_after_event(거래정지 후 재개일) 를 구분한다.
+        "basis_selection": validation.get("alignment_reason"),
+        "alignment_gap_calendar_days": validation.get("alignment_gap_calendar_days"),
+        "last_usable_trading_date": validation.get("latest_available_date"),
+    }
+    if validation.get("next_tradable_date_outside_window"):
+        event_window["next_tradable_date_outside_window"] = (
+            validation["next_tradable_date_outside_window"]
+        )
+
+    warnings = [m.get("message") for m in (validation.get("messages") or [])
+                if m.get("message")]
+    return {
+        "data_completeness": completeness,
+        "coverage": coverage,
+        "warnings": warnings,
+        "event_window": event_window,
+        "flow_window": flow_window,
+    }
 
 
 def format_event_reaction(reaction: dict) -> str:

@@ -83,11 +83,13 @@ from stock_mcp_server import _result_meta as rmeta
 from stock_mcp_server import _watchlist as wl
 from stock_mcp_server.event_reaction import (
     CORPORATE_ACTION_NOTE,
+    INSUFFICIENT_POST_EVENT_HISTORY,
     PROVIDER_ERROR,
     build_event_reaction,
     format_event_reaction,
     normalize_date,
     price_adjustment_meta,
+    reaction_meta_fields,
 )
 from stock_mcp_server.status import build_status, format_status
 from stock_mcp_server import yfinance_source as us
@@ -1159,7 +1161,22 @@ async def get_event_reaction(
         after=after,
         flow_error=flow_error,
     )
-    return format_event_reaction(reaction)
+    # 본문의 검증 상태를 같은 근거로 meta v3 봉투에 싣는다(SL-08).
+    fields = reaction_meta_fields(reaction)
+    return _append_result_meta(
+        format_event_reaction(reaction),
+        _kr_meta(
+            kind="bars",
+            code=code,
+            data_as_of=fields["event_window"].get("last_usable_trading_date"),
+            data_completeness=fields["data_completeness"],
+            coverage=fields["coverage"],
+            price_adjustment=reaction.get("price_adjustment"),
+            extra={"event_window": fields["event_window"],
+                   "flow_window": fields["flow_window"]},
+            warnings=fields["warnings"] or None,
+        ),
+    )
 
 # ETF/ETN 식별용 운용사 브랜드 — 거래량 랭킹 결과에서 종목명으로 빠르게 거름.
 _ETF_NAME_PREFIXES = (
@@ -1294,9 +1311,38 @@ async def get_event_reactions(
     if flow_error:
         lines.append(f"※ 수급 조회 실패({flow_error}) — 주가 반응만 계산했습니다.")
 
+    # 사건별 검증 상태를 집계한다. 하나라도 창이 덜 찼으면 이 표의 해당 칸은
+    # 값이 아니라 결측이고, 그 사실이 메타에 있어야 프로그램이 읽는다(SL-08).
+    statuses = [(r.get("validation") or {}).get("status") for _, _, r in rows]
+    all_codes: set[str] = set()
+    for _, _, r in rows:
+        all_codes.update((r.get("validation") or {}).get("codes") or [])
+    event_coverage = {
+        "events": len(rows),
+        "usable": sum(1 for s in statuses if s == "usable"),
+        "partial": sum(1 for s in statuses if s == "partial"),
+        "unavailable": sum(1 for s in statuses if s == "unavailable"),
+    }
+    incomplete = event_coverage["partial"] + event_coverage["unavailable"]
+    if incomplete:
+        ev_reason = ("insufficient_post_event_history"
+                     if INSUFFICIENT_POST_EVENT_HISTORY in all_codes
+                     else "source_limit")
+        ev_cov = {"truncated": False, "coverage_complete": False, "reason": ev_reason}
+    else:
+        ev_cov = None
     return _append_result_meta(
         "\n".join(lines),
-        _kr_meta(kind="bars", code=code, price_adjustment=price_adjustment_meta()),
+        _kr_meta(
+            kind="bars", code=code,
+            data_completeness=rmeta.PARTIAL if incomplete else rmeta.COMPLETE,
+            coverage=ev_cov,
+            price_adjustment=price_adjustment_meta(),
+            extra={"event_coverage": event_coverage},
+            warnings=([f"{incomplete}건 사건은 창이 덜 찼거나 분석 불가입니다"
+                       " - 표의 해당 칸은 값이 아니라 결측입니다."]
+                      if incomplete else None),
+        ),
     )
 
 
