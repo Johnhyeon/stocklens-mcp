@@ -84,14 +84,34 @@ async def _fetch_latest() -> tuple[str, str] | None:
     return None
 
 
+def _version_key(v: str) -> tuple[int, ...]:
+    """"0.8.2" -> (0, 8, 2). 숫자를 못 뽑으면 빈 튜플."""
+    import re
+
+    return tuple(int(x) for x in re.findall(r"\d+", v or "")[:4])
+
+
 def _version_gt(latest: str, current: str) -> bool:
-    """semver 비교. 실패 시 단순 비교 fallback."""
+    """semver 비교. packaging 이 없으면 숫자 튜플로 비교한다.
+
+    예전 fallback 은 "버전이 다르기만 하면 새 버전"이었다. 실측(2026-08-27):
+    현재 0.8.2 인데 캐시된 최신이 0.8.0 이던 시점에 "새 버전 v0.8.0" 안내가
+    만들어졌다. 낮은 버전으로 안내하면 사용자는 다운그레이드를 하게 된다.
+    숫자를 못 뽑으면 새 버전이라고 주장하지 않는다 - 오탐 안내가 더 나쁘다.
+    """
     try:
         from packaging.version import Version
 
         return Version(latest) > Version(current)
     except Exception:
-        return latest != current and latest != ""
+        pass
+    try:
+        lk, ck = _version_key(latest), _version_key(current)
+        if not lk or not ck:
+            return False
+        return lk > ck
+    except Exception:
+        return False
 
 
 def _format_notice(latest: str, current: str, notes: str, test_mode: bool = False) -> str:

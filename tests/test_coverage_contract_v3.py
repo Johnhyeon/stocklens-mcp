@@ -761,3 +761,134 @@ class FalseCompleteRegressionTests(unittest.IsolatedAsyncioTestCase):
         meta = extract_meta(text)
         self.assertEqual(meta["coverage"]["reason"], "mixed_periods")
         self.assertEqual(meta["data_completeness"], "partial")
+# ---------------------------------------------------------------------------
+# 회귀 - 안내문이 JSON 을 깨뜨리는 것 · data_as_of 가 실제 데이터보다 최신인 것
+# ---------------------------------------------------------------------------
+
+
+class NoticeDeliveryTests(unittest.IsolatedAsyncioTestCase):
+    """업데이트·체험 안내를 JSON 응답 뒤에 텍스트로 붙이면 json.loads 가 깨진다.
+
+    실측(2026-08-27): get_indicators_bulk 응답 뒤에 업데이트 안내가 붙어
+    JSONDecodeError(Extra data)가 났다. JSON 도구에서는 안내를 _meta.warnings
+    안에 넣어야 한다.
+    """
+
+    ROWS = [_bar(f"202607{d:02d}") for d in range(1, 29)]
+
+    def _base_patches(self):
+        return (
+            patch.object(server, "get_ohlcv", AsyncMock(return_value=self.ROWS)),
+            patch.object(server, "build_market_clock", return_value=_CLOSED),
+            patch.object(server, "_now_kst", return_value=_WED_EVENING),
+        )
+
+    async def test_update_notice_lands_inside_json_meta(self):
+        a, b, c = self._base_patches()
+        with a, b, c, \
+             patch.object(server, "get_update_notice",
+                          AsyncMock(return_value="\n\n---\nℹ️ 새 버전 v9.9.9 안내")):
+            text = await server.get_indicators(code="005930", days=28)
+        payload = json.loads(text)   # 엄격 파싱 - 뒤에 텍스트가 붙어 있으면 실패한다
+        self.assertTrue(
+            any("새 버전 v9.9.9" in w for w in payload["_meta"]["warnings"]),
+            payload["_meta"]["warnings"],
+        )
+
+    async def test_trial_notice_lands_inside_json_meta(self):
+        import stock_mcp_server.trial_notice as tn
+
+        a, b, c = self._base_patches()
+        with a, b, c, \
+             patch.object(server, "get_update_notice", AsyncMock(return_value="")), \
+             patch.object(tn, "pending_notice", return_value="ℹ️ 체험 기간이 3일 남았습니다"):
+            text = await server.get_indicators_bulk(codes=["005930"], days=28)
+        payload = json.loads(text)
+        self.assertTrue(
+            any("체험 기간" in w for w in payload["_meta"]["warnings"]),
+            payload["_meta"]["warnings"],
+        )
+
+    async def test_text_tools_still_get_the_notice_appended(self):
+        """텍스트 도구의 기존 전달 방식은 그대로다. 안내가 사라지면 안 된다."""
+        a, b, c = self._base_patches()
+        with a, b, c, \
+             patch.object(server, "get_update_notice",
+                          AsyncMock(return_value="\n\n---\nℹ️ 새 버전 v9.9.9 안내")):
+            text = await server.get_chart(code="005930", timeframe="day", count=5)
+        self.assertIn("새 버전 v9.9.9", text)
+        # 메타 봉투는 여전히 읽혀야 한다
+        self.assertIn("meta_v", json.dumps(extract_meta(text)))
+
+    async def test_no_notice_leaves_json_untouched(self):
+        import stock_mcp_server.trial_notice as tn
+
+        a, b, c = self._base_patches()
+        with a, b, c, \
+             patch.object(server, "get_update_notice", AsyncMock(return_value="")), \
+             patch.object(tn, "pending_notice", return_value=None):
+            text = await server.get_indicators(code="005930", days=28)
+        json.loads(text)
+
+
+class BatchDataAsOfTests(unittest.IsolatedAsyncioTestCase):
+    """배치의 data_as_of 는 시장 달력이 아니라 실제 반환 데이터에서 나와야 한다.
+
+    거래정지·수집 지연 종목의 옛 데이터가 "오늘 자료"로 읽히면 안 된다.
+    """
+
+    async def test_flow_batch_data_as_of_is_the_newest_flow_row(self):
+        rows = [{"date": f"2026.08.{d:02d}", "institutional": 1, "foreign": 2}
+                for d in range(16, 21)]   # 마지막 행 2026-08-20
+        with patch.object(server, "get_investor_flow", AsyncMock(return_value=rows)), \
+             patch.object(server, "naver_get_multi_stocks", AsyncMock(return_value=[])), \
+             patch.object(server, "build_market_clock", return_value=_CLOSED):
+            text = await server.get_flow_batch(["005930"], days=5)
+        meta = extract_meta(text)
+        self.assertEqual(meta["data_as_of"], "2026-08-20")
+        self.assertEqual(meta["per_entity_data_as_of"], {"005930": "2026-08-20"})
+
+    async def test_indicators_bulk_data_as_of_is_the_newest_bar(self):
+        bars = [_bar(f"202608{d:02d}") for d in range(1, 22)]   # 마지막 봉 2026-08-21
+        with patch.object(server, "get_ohlcv", AsyncMock(return_value=bars)), \
+             patch.object(server, "build_market_clock", return_value=_CLOSED), \
+             patch.object(server, "_now_kst", return_value=_WED_EVENING):
+            payload = json.loads(await server.get_indicators_bulk(
+                codes=["005930", "000660"], days=30
+            ))
+        meta = payload["_meta"]
+        self.assertEqual(meta["data_as_of"], "2026-08-21")
+        self.assertEqual(meta["per_entity_data_as_of"],
+                         {"005930": "2026-08-21", "000660": "2026-08-21"})
+
+    async def test_multi_chart_stats_data_as_of_is_from_the_stats(self):
+        stats = [{
+            "code": c, "bars_count": 60, "current_price": 70000,
+            "current_date": d, "high": 90000, "high_date": "20260101",
+            "low": 60000, "low_date": "20260601", "drawdown_pct": -22.2,
+            "recovery_pct": 16.6, "period_return_pct": 5.0, "avg_volume": 100,
+        } for c, d in (("005930", "20260821"), ("000660", "20260814"))]
+        with patch.object(server, "naver_get_multi_chart_stats", AsyncMock(return_value=stats)), \
+             patch.object(server, "build_market_clock", return_value=_CLOSED), \
+             patch.object(server, "_now_kst", return_value=_WED_EVENING):
+            text = await server.get_multi_chart_stats(codes=["005930", "000660"], days=60)
+        meta = extract_meta(text)
+        self.assertEqual(meta["data_as_of"], "2026-08-21")
+        self.assertEqual(meta["per_entity_data_as_of"],
+                         {"005930": "2026-08-21", "000660": "2026-08-14"})
+
+    async def test_stale_entity_dates_are_visible(self):
+        """한 종목이 엿새 뒤처져 있으면 그 사실이 종목별 기준일로 드러나야 한다."""
+        async def uneven(code, timeframe="day", count=260):
+            end = 21 if code == "005930" else 14
+            return [_bar(f"202608{d:02d}") for d in range(1, end + 1)]
+
+        with patch.object(server, "get_ohlcv", AsyncMock(side_effect=uneven)), \
+             patch.object(server, "build_market_clock", return_value=_CLOSED), \
+             patch.object(server, "_now_kst", return_value=_WED_EVENING):
+            payload = json.loads(await server.get_indicators_bulk(
+                codes=["005930", "000660"], days=30
+            ))
+        meta = payload["_meta"]
+        self.assertEqual(meta["data_as_of"], "2026-08-21")
+        self.assertEqual(meta["per_entity_data_as_of"]["000660"], "2026-08-14")

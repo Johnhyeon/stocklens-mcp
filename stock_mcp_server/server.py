@@ -197,13 +197,16 @@ def safe_tool(func):
             notice = await get_update_notice()
         except Exception:
             notice = ""
-        if notice:
-            result = result + notice
         # 체험 만료가 다가오면 한 줄 덧붙인다. 사람들은 LeetKit Manager를 잘 안 열어서,
         # 그 화면에만 두면 기간이 끝나고 도구가 잠긴 뒤에야 알게 된다(trial_notice 참고).
-        from stock_mcp_server.trial_notice import append_notice
+        # pending_notice 는 표시 이력을 소진하므로 **한 번만** 부른다.
+        try:
+            import stock_mcp_server.trial_notice as _tn
 
-        return append_notice(result)
+            trial = _tn.pending_notice() or ""
+        except Exception:
+            trial = ""
+        return _deliver_notices(result, [notice, trial])
 
     return wrapper
 
@@ -749,6 +752,47 @@ def _us_meta(
         entity_info=rmeta.entity(stock_code=ticker),
         warnings=warns,
     )
+
+
+def _deliver_notices(result, notices: list[str]) -> str:
+    """업데이트·체험 안내를 결과에 싣는다.
+
+    JSON 도구(get_indicators 등)는 응답 전체가 json.loads 대상이라, 뒤에 텍스트를
+    붙이면 Extra data 로 깨진다(실측 2026-08-27, get_indicators_bulk). JSON 이면
+    _meta.warnings 안에 넣고, 텍스트면 예전처럼 뒤에 덧붙인다.
+    """
+    if not isinstance(result, str):
+        return result
+    notes = [n.strip() for n in notices if n and n.strip()]
+    if not notes:
+        return result
+
+    if result.lstrip().startswith("{"):
+        try:
+            payload = json.loads(result)
+        except ValueError:
+            payload = None
+        if isinstance(payload, dict):
+            meta = payload.get("_meta")
+            if not isinstance(meta, dict):
+                meta = {}
+                payload["_meta"] = meta
+            warns = meta.get("warnings")
+            if not isinstance(warns, list):
+                warns = []
+                meta["warnings"] = warns
+            for n in notes:
+                # 텍스트용 구분선("---")은 warnings 안에서는 노이즈다.
+                lines = [ln for ln in n.splitlines() if ln.strip() and ln.strip() != "---"]
+                warns.append(" ".join(ln.strip() for ln in lines))
+            return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+        # JSON 처럼 생겼는데 파싱이 안 되면 원문을 건드리지 않는다.
+        return result
+
+    out = result
+    for n in notes:
+        out = f"{out}\n\n{n}"
+    return out
 
 
 def _kr_market_note(krx: dict | None = None) -> list[str]:
@@ -1326,10 +1370,17 @@ async def get_flow_batch(codes: list[str], days: int = 5) -> str:
     # 상한 안이어도 종목마다 실제 행 수는 다르다(신규 상장·거래정지). 합계만
     # 보여주면 3일치와 20일치가 같은 무게로 읽힌다.
     per_entity: dict[str, int] = {}
+    # 배치의 기준일은 시장 달력이 아니라 실제 반환 데이터에서 나와야 한다.
+    # 거래정지·수집 지연 종목의 옛 데이터가 "오늘 자료"로 읽히면 안 된다.
+    per_entity_as_of: dict[str, str] = {}
     for code, data in results:
         name = name_map.get(code, "")
         header = f"[{code}] {name}".rstrip()
         per_entity[code] = len(data or [])
+        row_days = [rmeta.normalize_day(r.get("date")) for r in (data or [])]
+        row_days = [d for d in row_days if d]
+        if row_days:
+            per_entity_as_of[code] = max(row_days)
         if not data:
             failed.append(code)
             continue
@@ -1391,8 +1442,10 @@ async def get_flow_batch(codes: list[str], days: int = 5) -> str:
         "\n".join(lines),
         _kr_meta(
             kind="bars",
+            data_as_of=max(per_entity_as_of.values()) if per_entity_as_of else None,
             data_completeness=rmeta.PARTIAL if has_gap else rmeta.COMPLETE,
             coverage=coverage,
+            extra={"per_entity_data_as_of": per_entity_as_of},
         ),
     )
 
@@ -2377,9 +2430,15 @@ async def get_multi_chart_stats(codes: list[str], days: int = 260) -> str:
             f"요청 {days}일보다 데이터가 크게 짧은 종목 {len(short)}건: {names}"
             " — 신규 상장·거래정지 가능성. 낙폭·기간수익률이 짧은 구간 기준입니다."
         ]
+    per_entity_as_of = {}
+    for s in stats:
+        d = rmeta.normalize_day(s.get("current_date"))
+        if s.get("code") and d:
+            per_entity_as_of[s["code"]] = d
     return _append_result_meta(
         "\n".join(lines),
         _kr_meta(kind="bars",
+                 data_as_of=max(per_entity_as_of.values()) if per_entity_as_of else None,
                  data_completeness=rmeta.PARTIAL if short else rmeta.COMPLETE,
                  warnings=warns,
                  bar_state=_merge_bar_states([
@@ -2387,7 +2446,8 @@ async def get_multi_chart_stats(codes: list[str], days: int = 260) -> str:
                                 market_calendar=_cal_stats, calendar_fallback=True)
                      for s in stats if s.get("current_date")
                  ]),
-                 price_adjustment=price_adjustment_meta()),
+                 price_adjustment=price_adjustment_meta(),
+                 extra={"per_entity_data_as_of": per_entity_as_of}),
     )
 
 
@@ -2734,6 +2794,11 @@ async def get_indicators_bulk(
     # 봉 상태는 종목별로 계산한 뒤 합친다. 한 종목이라도 미완성 봉을 물고
     # 있으면 이 배치의 계산에는 미완성 봉이 섞인 것이다.
     batch_bar_state = _merge_bar_states([s for _, _, s in results])
+    per_entity_as_of = {
+        code: s["last_bar_date"]
+        for code, _, s in results
+        if s and s.get("last_bar_date")
+    }
     payload = {
         "timeframe": timeframe,
         "days": days,
@@ -2742,6 +2807,7 @@ async def get_indicators_bulk(
         "results": {code: data for code, data, _ in results},
         "_meta": _kr_meta(
             kind="bars",
+            data_as_of=max(per_entity_as_of.values()) if per_entity_as_of else None,
             data_completeness=(rmeta.PARTIAL
                                if failed or ind_cov["insufficient"] else rmeta.COMPLETE),
             warnings=([f"{failed}개 종목 조회 실패 — results의 error 필드 확인."] if failed else [])
@@ -2751,7 +2817,8 @@ async def get_indicators_bulk(
                      ] if ind_cov["insufficient"] else []) or None,
             bar_state=batch_bar_state,
             price_adjustment=price_adjustment_meta(),
-            extra={"indicator_coverage": ind_cov},
+            extra={"indicator_coverage": ind_cov,
+                   "per_entity_data_as_of": per_entity_as_of},
         ),
     }
     for _data in payload["results"].values():
