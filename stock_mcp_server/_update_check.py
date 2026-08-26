@@ -84,11 +84,24 @@ async def _fetch_latest() -> tuple[str, str] | None:
     return None
 
 
-def _version_key(v: str) -> tuple[int, ...]:
-    """"0.8.2" -> (0, 8, 2). 숫자를 못 뽑으면 빈 튜플."""
+def _version_key(v: str) -> tuple[int, ...] | None:
+    """"0.8.2" / "v1.2" -> (0, 8, 2) / (1, 2). 그 밖의 형태는 None.
+
+    숫자만 뽑아 비교하면 안 된다. "0.8.3rc1" 의 숫자는 (0,8,3,1)이라
+    (0,8,3)보다 커져 프리릴리스가 정식판 위로 올라간다. 순수한
+    v?숫자.숫자... 형태만 받고, rc·beta·post 같은 접미사가 붙으면
+    비교 자체를 포기한다(None). 끝의 0은 지운다 - 0.8.2.0 과 0.8.2 는
+    같은 버전인데 튜플 길이로 이기면 안 된다.
+    """
     import re
 
-    return tuple(int(x) for x in re.findall(r"\d+", v or "")[:4])
+    s = (v or "").strip()
+    if not re.fullmatch(r"[vV]?\d+(?:\.\d+)*", s):
+        return None
+    nums = [int(x) for x in s.lstrip("vV").split(".")]
+    while nums and nums[-1] == 0:
+        nums.pop()
+    return tuple(nums)
 
 
 def _version_gt(latest: str, current: str) -> bool:
@@ -107,7 +120,8 @@ def _version_gt(latest: str, current: str) -> bool:
         pass
     try:
         lk, ck = _version_key(latest), _version_key(current)
-        if not lk or not ck:
+        # 빈 튜플은 버전 0 이지 실패가 아니다. 실패(None)만 걸러낸다.
+        if lk is None or ck is None:
             return False
         return lk > ck
     except Exception:
