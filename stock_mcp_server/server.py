@@ -2637,6 +2637,7 @@ async def save_analysis_to_excel(
     sources: list[str] | None = None,
     detail_codes: list[str] | None = None,
     detail_days: int = 60,
+    extras: dict | None = None,
     filename: str = "",
 ) -> str:
     """분석결과저장 — **당신이 정리한 표**를 그대로 Excel로 저장합니다.
@@ -2673,6 +2674,16 @@ async def save_analysis_to_excel(
             목록만 있으면 "그래서 어떻게 움직이고 있나"를 다시 조회해야 하므로,
             사용자가 더 볼지 정할 수 있게 **후보 상위 몇 개는 넣어 주세요**.
         detail_days: 흐름 시트에 담을 거래일 수 (기본 60, 최대 120).
+        extras: **다른 렌즈에서 가져온 것을 종목 시트에 얹습니다.**
+            StockLens 는 TelegramLens·DartLens 를 직접 부르지 못하므로,
+            그 도구들을 먼저 호출해 결과를 여기에 담아 주세요.
+            `{"042660": [{"title": "텔레그램 언급", "cols": ["시각","채널","내용"],
+                          "rows": [["08-26 10:30","매경 자이앤트","원전 수주 기대"]]}]}`
+            형식이며, 카드는 담은 순서대로 붙습니다.
+            넣을 만한 것 — TelegramLens `telegram_stock_buzz`(언급 원문),
+            `telegram_timeline`(확산 흐름) / DartLens `get_major_holders`(5%룰 변동),
+            `get_insider_trades`(임원 매매), `list_disclosures`(공시 유형별).
+            ⚠️ 원문에 있는 내용만 옮기고, 없는 것을 지어내지 마세요.
         filename: 파일명 (비우면 제목으로 자동 생성)
     """
     if not rows or not isinstance(rows, list):
@@ -2895,6 +2906,10 @@ async def save_analysis_to_excel(
             except Exception:
                 pass
             out["news"] = news
+            if isinstance(extras, dict):
+                ex = extras.get(c) or extras.get(str(c).zfill(6))
+                if isinstance(ex, list):
+                    out["extras"] = [x for x in ex if isinstance(x, dict)]
             return c, out
 
         results = await asyncio.gather(*[one_detail(c) for c in picks])

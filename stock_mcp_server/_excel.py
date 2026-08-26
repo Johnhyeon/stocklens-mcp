@@ -452,6 +452,39 @@ def add_detail_sheet(wb, sheet_title: str, summary: list[tuple], data: dict) -> 
                 ws.merge_cells(start_row=r, start_column=2, end_row=r, end_column=6)
                 r += 1
 
+    # 다른 렌즈(TelegramLens·DartLens 등)에서 가져온 것들. 형식을 고정하지 않고
+    # 표 형태로 받아 그대로 카드로 만든다 — 무엇을 넣을지는 부르는 쪽이 정한다.
+    for card in (data.get("extras") or []):
+        rows_ = card.get("rows") or []
+        if not rows_:
+            continue
+        r += 1
+        r = section(r, str(card.get("title", "참고")))
+        cols_ = card.get("cols") or []
+        if cols_:
+            for i, cname in enumerate(cols_[:6]):
+                hc = ws.cell(row=r, column=1 + i, value=str(cname))
+                hc.font = Font(bold=True, size=9, color=GREY)
+                hc.fill = PatternFill("solid", fgColor=SKY)
+                hc.border = box
+            r += 1
+        for line_ in rows_[:8]:
+            cells = line_ if isinstance(line_, (list, tuple)) else [line_]
+            span = len(cols_) if cols_ else min(len(cells), 6)
+            for i, v in enumerate(cells[:6]):
+                vc = ws.cell(row=r, column=1 + i, value=v)
+                vc.border = box
+                vc.font = Font(size=9 if i == 0 else 10,
+                               color=GREY if i == 0 else "000000")
+                vc.alignment = Alignment(horizontal="left", vertical="center")
+                if isinstance(v, (int, float)) and not isinstance(v, bool):
+                    vc.number_format = "#,##0.00" if float(v) != int(v) else "#,##0"
+            # 마지막 칸이 본문이면 남은 열까지 늘려 준다
+            if span < 6:
+                ws.merge_cells(start_row=r, start_column=span,
+                               end_row=r, end_column=6)
+            r += 1
+
     qs = data.get("quarters") or []
     if len(qs) >= 2:
         top = 3
