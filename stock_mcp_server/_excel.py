@@ -45,6 +45,7 @@ COLUMN_LABELS_KO: dict[str, str] = {
     "per": "PER(배)", "pbr": "PBR(배)", "eps": "EPS(원)", "bps": "BPS(원)",
     "roe": "ROE(%)", "per_basis": "PER기준", "fin_period": "재무기준기간",
     "sector": "업종", "market_cap": "시가총액",
+    "ma_phase": "이평배열", "rsi": "RSI", "vol_ratio": "거래량배수",
     "date": "날짜", "open": "시가", "close": "종가",
     "inst_net": "기관순매매", "foreign_net": "외국인순매매",
 }
@@ -116,6 +117,78 @@ def _polish_sheet(ws, df) -> None:
                     cell.number_format = fmt
 
 
+# 그래프로 그렸을 때 의미가 있는 열 — 종목 간 비교가 되는 값만 고른다.
+# 가격·거래량처럼 종목마다 단위가 크게 다른 값은 한 차트에 섞으면 못 읽는다.
+_CHART_CANDIDATES = (
+    ("기간수익률(%)", "기간 수익률 비교 (%)"),
+    ("고점대비낙폭(%)", "고점 대비 낙폭 (%)"),
+    ("PER(배)", "PER 비교 (배)"),
+    ("ROE(%)", "ROE 비교 (%)"),
+    ("RSI", "RSI 비교"),
+)
+_FLOW_PAIR = ("기관순매매", "외국인순매매")
+
+
+def _add_charts(wb, ws_data, df, sheet_name: str) -> None:
+    """비교용 막대그래프를 '차트' 시트에 넣는다.
+
+    숫자만 있는 표는 종목이 몇 개만 넘어가도 눈으로 비교가 안 된다. 파일을 여는
+    사람이 바로 알아볼 수 있도록, 종목 간 비교가 되는 열만 골라 그린다.
+    종목이 너무 많으면(20개 초과) 축이 뭉개져 오히려 안 보이므로 그리지 않는다.
+    """
+    from openpyxl.chart import BarChart, Reference
+
+    n = len(df)
+    if n < 2 or n > 20:
+        return
+    cols = list(df.columns)
+    if "종목명" not in cols:
+        return
+    name_idx = cols.index("종목명") + 1
+
+    picked: list[tuple[list[int], str]] = []
+
+    # 기간수익률·낙폭은 늘 따라오는 기본 항목이다. 사용자가 일부러 고른 항목
+    # (수급·재무·지표)이 있으면 그쪽을 먼저 그려야 원하는 그림이 나온다.
+    if all(c in cols for c in _FLOW_PAIR):
+        picked.append(([cols.index(c) + 1 for c in _FLOW_PAIR],
+                       "기관·외국인 순매매 (20일 누적, 주)"))
+    for label, title in (("PER(배)", "PER 비교 (배)"),
+                         ("ROE(%)", "ROE 비교 (%)"),
+                         ("RSI", "RSI 비교")):
+        if len(picked) >= 2:
+            break
+        if label in cols:
+            picked.append(([cols.index(label) + 1], title))
+    for label, title in _CHART_CANDIDATES:
+        if len(picked) >= 2:
+            break
+        if label in cols and not any(label in ttl for _, ttl in picked):
+            picked.append(([cols.index(label) + 1], title))
+    if not picked:
+        return
+
+    ws = wb.create_sheet("차트")
+    ws["A1"] = "아래 그래프는 왼쪽 데이터 시트를 그대로 읽습니다 — 값이 바뀌면 함께 바뀝니다."
+    anchor_row = 3
+    for value_cols, title in picked:
+        chart = BarChart()
+        chart.type = "col"
+        chart.style = 10
+        chart.title = title
+        chart.y_axis.title = None
+        chart.x_axis.title = None
+        chart.width = 24
+        chart.height = 11
+        for ci in value_cols:
+            ref = Reference(ws_data, min_col=ci, min_row=1, max_row=n + 1)
+            chart.add_data(ref, titles_from_data=True)
+        cats = Reference(ws_data, min_col=name_idx, min_row=2, max_row=n + 1)
+        chart.set_categories(cats)
+        ws.add_chart(chart, f"A{anchor_row}")
+        anchor_row += 23
+
+
 def save_dataframe_to_excel(
     df: pd.DataFrame,
     file_path: Path | str,
@@ -153,6 +226,10 @@ def save_dataframe_to_excel(
     with pd.ExcelWriter(file_path, engine="openpyxl") as writer:
         df.to_excel(writer, sheet_name=sheet_name, index=False)
         _polish_sheet(writer.sheets[sheet_name], df)
+        try:
+            _add_charts(writer.book, writer.sheets[sheet_name], df, sheet_name)
+        except Exception:
+            pass    # 그래프는 부가 기능이다 — 실패해도 데이터 저장은 살린다
 
         # 메타데이터 시트
         meta_rows = [
