@@ -1423,6 +1423,15 @@ async def get_financial(code: str) -> str:
                 + ". 연결과 별도는 비교 범위가 달라 나란히 읽으면 안 됩니다."
             )
     lines.append("※ (E)는 확정 실적이 아니라 증권사 컨센서스 추정치입니다.")
+    # PER·PBR 은 '가격 ÷ 실적'이라 어느 시점 주가로 나눴는지가 값을 좌우한다.
+    # 이 표는 각 기간말 주가 기준이고, get_sector_valuation 은 현재가÷TTM 이라
+    # 같은 종목인데 두 숫자가 다르게 보인다(한화오션 14.82 vs 12.79).
+    if any(k.startswith(("PER", "PBR")) for k in data):
+        lines.append(
+            "※ 표의 **PER·PBR 은 각 기간말 주가** 기준입니다. "
+            "**현재가** 기준이 필요하면 `get_sector_valuation`(현재가÷최근 4분기 EPS) "
+            "또는 네이버 종목 화면을 보세요 — 같은 종목이라도 값이 다릅니다."
+        )
     lines.append("")
 
     for key, value in data.items():
