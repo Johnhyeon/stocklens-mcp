@@ -2744,6 +2744,8 @@ async def save_analysis_to_excel(
         async def one_detail(c: str):
             """한 종목에 필요한 조각을 모은다. 일부가 실패해도 나머지는 살린다."""
             out: dict = {}
+            bars: list = []
+            fl: list = []
             try:
                 bars = await get_ohlcv(c, "day", max(detail_days, 130))
                 ind = compute_indicators(bars, ["ma_phase", "position", "volume"])
@@ -2775,10 +2777,13 @@ async def save_analysis_to_excel(
                 qs = []
                 for i, lb in enumerate(qtr):
                     idx = len(ann) + i
-                    if "(E)" in str(lb) or idx >= len(rev) or idx >= len(op):
+                    if idx >= len(rev) or idx >= len(op):
                         continue
+                    # 추정치는 버리지 않고 라벨에 남긴다 — 앞으로의 방향이 보인다.
+                    est = "(E)" in str(lb)
                     try:
                         qs.append({"기간": str(lb),
+                                   "추정": est,
                                    "매출액": float(str(rev[idx]).replace(",", "")),
                                    "영업이익": float(str(op[idx]).replace(",", ""))})
                     except ValueError:
@@ -2928,6 +2933,46 @@ async def save_analysis_to_excel(
             except Exception:
                 pass
             out["news"] = news
+
+            # 공시 목록만 있으면 "그래서 주가가 어떻게 반응했나"를 알 수 없다.
+            # 이미 받아둔 일봉·수급으로 계산하므로 추가 조회는 없다.
+            if bars:
+                rx_rows = []
+                for item in news:
+                    title = str(item.get("title", ""))
+                    if title.startswith("[리포트]"):
+                        continue
+                    day = str(item.get("date", "")).replace(".", "-")
+                    if len(day) != 10:
+                        continue
+                    try:
+                        rx = build_event_reaction(code=c, event_date=day, ohlcv=bars,
+                                                  flows=fl, before=3, after=5)
+                    except Exception:
+                        continue
+                    pts = rx.get("points") or {}
+
+                    def _ret(key):
+                        p = pts.get(key) or {}
+                        return p.get("return_pct") if p.get("status") == "available" else None
+
+                    d1, d5 = _ret("D+1"), _ret("D+5")
+                    if d1 is None and d5 is None:
+                        continue
+                    # lstrip 은 문자 집합을 지운다 — '(주) ' 로 지우면 뒤따르는
+                    # '주'까지 먹어 '주식선물'이 '식선물'이 된다. 접두사만 떼어낸다.
+                    short = title
+                    nm = str(name_of.get(c, ""))
+                    if nm and short.startswith(nm):
+                        short = short[len(nm):]
+                        for pre in ("(주)", "㈜", ")"):
+                            if short.startswith(pre):
+                                short = short[len(pre):]
+                                break
+                        short = short.lstrip()
+                    rx_rows.append({"날짜": day, "공시": short[:34],
+                                    "다음날": d1, "5일후": d5})
+                out["reactions"] = rx_rows[:5]
             if isinstance(extras, dict):
                 ex = extras.get(c) or extras.get(str(c).zfill(6))
                 if isinstance(ex, list):

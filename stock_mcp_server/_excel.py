@@ -391,6 +391,31 @@ def add_detail_sheet(wb, sheet_title: str, summary: list[tuple], data: dict) -> 
                 c.font = Font(bold=True, color=RED if c.value > 0 else BLUE)
         r += 1
 
+    rxs = data.get("reactions") or []
+    if rxs:
+        r = section(r, "공시에 주가가 어떻게 반응했나")
+        for i, h in enumerate(("날짜", "공시", "다음날(%)", "5일후(%)")):
+            hc = ws.cell(row=r, column=1 + i, value=h)
+            hc.font = Font(bold=True, size=9, color=GREY)
+            hc.fill = PatternFill("solid", fgColor=SKY)
+            hc.border = box
+        r += 1
+        for rx in rxs[:5]:
+            dc = ws.cell(row=r, column=1, value=rx.get("날짜"))
+            dc.font = Font(size=9, color=GREY)
+            dc.border = box
+            tc = ws.cell(row=r, column=2, value=str(rx.get("공시", ""))[:30])
+            tc.font = Font(size=10)
+            tc.border = box
+            for j, key in enumerate(("다음날", "5일후")):
+                v = rx.get(key)
+                vc = ws.cell(row=r, column=3 + j, value=v)
+                vc.border = box
+                if isinstance(v, (int, float)):
+                    vc.number_format = _SIGNED_FMT
+            r += 1
+        r += 1
+
     fin = data.get("stability") or {}
     if fin:
         r = section(r, "재무 안정성 · 배당")
@@ -525,7 +550,10 @@ def add_detail_sheet(wb, sheet_title: str, summary: list[tuple], data: dict) -> 
             c.alignment = Alignment(horizontal="center")
         for i, q in enumerate(qs):
             rr = top + 1 + i
-            ws.cell(row=rr, column=16, value=q.get("기간")).border = box
+            qc = ws.cell(row=rr, column=16, value=q.get("기간"))
+            qc.border = box
+            if q.get("추정"):
+                qc.font = Font(size=10, italic=True, color=GREY)
             a = ws.cell(row=rr, column=17, value=q.get("매출액"))
             a.number_format = "#,##0"
             a.border = box
