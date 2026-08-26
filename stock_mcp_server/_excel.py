@@ -253,157 +253,221 @@ def _add_charts(wb, ws_data, df, sheet_name: str) -> None:
 
 
 def add_detail_sheet(wb, sheet_title: str, summary: list[tuple], data: dict) -> None:
-    """종목 한 개의 '한눈에' 시트 — 가격·밸류에이션·재무추이·수급·공시를 한 화면에.
+    """종목 한 개의 '한눈에' 시트.
 
-    주가 캔들차트는 넣지 않는다. 그건 HTS·증권사 화면이 훨씬 잘 보여주고, 엑셀로
-    옮겨봐야 선 하나짜리 그래프가 된다. 엑셀이 잘하는 건 **흩어진 숫자를 한자리에
-    모아 비교하는 것**이라, 여기서는 재무 추이·목표주가 방향·수급처럼 여러 화면을
-    돌아다녀야 보이던 것들을 모은다.
-
-    data 키: price(dict) / valuation(dict) / quarters(list) / flow(dict)
-             / target(list) / news(list)
+    주가 캔들은 넣지 않는다 — HTS·증권사 화면이 훨씬 낫고 엑셀로 옮기면 선 하나가
+    된다. 대신 여러 화면을 돌아다녀야 보이던 것(밸류에이션·증권가 전망·수급·공시)을
+    한 장에 모으고, 숫자만 늘어놓지 않도록 카드로 끊어 읽게 만든다.
     """
     from openpyxl.chart import BarChart, LineChart, Reference
-    from openpyxl.styles import Alignment, Font, PatternFill
-    from openpyxl.utils import get_column_letter
+    from openpyxl.formatting.rule import DataBarRule
+    from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 
     ws = wb.create_sheet(sheet_title[:31])
     ws.sheet_view.showGridLines = False
-    HEAD = PatternFill("solid", fgColor="1F4E79")
-    SUB = PatternFill("solid", fgColor="DDEBF7")
-    WHITE = Font(bold=True, color="FFFFFF", size=11)
 
-    for col, w in (("A", 17), ("B", 15), ("C", 15), ("D", 13), ("E", 13), ("F", 13)):
+    NAVY, SKY, GREY = "1F4E79", "EAF1F8", "888888"
+    RED, BLUE = "C00000", "1F6FB5"
+    thin = Side(style="thin", color="BFD4E8")
+    box = Border(left=thin, right=thin, top=thin, bottom=thin)
+
+    for col, w in (("A", 16), ("B", 15), ("C", 14), ("D", 15), ("E", 14), ("F", 12)):
         ws.column_dimensions[col].width = w
-    for col in "HIJKLM":
+    for col in "HIJKL":
         ws.column_dimensions[col].width = 13
+    ws.row_dimensions[1].height = 26
+    ws.row_dimensions[4].height = 30
+
+    price = data.get("price") or {}
+    val = data.get("valuation") or {}
+    con = data.get("consensus") or {}
+    flow = data.get("flow") or {}
+
+    def money(v):
+        return format(v, ",.0f") if isinstance(v, (int, float)) else "-"
+
+    def pct(v, digits=2):
+        return format(v, "+." + str(digits) + "f") + "%" if isinstance(v, (int, float)) else "-"
 
     ws["A1"] = sheet_title
-    ws["A1"].font = Font(bold=True, size=15)
-    note = next((str(v) for k, v in summary
-                 if str(k) in ("읽는법", "판정", "코멘트") and v), "")
+    ws["A1"].font = Font(bold=True, size=16, color=NAVY)
+    note = ""
+    for k, v in summary:
+        if str(k) in ("읽는법", "판정", "코멘트") and v:
+            note = str(v)
+            break
     if note:
         ws["A2"] = note
-        ws["A2"].font = Font(size=10, color="555555")
+        ws["A2"].font = Font(size=10, color=GREY)
+        ws.merge_cells("A2:F2")
+
+    chg = price.get("등락률")
+    if isinstance(chg, (int, float)):
+        chg_color = RED if chg > 0 else (BLUE if chg < 0 else NAVY)
+    else:
+        chg_color = NAVY
+    per_txt = format(val["PER"], ",.2f") if val.get("PER") else "-"
+    tiles = [
+        ("현재가", money(price.get("현재가")), NAVY),
+        ("등락률", pct(chg), chg_color),
+        ("PER (TTM)", per_txt, NAVY),
+        ("52주 고점 대비", pct(price.get("고점대비"), 1), BLUE),
+    ]
+    for i, (label, value, color) in enumerate(tiles):
+        col = 1 + i
+        lc = ws.cell(row=3, column=col, value=label)
+        lc.font = Font(size=9, color=GREY)
+        lc.alignment = Alignment(horizontal="center")
+        lc.fill = PatternFill("solid", fgColor=SKY)
+        lc.border = box
+        vc = ws.cell(row=4, column=col, value=value)
+        vc.font = Font(bold=True, size=15, color=color)
+        vc.alignment = Alignment(horizontal="center", vertical="center")
+        vc.fill = PatternFill("solid", fgColor=SKY)
+        vc.border = box
 
     def section(row, title):
-        c = ws.cell(row=row, column=1, value=f"  {title}")
-        c.fill = HEAD
-        c.font = WHITE
-        for i in range(2, 7):
-            ws.cell(row=row, column=i).fill = HEAD
+        c = ws.cell(row=row, column=1, value="  " + title)
+        c.font = Font(bold=True, size=11, color="FFFFFF")
+        for i in range(1, 7):
+            ws.cell(row=row, column=i).fill = PatternFill("solid", fgColor=NAVY)
         return row + 1
 
-    def kv(row, pairs):
+    def line(row, pairs):
         for i, (k, v) in enumerate(pairs):
-            ws.cell(row=row, column=1 + i * 2, value=str(k)).font = Font(bold=True, size=10)
-            cell = ws.cell(row=row, column=2 + i * 2, value=v)
+            kc = ws.cell(row=row, column=1 + i * 2, value=str(k))
+            kc.font = Font(bold=True, size=10, color="333333")
+            kc.border = box
+            vc = ws.cell(row=row, column=2 + i * 2, value=v)
+            vc.border = box
             if isinstance(v, (int, float)) and not isinstance(v, bool):
-                cell.number_format = "#,##0.00" if float(v) != int(v) else "#,##0"
+                vc.number_format = "#,##0.00" if float(v) != int(v) else "#,##0"
         return row + 1
 
-    r = 4
-    price = data.get("price") or {}
-    if price:
-        r = section(r, "가격")
-        r = kv(r, [("현재가", price.get("현재가")), ("등락률(%)", price.get("등락률"))])
-        r = kv(r, [("52주 고점 대비(%)", price.get("고점대비")),
-                   ("저점 대비(%)", price.get("저점대비"))])
-        r = kv(r, [("이평배열", price.get("이평배열")), ("거래량 배수", price.get("거래량배수"))])
-        r += 1
+    def wide(row, key, value, color=None):
+        kc = ws.cell(row=row, column=1, value=key)
+        kc.font = Font(bold=True, size=10, color="333333")
+        kc.border = box
+        vc = ws.cell(row=row, column=2, value=value)
+        vc.border = box
+        vc.font = Font(bold=bool(color), size=10, color=color or "000000")
+        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=6)
+        return row + 1
 
-    val = data.get("valuation") or {}
+    r = 6
+    r = section(r, "가격 위치")
+    r = line(r, [("저점 대비(%)", price.get("저점대비")), ("이평배열", price.get("이평배열"))])
+    r = line(r, [("거래량 배수", price.get("거래량배수")), ("52주 저점", price.get("저점가"))])
+    r += 1
+
     if val:
-        r = section(r, f"밸류에이션  ({val.get('기준', '-')})")
-        r = kv(r, [("PER(배)", val.get("PER")), ("업종 중앙값", val.get("업종PER"))])
-        r = kv(r, [("PBR(배)", val.get("PBR")), ("ROE(%)", val.get("ROE"))])
+        r = section(r, "밸류에이션   " + str(val.get("기준", "")))
+        r = line(r, [("PER(배)", val.get("PER")), ("업종 중앙값", val.get("업종PER"))])
+        r = line(r, [("PBR(배)", val.get("PBR")), ("ROE(%)", val.get("ROE"))])
         if val.get("위치"):
-            ws.cell(row=r, column=1, value="업종 대비").font = Font(bold=True, size=10)
-            ws.cell(row=r, column=2, value=val["위치"])
-            ws.merge_cells(start_row=r, start_column=2, end_row=r, end_column=4)
-            r += 1
+            tone = RED if "할증" in str(val["위치"]) else BLUE
+            r = wide(r, "업종 대비", val["위치"], tone)
         r += 1
 
-    flow = data.get("flow") or {}
+    if con:
+        r = section(r, "증권가 전망")
+        r = line(r, [("목표주가", con.get("목표주가")), ("현재가 대비(%)", con.get("괴리율"))])
+        if con.get("의견"):
+            r = wide(r, "투자의견", con["의견"])
+        if con.get("서프라이즈"):
+            r = wide(r, "실적 서프라이즈", con["서프라이즈"])
+        r += 1
+
     if flow:
         r = section(r, "수급 (최근 20거래일 누적)")
-        r = kv(r, [("기관(주)", flow.get("기관")), ("외국인(주)", flow.get("외국인"))])
+        fr = r
+        r = line(r, [("기관(주)", flow.get("기관")), ("외국인(주)", flow.get("외국인"))])
         for col in (2, 4):
-            c = ws.cell(row=r - 1, column=col)
+            c = ws.cell(row=fr, column=col)
             if isinstance(c.value, (int, float)):
                 c.number_format = _SIGNED_INT_FMT
+                c.font = Font(bold=True, color=RED if c.value > 0 else BLUE)
         r += 1
 
     news = data.get("news") or []
     if news:
         r = section(r, "최근 공시·리포트")
         for item in news[:6]:
-            # 공시는 2026.08.25, 리포트는 26.07.29 로 와서 나란히 두면 어긋난다.
             day = str(item.get("date", "")).replace(".", "-")
-            if len(day) == 8 and day[2] == "-":      # 26-07-29 → 2026-07-29
+            if len(day) == 8 and day[2] == "-":
                 day = "20" + day
-            ws.cell(row=r, column=1, value=day[:10]).font = Font(size=10)
+            dc = ws.cell(row=r, column=1, value=day[:10])
+            dc.font = Font(size=9, color=GREY)
+            dc.border = box
             title = str(item.get("title", ""))
-            # "한화오션(주) ..." 처럼 회사명이 앞에 붙으면 시트 제목과 겹친다.
-            # lstrip("(주) ") 은 문자 집합을 지우므로 뒤따르는 '주'까지 먹는다
-            # (주식선물 → 식선물). 접두사만 정확히 떼어낸다.
             if title.startswith(sheet_title):
                 title = title[len(sheet_title):]
-                for pre in ("(주)", "㈜", ")"):
+                for pre in ("(주)", "\u321c", ")"):
                     if title.startswith(pre):
                         title = title[len(pre):]
                         break
                 title = title.lstrip()
-            c = ws.cell(row=r, column=2, value=title[:58])
+            c = ws.cell(row=r, column=2, value=title[:56])
             c.font = Font(size=10)
+            c.border = box
             c.alignment = Alignment(horizontal="left")
             ws.merge_cells(start_row=r, start_column=2, end_row=r, end_column=6)
             r += 1
 
-    # ── 오른쪽: 차트용 데이터와 그래프 ────────────────────
     qs = data.get("quarters") or []
-    chart_row = 3
     if len(qs) >= 2:
-        ws.cell(row=chart_row, column=8, value="분기").fill = SUB
-        ws.cell(row=chart_row, column=9, value="매출액(억)").fill = SUB
-        ws.cell(row=chart_row, column=10, value="영업이익(억)").fill = SUB
-        for i in range(8, 11):
-            ws.cell(row=chart_row, column=i).font = Font(bold=True)
+        top = 3
+        for i, cname in enumerate(("분기", "매출액(억)", "영업이익(억)")):
+            c = ws.cell(row=top, column=8 + i, value=cname)
+            c.font = Font(bold=True, size=10)
+            c.fill = PatternFill("solid", fgColor=SKY)
+            c.border = box
+            c.alignment = Alignment(horizontal="center")
         for i, q in enumerate(qs):
-            rr = chart_row + 1 + i
-            ws.cell(row=rr, column=8, value=q.get("기간"))
-            ws.cell(row=rr, column=9, value=q.get("매출액")).number_format = "#,##0"
-            ws.cell(row=rr, column=10, value=q.get("영업이익")).number_format = _SIGNED_INT_FMT
-        last = chart_row + len(qs)
+            rr = top + 1 + i
+            ws.cell(row=rr, column=8, value=q.get("기간")).border = box
+            a = ws.cell(row=rr, column=9, value=q.get("매출액"))
+            a.number_format = "#,##0"
+            a.border = box
+            b = ws.cell(row=rr, column=10, value=q.get("영업이익"))
+            b.number_format = _SIGNED_INT_FMT
+            b.border = box
+        last = top + len(qs)
+        ws.conditional_formatting.add(
+            "I" + str(top + 1) + ":I" + str(last),
+            DataBarRule(start_type="min", end_type="max", color="8EA9DB"))
         ch = BarChart()
         ch.type = "col"
         ch.title = "분기 매출·영업이익 (억원)"
-        ch.height, ch.width = 7.5, 15
-        ch.add_data(Reference(ws, min_col=9, max_col=10, min_row=chart_row, max_row=last),
+        ch.height, ch.width = 7.2, 14.5
+        ch.add_data(Reference(ws, min_col=9, max_col=10, min_row=top, max_row=last),
                     titles_from_data=True)
-        ch.set_categories(Reference(ws, min_col=8, min_row=chart_row + 1, max_row=last))
+        ch.set_categories(Reference(ws, min_col=8, min_row=top + 1, max_row=last))
         ch.y_axis.majorGridlines = None
         for s_, color in zip(ch.series, ("4472C4", "ED7D31")):
             s_.graphicalProperties.solidFill = color
             s_.graphicalProperties.line.noFill = True
-        ws.add_chart(ch, "H10")
-        chart_row = last + 2
+        ws.add_chart(ch, "H" + str(last + 2))
 
     tg = data.get("target") or []
     if len(tg) >= 2:
-        base = 27
-        ws.cell(row=base, column=8, value="기준월").fill = SUB
-        ws.cell(row=base, column=9, value="목표주가").fill = SUB
-        for i in (8, 9):
-            ws.cell(row=base, column=i).font = Font(bold=True)
+        base = 28
+        for i, cname in enumerate(("기준월", "목표주가")):
+            c = ws.cell(row=base, column=8 + i, value=cname)
+            c.font = Font(bold=True, size=10)
+            c.fill = PatternFill("solid", fgColor=SKY)
+            c.border = box
+            c.alignment = Alignment(horizontal="center")
         for i, tp in enumerate(tg):
             rr = base + 1 + i
-            ws.cell(row=rr, column=8, value=tp.get("월"))
-            ws.cell(row=rr, column=9, value=tp.get("목표주가")).number_format = "#,##0"
+            ws.cell(row=rr, column=8, value=tp.get("월")).border = box
+            v = ws.cell(row=rr, column=9, value=tp.get("목표주가"))
+            v.number_format = "#,##0"
+            v.border = box
         last2 = base + len(tg)
         lc = LineChart()
         lc.title = "증권사 목표주가 추이 (원)"
-        lc.height, lc.width = 7.5, 15
+        lc.height, lc.width = 7.2, 14.5
         lc.add_data(Reference(ws, min_col=9, min_row=base, max_row=last2),
                     titles_from_data=True)
         lc.set_categories(Reference(ws, min_col=8, min_row=base + 1, max_row=last2))
@@ -411,9 +475,9 @@ def add_detail_sheet(wb, sheet_title: str, summary: list[tuple], data: dict) -> 
         lc.y_axis.majorGridlines = None
         s0 = lc.series[0]
         s0.smooth = False
-        s0.graphicalProperties.line.solidFill = "C00000"
+        s0.graphicalProperties.line.solidFill = RED
         s0.graphicalProperties.line.width = 22000
-        ws.add_chart(lc, "H34")
+        ws.add_chart(lc, "H" + str(last2 + 2))
 
 
 def save_dataframe_to_excel(

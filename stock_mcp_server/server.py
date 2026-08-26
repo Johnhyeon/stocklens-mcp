@@ -2745,6 +2745,7 @@ async def save_analysis_to_excel(
                     "저점대비": pos.get("pct_from_low_52w"),
                     "이평배열": (ind.get("ma_phase") or {}).get("phase_label"),
                     "거래량배수": vol.get("ratio_vs_avg_20b"),
+                    "저점가": pos.get("low_52w"),
                 }
             except Exception:
                 pass
@@ -2796,6 +2797,29 @@ async def save_analysis_to_excel(
                 pass
             try:
                 con = await naver_get_consensus(c)
+                tp = con.get("target_price")
+                px = (out.get("price") or {}).get("현재가")
+                op = con.get("opinion") or {}
+                total = sum(v for v in op.values() if isinstance(v, (int, float)))
+                buy = sum(v for k, v in op.items()
+                          if isinstance(v, (int, float)) and ("매수" in str(k)))
+                out["consensus"] = {
+                    "목표주가": tp,
+                    "괴리율": round((tp - px) / px * 100, 1) if (tp and px) else None,
+                    "의견": (f"매수 {buy} / 전체 {int(total)}건" if total else None),
+                }
+                es = con.get("earnings_surprise") or {}
+                op_row = es.get("영업이익") or {}
+                surp = []
+                for period, v in list(op_row.items())[-3:]:
+                    if isinstance(v, dict) and v.get("surprise") is not None:
+                        # 202512 → 2025.12 로 읽히게 (원본은 붙여 쓴 문자열)
+                        pl = str(period)
+                        if len(pl) == 6 and pl.isdigit():
+                            pl = f"{pl[:4]}.{pl[4:]}"
+                        surp.append(f"{pl} {v['surprise']:+.1f}%")
+                if surp:
+                    out["consensus"]["서프라이즈"] = " · ".join(surp)
                 pts = []
                 for h in (con.get("target_price_history") or []):
                     y, d = h.get("price"), h.get("date")
