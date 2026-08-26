@@ -3994,7 +3994,10 @@ async def get_us_multi_price(tickers: list[str]) -> str:
         name = (r.get("name") or "-")[:25]
         lines.append(f"**{r['ticker']}** | {name} | {price_s} | {ch_s} | {chp_s} | {vol_s} | {mcap_s}")
 
-    return _append_result_meta("\n".join(lines), _us_meta(kind="snapshot", ticker=ticker))
+    # 이 함수의 인자는 tickers(복수)다 — 없는 단수 ticker 를 넘기다 NameError 로
+    # 죽어서, 데이터를 다 받아놓고 마지막 줄에서 도구 전체가 실패했다.
+    # 여러 종목 스냅샷이라 entity 를 하나로 특정할 수 없으므로 ticker 는 넘기지 않는다.
+    return _append_result_meta("\n".join(lines), _us_meta(kind="snapshot"))
 
 
 @mcp.tool()
