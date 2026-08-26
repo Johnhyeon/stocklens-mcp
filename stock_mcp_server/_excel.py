@@ -231,9 +231,13 @@ def _add_charts(wb, ws_data, df, sheet_name: str) -> None:
     if not picked:
         return
 
-    ws = wb.create_sheet("차트")
-    ws["A1"] = "아래 그래프는 왼쪽 데이터 시트를 그대로 읽습니다 — 값이 바뀌면 함께 바뀝니다."
-    anchor_row = 3
+    # 별도 탭으로 빼면 무엇을 비교한 그래프인지 알 수 없다. 표 바로 아래 둔다.
+    ws = ws_data
+    anchor_row = n + 4
+    note = ws.cell(row=n + 3, column=1,
+                   value="아래 그래프는 위 표를 그대로 읽습니다 — 값이 바뀌면 함께 바뀝니다.")
+    from openpyxl.styles import Font as _Font
+    note.font = _Font(size=9, color="888888")
     for value_cols, title in picked:
         chart = BarChart()
         chart.type = "col"

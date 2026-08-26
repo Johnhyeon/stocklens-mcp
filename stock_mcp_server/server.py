@@ -2708,11 +2708,29 @@ async def save_analysis_to_excel(
         meta["근거 도구"] = ", ".join(str(s) for s in sources)
     meta["작성 주체"] = "AI가 도구 결과를 정리한 표 (원본 조회 결과 아님)"
 
-    sheet = (title[:28] or "분석").replace("/", "-").replace("\\", "-")
-    saved = save_dataframe_to_excel(df, file_path, sheet_name=sheet, metadata=meta)
+    # 탭 이름에 제목을 그대로 넣으면 '완성판' 같은 말이 탭에 박혀 무슨 시트인지
+    # 알 수 없다. 탭은 '요약'으로 고정하고 제목은 시트 안에 적는다.
+    saved = save_dataframe_to_excel(df, file_path, sheet_name="요약", metadata=meta)
 
     # 근거·한계는 별도 시트에 남긴다 — 표만 떨어져 나가면 맥락이 사라진다.
-    if notes or sources:
+    # notes 를 안 주거나 한 줄만 줘도 '무엇을 보고 만든 파일인지'는 남아야 한다.
+    auto_notes: list[str] = []
+    try:
+        clock = build_market_clock()
+        krx = clock.get("krx") or {}
+        auto_notes.append(
+            "조회 시각 " + _dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+            + " · 한국장 " + ("장중(마감 전)" if krx.get("is_open") else "마감 후")
+            + (" — 장중 수치는 마감 시 달라질 수 있습니다." if krx.get("is_open") else "")
+        )
+    except Exception:
+        pass
+    auto_notes.append("개인 순매매는 제공되지 않습니다(기관·외국인만). "
+                      "'개인이 받았다'는 판단은 이 자료로 할 수 없습니다.")
+    auto_notes.append("PER 은 현재가 ÷ 최근 4분기 EPS(TTM) 기준입니다. "
+                      "실적표의 PER(각 기간말 주가 기준)과 값이 다를 수 있습니다.")
+
+    if True:
         from openpyxl import load_workbook
         wb = load_workbook(saved)
         ws = wb.create_sheet("근거와 한계")
@@ -2727,6 +2745,11 @@ async def save_analysis_to_excel(
         if notes:
             ws.cell(row=r, column=1, value="■ 판단 근거와 한계"); r += 1
             for n in notes:
+                ws.cell(row=r, column=1, value=f"  · {n}"); r += 1
+            r += 1
+        if auto_notes:
+            ws.cell(row=r, column=1, value="■ 이 자료를 읽을 때"); r += 1
+            for n in auto_notes:
                 ws.cell(row=r, column=1, value=f"  · {n}"); r += 1
         r += 1
         ws.cell(row=r, column=1,
@@ -3060,6 +3083,14 @@ async def save_analysis_to_excel(
         if made_detail:
             # 탭을 넘기며 훑는 순서로 맞춘다 — 요약·차트 다음에 종목들,
             # 관리용 시트(근거·메타)는 뒤로. 안 그러면 종목 시트가 맨 끝에 밀린다.
+            # 종목 시트는 이 시점에야 확정된다 — 근거 시트에 목록을 덧붙인다.
+            if "근거와 한계" in wb.sheetnames:
+                gs = wb["근거와 한계"]
+                rr = gs.max_row + 2
+                gs.cell(row=rr, column=1, value="■ 종목별 상세 시트")
+                gs.cell(row=rr + 1, column=1,
+                        value="  · " + ", ".join(made_detail)
+                              + "   (요약 시트에서 종목명을 누르면 이동합니다)")
             tail = [n for n in ("근거와 한계", "Metadata") if n in wb.sheetnames]
             front = [n for n in wb.sheetnames if n not in tail and n not in made_detail]
             try:
