@@ -352,6 +352,9 @@ payload 안 `_meta` 키로) 붙인다. **날짜를 말하기 전에 반드시 �
   개별 지표만으로는 알 수 없는 **비교 기준**을 만든다. 중앙값이 기준이며
   적자(PER 음수)는 집계에서 빼고 건수를 따로 알린다.
 - `get_disclosure`: 공시 목록 — DART 전자공시 제목/날짜
+- `get_event_reactions`: **공시 반응 이력** — 최근 공시들에 이 종목이 어떻게 반응해 왔는지
+  한 번에. 일봉·수급을 1회만 받아 여러 공시일을 계산한다(get_event_reaction 을 N번
+  부르지 말 것). 반응이 최근 약해지는지도 함께 판정한다.
 - DartLens가 함께 설치되어 있으면: StockLens 주가·수급 이상 구간 → DartLens 해당 기간 공시 확인,
   DartLens 실적/공시 결과 → StockLens `get_event_reaction(code, event_date=공시일)` 순서로 이어가기
 
@@ -1027,6 +1030,129 @@ def _looks_like_etf(name: str) -> bool:
     if "ETF" in upper or "ETN" in upper:
         return True
     return any(upper.startswith(p) for p in _ETF_NAME_PREFIXES)
+
+
+@mcp.tool()
+@safe_tool
+@track_metrics("get_event_reactions")
+async def get_event_reactions(
+    code: str,
+    max_events: int = 8,
+    before: int = 5,
+    after: int = 10,
+) -> str:
+    """공시반응이력 — 최근 공시들에 이 종목이 **어떻게 반응해 왔는지** 한 번에.
+
+    "이 종목은 호재에 잘 오르나", "공시 나오면 어떻게 움직였나", "최근 반응이
+    예전보다 약해졌나" 같은 질문에 사용합니다.
+
+    `get_event_reaction`은 날짜 **하나**만 봅니다. 공시 8건을 보려면 8번 불러야 하고
+    응답도 8배가 됩니다. 이 도구는 일봉·수급을 **한 번만** 받아 여러 공시일을
+    한꺼번에 계산합니다.
+
+    ⚠️ 반응이 좋았다고 앞으로도 그러리라는 뜻이 아닙니다. 과거 기록일 뿐입니다.
+    ⚠️ 네이버 공시 목록에는 '가격제한폭 확대요건 도달' 같은 시장 안내도 섞입니다.
+    제목을 보고 실제 기업 공시인지 구분하세요.
+
+    Args:
+        code: 종목코드 6자리
+        max_events: 볼 공시 개수 (기본 8, 최대 15). 같은 날 여러 건이면 하나로 묶습니다.
+        before: 기준일 전 비교 거래일 수 (기본 5)
+        after: 기준일 후 비교 거래일 수 (기본 10, 최대 60)
+    """
+    import re as _re
+    import statistics as _st
+
+    if not _re.match(r"^[A-Za-z0-9]{6}$", code):
+        return f"⚠️ 종목코드 형식이 올바르지 않습니다: {code}"
+    max_events = max(1, min(int(max_events), 15))
+    before = max(0, min(int(before), 60))
+    after = max(1, min(int(after), 60))
+
+    items = await naver_get_disclosure_list(code)
+    if not items:
+        return f"종목 {code}의 공시 목록을 찾지 못했습니다."
+
+    # 같은 날 여러 건은 첫 건으로 대표시킨다 — 같은 날짜의 반응은 어차피 같다.
+    seen: dict[str, str] = {}
+    for it in items:
+        day = str(it.get("date", "")).replace(".", "-").strip()
+        if len(day) == 10 and day not in seen:
+            seen[day] = str(it.get("title", ""))
+        if len(seen) >= max_events:
+            break
+    if not seen:
+        return f"종목 {code}의 공시에서 날짜를 읽지 못했습니다."
+
+    try:
+        ohlcv = await get_ohlcv(code, "day", 500)
+    except Exception as e:
+        return (f"⚠️ `{PROVIDER_ERROR}` — 일봉 조회 실패 ({type(e).__name__}). "
+                f"데이터 없음이 아니라 조회 실패이므로 재시도하세요.")
+    flow_error = None
+    try:
+        flows = await get_investor_flow(code, 60)
+    except Exception as e:
+        flows, flow_error = [], type(e).__name__
+
+    rows = []
+    for day, title in sorted(seen.items(), reverse=True):
+        try:
+            r = build_event_reaction(code=code, event_date=day, ohlcv=ohlcv, flows=flows,
+                                     before=before, after=after, flow_error=flow_error)
+        except ValueError:
+            continue
+        rows.append((day, title, r))
+    if not rows:
+        return f"종목 {code}의 공시일을 주가 데이터와 맞추지 못했습니다."
+
+    def pt(r, key):
+        p = (r.get("points") or {}).get(key) or {}
+        return p.get("return_pct") if p.get("status") == "available" else None
+
+    lines = [f"# 공시 반응 이력 — {code} (최근 {len(rows)}건)", ""]
+    lines.append(f"기준일 | 공시 | D+1 | D+{after//2 if after>=4 else 1} | D+{after} | 당일거래량/직전평균")
+    lines.append("---|---|---:|---:|---:|---:")
+    mid_key = f"D+{after//2}" if after >= 4 else "D+1"
+    d1s = []
+    for day, title, r in rows:
+        v = r.get("volume") or {}
+        pre, basis = v.get("pre_avg"), v.get("basis")
+        ratio = f"{basis/pre:.1f}배" if isinstance(pre, (int, float)) and pre and isinstance(basis, (int, float)) else "-"
+        d1 = pt(r, "D+1"); dm = pt(r, mid_key); dl = pt(r, f"D+{after}")
+        if d1 is not None:
+            d1s.append(d1)
+        f = lambda x: f"{x:+.2f}%" if isinstance(x, (int, float)) else "-"
+        t = (title or "").replace("|", "/")
+        t = (t[:34] + "…") if len(t) > 34 else t
+        lines.append(f"{day} | {t} | {f(d1)} | {f(dm)} | {f(dl)} | {ratio}")
+
+    if d1s:
+        up = sum(1 for x in d1s if x > 0)
+        lines.append("")
+        lines.append("## 이 종목의 반응 습관")
+        lines.append(f"- 계산된 공시 {len(d1s)}건 중 **다음 날 오른 경우 {up}건** ({up/len(d1s)*100:.0f}%)")
+        lines.append(f"- D+1 중앙값 **{_st.median(d1s):+.2f}%** · 평균 {sum(d1s)/len(d1s):+.2f}%")
+        lines.append(f"- 최대 {max(d1s):+.2f}% / 최소 {min(d1s):+.2f}%")
+        if len(d1s) >= 4:
+            half = len(d1s) // 2
+            recent, past = d1s[:half], d1s[half:]   # rows 가 최신순이라 앞쪽이 최근
+            rm, pm = _st.median(recent), _st.median(past)
+            trend = "약해지는 중" if rm < pm - 0.5 else ("강해지는 중" if rm > pm + 0.5 else "비슷")
+            lines.append(f"- 최근 {len(recent)}건 중앙값 {rm:+.2f}% vs 이전 {len(past)}건 {pm:+.2f}% → **{trend}**")
+            lines.append("  · 좋은 소식이 계속 나오는데 반응이 약해진다면 기대가 이미 반영됐을 수 있습니다.")
+
+    lines.append("")
+    lines.append("※ 과거 반응이지 예측이 아닙니다. 같은 공시라도 시장 상황에 따라 다르게 움직입니다.")
+    lines.append("※ 시장 전체가 크게 움직인 날은 개별 반응과 섞입니다 — get_index 로 그날 지수를 함께 보세요.")
+    if flow_error:
+        lines.append(f"※ 수급 조회 실패({flow_error}) — 주가 반응만 계산했습니다.")
+
+    return _append_result_meta(
+        "\n".join(lines),
+        _kr_meta(kind="bars", code=code),
+    )
+
 
 
 @mcp.tool()
