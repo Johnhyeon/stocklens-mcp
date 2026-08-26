@@ -576,5 +576,49 @@ class EventReactionToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("YYYY-MM-DD", text)
 
 
+class PriceAdjustmentBasisTests(unittest.TestCase):
+    """이 종가가 수정주가인지 원주가인지 반응 결과에 적혀 있는가.
+
+    액면분할 전후를 그냥 이어 붙이면 D-5 대비 D+1 수익률이 통째로 허구가 된다.
+    네이버는 조정 기준을 알려주지 않으므로 정답은 "모른다"이고, 모른다고 적어야
+    6개월 전 공시 반응과 지금을 나란히 놓기 전에 한 번 멈춘다.
+    """
+
+    ROWS = [_bar(f"2026-06-{d:02d}", 1000 + d) for d in range(1, 29)]
+
+    def test_reaction_carries_unknown_adjustment_by_default(self):
+        r = build_event_reaction(
+            code="005930", event_date="2026-06-10", ohlcv=self.ROWS, before=2, after=3
+        )
+        self.assertEqual(r["price_adjustment"], {
+            "status": "unknown",
+            "corporate_actions_checked": False,
+            "cross_event_comparison_safe": False,
+        })
+
+    def test_source_declared_basis_is_passed_through(self):
+        r = build_event_reaction(
+            code="005930", event_date="2026-06-10", ohlcv=self.ROWS,
+            before=2, after=3, price_adjustment="split_adjusted",
+        )
+        self.assertEqual(r["price_adjustment"]["status"], "split_adjusted")
+        self.assertTrue(r["price_adjustment"]["cross_event_comparison_safe"])
+
+    def test_unavailable_reaction_still_declares_basis(self):
+        """분석 불가로 끝나도 '무슨 가격을 봤는지'는 남아야 한다."""
+        r = build_event_reaction(
+            code="005930", event_date="2026-06-10", ohlcv=[], before=2, after=3
+        )
+        self.assertEqual(r["price_adjustment"]["status"], "unknown")
+
+    def test_formatted_report_warns_about_corporate_actions(self):
+        r = build_event_reaction(
+            code="005930", event_date="2026-06-10", ohlcv=self.ROWS, before=2, after=3
+        )
+        text = format_event_reaction(r)
+        self.assertIn("기업행위", text)
+        self.assertIn("액면분할", text)
+
+
 if __name__ == "__main__":
     unittest.main()

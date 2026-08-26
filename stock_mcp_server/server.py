@@ -80,10 +80,12 @@ from stock_mcp_server.market_clock import (  # noqa: E402
 from stock_mcp_server import _result_meta as rmeta
 from stock_mcp_server import _watchlist as wl
 from stock_mcp_server.event_reaction import (
+    CORPORATE_ACTION_NOTE,
     PROVIDER_ERROR,
     build_event_reaction,
     format_event_reaction,
     normalize_date,
+    price_adjustment_meta,
 )
 from stock_mcp_server.status import build_status, format_status
 from stock_mcp_server import yfinance_source as us
@@ -649,6 +651,7 @@ async def get_chart(
         bar_state=_bar_state(
             timeframe=timeframe, rows=data, market_calendar=krx_calendar()
         ),
+        price_adjustment=price_adjustment_meta(),
     )
     return _append_result_meta("\n".join(lines), meta)
 
@@ -769,6 +772,7 @@ def _kr_meta(
     data_completeness: str = rmeta.COMPLETE,
     coverage: dict | None = None,
     bar_state: dict | None = None,
+    price_adjustment: dict | None = None,
     warnings: list[str] | None = None,
 ) -> dict:
     """KRX 도구용 메타. 세션 상태에서 data_basis를 자동 판정한다.
@@ -831,6 +835,8 @@ def _kr_meta(
     )
     if bar_state:
         meta["bar_state"] = bar_state
+    if price_adjustment:
+        meta["price_adjustment"] = price_adjustment
     return meta
 
 
@@ -1185,13 +1191,14 @@ async def get_event_reactions(
 
     lines.append("")
     lines.append("※ 과거 반응이지 예측이 아닙니다. 같은 공시라도 시장 상황에 따라 다르게 움직입니다.")
+    lines.append(f"※ {CORPORATE_ACTION_NOTE}")
     lines.append("※ 시장 전체가 크게 움직인 날은 개별 반응과 섞입니다 — get_index 로 그날 지수를 함께 보세요.")
     if flow_error:
         lines.append(f"※ 수급 조회 실패({flow_error}) — 주가 반응만 계산했습니다.")
 
     return _append_result_meta(
         "\n".join(lines),
-        _kr_meta(kind="bars", code=code),
+        _kr_meta(kind="bars", code=code, price_adjustment=price_adjustment_meta()),
     )
 
 
@@ -2266,6 +2273,7 @@ async def get_multi_chart_stats(codes: list[str], days: int = 260) -> str:
         "요청 기간보다 훨씬 적으면(⚠️) 고점·저점과 낙폭이 그 짧은 구간 기준이라, "
         "'52주 고점' 같은 표현을 쓰면 안 됩니다."
     )
+    lines.append(f"※ {CORPORATE_ACTION_NOTE}")
     warns = None
     if short:
         names = ", ".join(f"{s['code']}({s['bars_count']}봉)" for s in short[:8])
@@ -2283,7 +2291,8 @@ async def get_multi_chart_stats(codes: list[str], days: int = 260) -> str:
                      rows=[{"date": d} for d in
                            sorted(s.get("current_date") for s in stats if s.get("current_date"))],
                      market_calendar=krx_calendar(),
-                 )),
+                 ),
+                 price_adjustment=price_adjustment_meta()),
     )
 
 
@@ -2351,6 +2360,7 @@ async def get_indicators(
             bar_state=_bar_state(
                 timeframe=timeframe, rows=ohlcv, market_calendar=krx_calendar()
             ),
+            price_adjustment=price_adjustment_meta(),
         ),
     }
     _mark_intraday_volume(result, payload["_meta"])
@@ -2523,6 +2533,7 @@ async def get_indicators_bulk(
                 rows=[{"date": d} for d in last_dates],
                 market_calendar=krx_calendar(),
             ),
+            price_adjustment=price_adjustment_meta(),
         ),
     }
     for _data in payload["results"].values():

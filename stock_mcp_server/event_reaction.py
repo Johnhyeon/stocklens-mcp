@@ -69,6 +69,34 @@ ALIGN_FIRST_TRADABLE = "first_tradable_session_after_event"
 _MISSING = "—"
 
 
+_KNOWN_ADJUSTMENTS = {"raw", "split_adjusted", "total_return_adjusted"}
+
+
+def price_adjustment_meta(source_status: Any = None) -> dict:
+    """이 종가가 무엇으로 조정된 값인지. 원천이 안 알려주면 "모른다"로 적는다.
+
+    액면분할·유상증자 전후를 그냥 이어 붙이면 D-5 대비 D+1 수익률이 통째로
+    허구가 된다. 그런데 지금까지 응답에는 이 가격이 수정주가인지 원주가인지
+    적힌 곳이 없었다. 네이버는 조정 기준을 명시하지 않으므로 정답은 unknown이고,
+    모른다고 적어야 6개월 전 반응과 지금을 나란히 놓기 전에 한 번 멈춘다.
+
+    모르는 라벨을 그대로 실어 보내지 않는다. 확인된 값으로 오해된다.
+    """
+    status = source_status if source_status in _KNOWN_ADJUSTMENTS else "unknown"
+    known = status != "unknown"
+    return {
+        "status": status,
+        "corporate_actions_checked": known,
+        "cross_event_comparison_safe": known,
+    }
+
+
+CORPORATE_ACTION_NOTE = (
+    "기업행위(액면분할·유상증자·합병) 전후 구간은 이 수치로 이어 붙여 비교하면 "
+    "안 됩니다. 원천이 조정 기준을 밝히지 않아 수정주가인지 확인되지 않았습니다."
+)
+
+
 def normalize_date(value: Any) -> str:
     """YYYYMMDD / YYYY.MM.DD / YYYY-MM-DD를 YYYY-MM-DD로 통일."""
     s = str(value or "").strip()
@@ -281,12 +309,38 @@ def build_event_reaction(
     before: int = 5,
     after: int = 20,
     flow_error: str | None = None,
+    price_adjustment: str | None = None,
 ) -> dict:
     """OHLCV/수급 원자료를 event_date 기준 반응 요약 dict로 변환.
 
     분석 가능성을 먼저 판정하고, 통과하지 못하면 수익률·수급 숫자를 만들지 않는다.
     `flow_error`는 수급 공급자 조회 실패 사유(문자열)로, 데이터 부재와 구분된다.
+    `price_adjustment`는 원천이 조정 기준을 밝히는 경우에만 넘긴다(기본 unknown).
     """
+    reaction = _reaction_core(
+        code=code,
+        event_date=event_date,
+        ohlcv=ohlcv,
+        flows=flows,
+        before=before,
+        after=after,
+        flow_error=flow_error,
+    )
+    # 분석 불가로 끝나도 '무슨 가격을 보고 그렇게 판정했는지'는 남아야 한다.
+    reaction["price_adjustment"] = price_adjustment_meta(price_adjustment)
+    return reaction
+
+
+def _reaction_core(
+    *,
+    code: str,
+    event_date: str,
+    ohlcv: list[dict],
+    flows: list[dict] | None = None,
+    before: int = 5,
+    after: int = 20,
+    flow_error: str | None = None,
+) -> dict:
     before = max(0, int(before))
     after = max(0, int(after))
     target_date = normalize_date(event_date)
@@ -651,4 +705,5 @@ def format_event_reaction(reaction: dict) -> str:
         "_반대 흐름: 주가·수급 이상 움직임에서 출발했다면 DartLens로 해당 기간 공시를 "
         "확인하세요. 이 도구는 원인 단정이나 매수/매도 판단이 아니라 시간축 정렬용입니다._"
     )
+    lines.append(f"_{CORPORATE_ACTION_NOTE}_")
     return "\n".join(lines)

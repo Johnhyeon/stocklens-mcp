@@ -364,3 +364,100 @@ class BarStateInToolsTests(unittest.IsolatedAsyncioTestCase):
         rows = [_bar("20260825"), _bar("20260826")]
         text = await self._chart("week", rows, _WED_EVENING)
         self.assertIn("종목 005930 주봉 OHLCV (2개 봉)", text)
+
+
+# ---------------------------------------------------------------------------
+# SL-03. 이 가격이 무엇으로 조정된 값인지
+# ---------------------------------------------------------------------------
+
+_UNKNOWN_ADJ = {
+    "status": "unknown",
+    "corporate_actions_checked": False,
+    "cross_event_comparison_safe": False,
+}
+
+
+class PriceAdjustmentTests(unittest.IsolatedAsyncioTestCase):
+    """액면분할·유상증자 전후를 그냥 이어 붙이면 안 되는데, 지금까지 응답에는
+    이 가격이 수정주가인지 원주가인지 적힌 곳이 없었다.
+
+    원천이 알려주지 않으므로 정답은 "모른다"다. 모른다고 적어야 6개월 전 공시
+    반응과 지금을 나란히 놓기 전에 한 번 멈춘다.
+    """
+
+    async def _chart(self):
+        with patch.object(server, "get_ohlcv", AsyncMock(return_value=[_bar("20260825"), _bar("20260826")])), \
+             patch.object(server, "build_market_clock", return_value=_CLOSED), \
+             patch.object(server, "_now_kst", return_value=_WED_EVENING):
+            return await server.get_chart(code="005930", timeframe="day", count=2)
+
+    async def test_chart_reports_unknown_adjustment(self):
+        meta = extract_meta(await self._chart())
+        self.assertEqual(meta["price_adjustment"], _UNKNOWN_ADJ)
+
+    async def test_indicators_report_unknown_adjustment(self):
+        rows = [_bar(f"202607{d:02d}") for d in range(1, 29)]
+        with patch.object(server, "get_ohlcv", AsyncMock(return_value=rows)), \
+             patch.object(server, "build_market_clock", return_value=_CLOSED), \
+             patch.object(server, "_now_kst", return_value=_WED_EVENING):
+            payload = json.loads(await server.get_indicators(code="005930", days=60))
+        self.assertEqual(payload["_meta"]["price_adjustment"], _UNKNOWN_ADJ)
+
+    async def test_indicators_bulk_reports_unknown_adjustment(self):
+        rows = [_bar(f"202607{d:02d}") for d in range(1, 29)]
+        with patch.object(server, "get_ohlcv", AsyncMock(return_value=rows)), \
+             patch.object(server, "build_market_clock", return_value=_CLOSED), \
+             patch.object(server, "_now_kst", return_value=_WED_EVENING):
+            payload = json.loads(await server.get_indicators_bulk(codes=["005930"], days=60))
+        self.assertEqual(payload["_meta"]["price_adjustment"], _UNKNOWN_ADJ)
+
+    async def test_period_stats_warn_about_corporate_actions(self):
+        """기간수익률은 구간 양 끝을 이어 붙인 값이라 특히 위험하다."""
+        stats = [{
+            "code": "005930", "bars_count": 260, "current_price": 70000,
+            "current_date": "20260826", "high": 90000, "high_date": "20260101",
+            "low": 60000, "low_date": "20260601", "drawdown_pct": -22.2,
+            "recovery_pct": 16.6, "period_return_pct": 5.0, "avg_volume": 100,
+        }]
+        with patch.object(server, "naver_get_multi_chart_stats", AsyncMock(return_value=stats)), \
+             patch.object(server, "build_market_clock", return_value=_CLOSED), \
+             patch.object(server, "_now_kst", return_value=_WED_EVENING):
+            text = await server.get_multi_chart_stats(codes=["005930"], days=260)
+        meta = extract_meta(text)
+        self.assertEqual(meta["price_adjustment"], _UNKNOWN_ADJ)
+        self.assertIn("기업행위", text)
+
+    async def test_event_reactions_report_unknown_adjustment(self):
+        items = [{"date": "2026-08-20", "title": "단일판매·공급계약 체결"}]
+        rows = [_bar(f"202608{d:02d}") for d in range(1, 27)]
+        flows = [{"date": f"2026.08.{d:02d}", "institutional": 1, "foreign": 2}
+                 for d in range(1, 27)]
+        with patch.object(server, "naver_get_disclosure_list", AsyncMock(return_value=items)), \
+             patch.object(server, "get_ohlcv", AsyncMock(return_value=rows)), \
+             patch.object(server, "get_investor_flow", AsyncMock(return_value=flows)), \
+             patch.object(server, "build_market_clock", return_value=_CLOSED), \
+             patch.object(server, "_now_kst", return_value=_WED_EVENING):
+            text = await server.get_event_reactions(code="005930", max_events=1, after=4)
+        meta = extract_meta(text)
+        self.assertEqual(meta["price_adjustment"], _UNKNOWN_ADJ)
+        self.assertIn("기업행위", text)
+
+    def test_known_source_status_is_passed_through(self):
+        """원천이 조정 기준을 알려주면 그대로 전달하고, 비교 가능으로 표시한다."""
+        from stock_mcp_server.event_reaction import price_adjustment_meta
+
+        self.assertEqual(price_adjustment_meta("split_adjusted"), {
+            "status": "split_adjusted",
+            "corporate_actions_checked": True,
+            "cross_event_comparison_safe": True,
+        })
+        self.assertEqual(price_adjustment_meta("total_return_adjusted")["status"],
+                         "total_return_adjusted")
+        self.assertEqual(price_adjustment_meta("raw")["status"], "raw")
+
+    def test_unrecognized_source_status_falls_back_to_unknown(self):
+        """모르는 라벨을 그대로 실어 보내면 읽는 쪽이 확인된 값으로 오해한다."""
+        from stock_mcp_server.event_reaction import price_adjustment_meta
+
+        for bogus in (None, "", "adjusted", "수정주가", 3):
+            self.assertEqual(price_adjustment_meta(bogus), _UNKNOWN_ADJ, bogus)
