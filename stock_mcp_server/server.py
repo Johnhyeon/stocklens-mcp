@@ -1772,17 +1772,24 @@ async def get_sector_valuation(
     if not sector_name:
         return "업종·테마 이름이나 종목코드(code) 중 하나는 필요합니다."
 
+    # 목록은 등락률 순으로 오므로 top_n 으로 자르면 그날 오른 쪽만 남는다.
+    # 먼저 업종 전체를 받아(페이지네이션 없음) 규모를 보고, 감당 가능하면 전량
+    # 집계해 시가총액 순으로 세운다.
+    FETCH_ALL = 300
     if kind == "theme":
-        rows = await naver_get_theme_stocks(sector_name, count=top_n, include_reason=False)
+        rows = await naver_get_theme_stocks(sector_name, count=FETCH_ALL, include_reason=False)
     else:
-        rows = await naver_get_sector_stocks(sector_name, count=top_n)
+        rows = await naver_get_sector_stocks(sector_name, count=FETCH_ALL)
     # 두 도구 모두 {"stocks": [...]} 형태의 dict 를 돌려준다(리스트가 아니다).
     if isinstance(rows, dict):
         rows = rows.get("stocks") or rows.get("items") or []
     if not rows:
         return f"'{sector_name}'에 해당하는 종목을 찾지 못했습니다. list_sectors / list_themes 로 이름을 확인하세요."
 
-    codes = [r.get("code") for r in rows if isinstance(r, dict) and r.get("code")][:top_n]
+    all_codes = [r.get("code") for r in rows if isinstance(r, dict) and r.get("code")]
+    universe = len(all_codes)
+    full_scan = universe <= top_n
+    codes = all_codes if full_scan else all_codes[:top_n]
     # 목록이 등락률 순이라, 기준 종목이 상위 top_n 밖으로 밀려 표에서 사라질 수 있다.
     # (실제로 "조선" 상위 8개에 한화오션이 없었다.) 기준 종목은 반드시 포함시킨다.
     if focus_code and focus_code not in codes:
@@ -1824,7 +1831,14 @@ async def get_sector_valuation(
     lines = [f"## {sector_name} 밸류에이션 집계", ""]
     if focus_code:
         lines.append(f"- 기준 종목: **{focus_name}({focus_code})** → 업종 `{sector_name}`")
-    lines.append(f"- 대상 종목: {len(snap)}개 (요청 {len(codes)}개)")
+    if full_scan:
+        lines.append(f"- 대상 종목: **업종 전체 {len(snap)}개** — 편향 없음")
+    else:
+        lines.append(
+            f"- 대상 종목: {len(snap)}개 / 업종 전체 **{universe}개** "
+            f"→ ⚠️ **등락률 상위만** 집계 (그날 오른 쪽으로 치우침). "
+            f"전체를 보려면 top_n={min(universe, 80)} 로 다시 부르세요."
+        )
     if periods:
         lines.append(f"- 재무 기준 기간: {', '.join(periods)}")
     if neg_per:
@@ -1841,25 +1855,47 @@ async def get_sector_valuation(
     med_per = _st.median([v for _, _, v in per]) if per else None
     if med_per:
         lines.append("")
-        lines.append(f"### 중앙값(PER {med_per:,.2f}배) 대비 위치")
-        lines.append("종목 | PER | 중앙값 대비 | PBR | ROE(%)")
-        lines.append("---|---:|---:|---:|---:")
+        cap_map = {s.get("code"): _market_cap_eok(s.get("시가총액")) for s in snap}
+        name_map = {s.get("code"): s.get("name") for s in snap}
+
+        # 표가 길어지면 읽히지 않는다(건설 업종은 78종목). 소형주 PER 은 노이즈가
+        # 크므로 시가총액 상위부터 남기고, 기준 종목은 잘려도 반드시 넣는다.
+        SHOW = 20
+        cands = [c for c in per_map if c in name_map]
+        omitted = 0
+        if len(cands) > SHOW:
+            by_cap = sorted(cands, key=lambda c: (cap_map.get(c) or 0), reverse=True)
+            keep = by_cap[:SHOW]
+            if focus_code and focus_code in cands and focus_code not in keep:
+                keep = [focus_code] + keep[:SHOW - 1]
+            omitted = len(cands) - len(keep)
+            cands = keep
+
+        lines.append("")
+        head = f"### 중앙값(PER {med_per:,.2f}배) 대비 위치"
+        if omitted:
+            head += f" — 시총 상위 {len(cands)}개 표시 ({omitted}개 생략)"
+        lines.append(head)
+        lines.append("종목 | PER | 중앙값 대비 | PBR | ROE(%) | 시총(억)")
+        lines.append("---|---:|---:|---:|---:|---:")
         pbr_map = {c: v for c, _, v in pbr}
         roe_map = {c: v for c, _, v in roe}
-        ranked = sorted(((s.get("code"), s.get("name")) for s in snap
-                         if s.get("code") in per_map),
-                        key=lambda x: per_map[x[0]])
-        for code_, name_ in ranked:
-            p = per_map[code_]
-            gap = (p - med_per) / med_per * 100
+        for code_ in sorted(cands, key=lambda c: per_map[c]):
+            name_ = name_map.get(code_) or code_
+            pv = per_map[code_]
+            gap = (pv - med_per) / med_per * 100
             tag = "할인" if gap < -5 else ("할증" if gap > 5 else "비슷")
             pb = pbr_map.get(code_)
             ro = roe_map.get(code_)
+            cap = cap_map.get(code_)
+            mark = "**" if code_ == focus_code else ""
             lines.append(
-                f"{name_}({code_}) | {p:,.2f} | {gap:+.0f}% {tag} | "
-                f"{pb:,.2f}" if pb is not None else f"{name_}({code_}) | {p:,.2f} | {gap:+.0f}% {tag} | -"
+                f"{mark}{name_}({code_}){mark} | {pv:,.2f} | {gap:+.0f}% {tag} | "
+                f"{pb:,.2f}" .replace("nan", "-") if pb is not None
+                else f"{mark}{name_}({code_}){mark} | {pv:,.2f} | {gap:+.0f}% {tag} | -"
             )
             lines[-1] += f" | {ro:,.2f}" if ro is not None else " | -"
+            lines[-1] += f" | {cap:,.0f}" if cap is not None else " | -"
 
     lines.append("")
     lines.append("※ 낮은 PER이 곧 저평가는 아닙니다. 이익이 정점이거나 성장이 멈출 것이라는")
@@ -2171,6 +2207,27 @@ async def get_indicators(
     }
     _mark_intraday_volume(result, payload["_meta"])
     return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+
+
+def _market_cap_eok(value) -> float | None:
+    """'1,543조 4,176억원' → 억 단위 숫자. 못 읽으면 None(0 아님).
+
+    네이버는 시가총액을 사람이 읽는 문자열로 준다. 정렬·비교에 쓰려면 숫자가
+    필요한데, 실패를 0으로 채우면 시총 최하위로 내려가 순서가 뒤집힌다.
+    """
+    if value is None:
+        return None
+    txt = str(value).replace(",", "").replace(" ", "")
+    if not txt:
+        return None
+    total = 0.0
+    m = re.search(r"(\d+(?:\.\d+)?)조", txt)
+    if m:
+        total += float(m.group(1)) * 10000
+    m2 = re.search(r"(\d+(?:\.\d+)?)억", txt)
+    if m2:
+        total += float(m2.group(1))
+    return total if total > 0 else None
 
 
 def _mark_intraday_volume(indicators: dict, meta: dict) -> None:
