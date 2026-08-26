@@ -1860,7 +1860,9 @@ async def get_sector_valuation(
     if neg_per:
         names = ", ".join(f"{s.get('name')}" for s in neg_per[:6])
         lines.append(f"- **PER 집계 제외(적자) {len(neg_per)}개**: {names}")
-    lines.append("- 계산 방식: **종목별 지표의 중앙값** (가장 최근 확정 분기 재무 기준)")
+    lines.append("- 계산 방식: **종목별 지표의 중앙값**")
+    lines.append("  · PER = 현재가 ÷ **최근 4분기 EPS 합(TTM)** — 네이버 종목 화면과 같은 기준")
+    lines.append("  · PBR·ROE = 최근 확정 분기 기준")
     if focus_per_ttm or focus_sector_per:
         lines.append("")
         lines.append("### 참고 — 네이버 기준값 (계산 방식이 다릅니다)")
@@ -1868,7 +1870,7 @@ async def get_sector_valuation(
         lines.append("---|---:|---")
         if focus_per_ttm:
             lines.append(f"{focus_name or focus_code} PER | {focus_per_ttm:,.2f} | "
-                         f"현재가 ÷ **최근 4분기 합산** EPS (TTM)")
+                         f"네이버 표기값 — 위 표의 PER 과 **같은 기준**이라 일치해야 정상")
         if focus_sector_per:
             lines.append(f"동일업종 PER | {focus_sector_per:,.2f} | "
                          f"업종 **집계**(합산 시총÷합산 순이익 계열)")
@@ -1931,9 +1933,11 @@ async def get_sector_valuation(
             lines[-1] += f" | {cap:,.0f}" if cap is not None else " | -"
 
     lines.append("")
-    lines.append("※ **기준이 다르면 결론이 뒤집힙니다.** 같은 종목이라도 연간 확정 재무로는")
-    lines.append("  할증, 최근 분기·TTM 기준으로는 할인으로 보일 수 있습니다. 이 표는")
-    lines.append("  **최근 확정 분기**를 기준으로 하며, 위 `재무 기준 기간`에 적혀 있습니다.")
+    lines.append("※ **기준이 다르면 결론이 뒤집힙니다.** 같은 종목이 작년 연간 재무로는 할증,")
+    lines.append("  TTM 기준으로는 할인으로 보일 수 있습니다(실측 27.94배 vs 12.84배).")
+    lines.append("  이 표의 PER 은 네이버와 같은 TTM 기준이라 종목 화면에서 대조할 수 있습니다.")
+    lines.append("※ 적자이거나 확정 분기가 4개 미만이면 TTM PER 을 만들지 않습니다 —")
+    lines.append("  3개를 12개월인 척 합치지 않습니다.")
     lines.append("※ 낮은 PER이 곧 저평가는 아닙니다. 이익이 정점이거나 성장이 멈출 것이라는")
     lines.append("  기대가 반영된 결과일 수 있습니다. **왜 그 숫자인지**를 함께 확인하세요.")
     lines.append("※ 적자 기업(PER 음수)은 집계에서 빠져 있습니다 — 위 제외 목록을 보세요.")

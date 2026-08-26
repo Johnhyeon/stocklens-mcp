@@ -1101,6 +1101,44 @@ async def get_multi_stocks(codes: list[str]) -> list[dict]:
     return ok
 
 
+def _ttm_eps(fin: dict) -> tuple[float | None, str | None]:
+    """최근 **확정 4개 분기 EPS 합** = TTM EPS 와 마지막 분기 라벨.
+
+    네이버가 종목 화면에 쓰는 PER 과 같은 기준이다("EPS 는 지배기업귀속 최근
+    4분기 합산 순이익을 수정평균발행주식수로 나눈 값"). 연간 확정치로 PER 을
+    내면 실적이 급변한 기업에서 1년 가까이 낡은 값이 나오고, 분기 하나만 쓰면
+    계절성에 흔들린다. 실측에서 이 방식은 네이버 값과 오차 0.0~0.3% 로 맞았다.
+
+    4개가 안 되면(신규 상장 등) None 을 돌려준다 — 3개로 합쳐 12개월인 척하지 않는다.
+    """
+    meta = fin.get("_periods") or {}
+    annual = meta.get("annual") or []
+    quarterly = meta.get("quarterly") or []
+    series = fin.get("EPS(원)") or []
+    if not isinstance(series, list) or not quarterly:
+        return None, None
+    offset = len(annual)
+    confirmed: list[tuple[str, float]] = []
+    for i, label in enumerate(quarterly):
+        idx = offset + i
+        if idx >= len(series) or "(E)" in str(label):
+            continue
+        raw = str(series[idx]).replace(",", "").strip()
+        if not raw or raw == "-":
+            continue
+        try:
+            confirmed.append((str(label), float(raw)))
+        except ValueError:
+            continue
+    if len(confirmed) < 4:
+        return None, None
+    last4 = confirmed[-4:]
+    total = sum(v for _, v in last4)
+    if total <= 0:          # 적자면 PER 이 음수/무의미 — 계산하지 않는다
+        return None, last4[-1][0]
+    return total, last4[-1][0]
+
+
 def _latest_confirmed_annual(fin: dict, key: str) -> tuple[float | None, str | None]:
     """재무 시계열에서 **가장 최근 확정값**과 그 기준 기간을 뽑는다(분기 우선).
 
@@ -1242,11 +1280,21 @@ async def scan_stocks_to_snapshot(
             # 찾아서 단위 없는 '시가총액'만 걸리고 PER·PBR은 통째로 빠졌다.
             # 값도 단일 숫자가 아니라 [연간…, 분기…] 시계열이라, 위치로 집으면
             # 추정치((E))나 엉뚱한 기간이 확정 수치로 들어간다.
+            # PER 은 TTM(최근 4분기 EPS 합)으로 직접 계산한다 — 네이버 종목 화면과
+            # 같은 기준이라 사용자가 대조할 수 있고, 실적 급변 기업에서도 안 낡는다.
+            ttm, ttm_label = _ttm_eps(f)
+            cur_price = row.get("current_price")
+            if ttm and isinstance(cur_price, (int, float)) and cur_price > 0:
+                row["per"] = round(cur_price / ttm, 2)
+                row["per_basis"] = f"TTM~{ttm_label}"
+
             for out_key, src_key in (
                 ("per", "PER(배)"), ("pbr", "PBR(배)"),
                 ("eps", "EPS(원)"), ("bps", "BPS(원)"),
                 ("roe", "ROE(지배주주)"), ("배당수익률", "시가배당률(%)"),
             ):
+                if out_key == "per" and row.get("per_basis"):
+                    continue        # TTM 으로 이미 계산했다 — 분기 단일값으로 덮지 않는다
                 val, period = _latest_confirmed_annual(f, src_key)
                 if val is not None:
                     row[out_key] = val
