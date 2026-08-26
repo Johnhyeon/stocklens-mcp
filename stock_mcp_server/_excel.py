@@ -261,7 +261,7 @@ def add_detail_sheet(wb, sheet_title: str, summary: list[tuple], data: dict) -> 
     """
     from openpyxl.chart import BarChart, LineChart, Reference
     from openpyxl.formatting.rule import DataBarRule
-    from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+    from openpyxl.styles import Alignment, Border, Font, PatternFill, Side  # noqa: F401
 
     ws = wb.create_sheet(sheet_title[:31])
     ws.sheet_view.showGridLines = False
@@ -358,8 +358,31 @@ def add_detail_sheet(wb, sheet_title: str, summary: list[tuple], data: dict) -> 
 
     r = 6
     r = section(r, "가격 위치")
+    # 52주 구간에서 지금 어디쯤인지 — 고점·저점 숫자만 보면 감이 안 온다.
+    band = price.get("52주위치")
+    if isinstance(band, (int, float)):
+        kc = ws.cell(row=r, column=1, value="52주 구간 위치")
+        kc.font = Font(bold=True, size=10, color="333333")
+        kc.border = box
+        bc = ws.cell(row=r, column=2, value=round(band, 1))
+        bc.number_format = '0.0"%  (저점 0 ~ 고점 100)"'
+        bc.border = box
+        ws.merge_cells(start_row=r, start_column=2, end_row=r, end_column=4)
+        ws.conditional_formatting.add(
+            "B" + str(r) + ":B" + str(r),
+            DataBarRule(start_type="num", start_value=0,
+                        end_type="num", end_value=100, color="9BC2E6"))
+        r += 1
     r = line(r, [("저점 대비(%)", price.get("저점대비")), ("이평배열", price.get("이평배열"))])
     r = line(r, [("거래량 배수", price.get("거래량배수")), ("52주 저점", price.get("저점가"))])
+    rel = price.get("상대성과") or {}
+    if rel:
+        parts = []
+        for k in ("업종", "시장"):
+            if isinstance(rel.get(k), (int, float)):
+                parts.append(k + " 대비 " + format(rel[k], "+.2f") + "%p")
+        if parts:
+            r = wide(r, "오늘 상대성과", "  ·  ".join(parts))
     r += 1
 
     if val:

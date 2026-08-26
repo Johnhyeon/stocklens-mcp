@@ -2680,9 +2680,14 @@ async def save_analysis_to_excel(
             `{"042660": [{"title": "텔레그램 언급", "cols": ["시각","채널","내용"],
                           "rows": [["08-26 10:30","매경 자이앤트","원전 수주 기대"]]}]}`
             형식이며, 카드는 담은 순서대로 붙습니다.
-            넣을 만한 것 — TelegramLens `telegram_stock_buzz`(언급 원문),
-            `telegram_timeline`(확산 흐름) / DartLens `get_major_holders`(5%룰 변동),
-            `get_insider_trades`(임원 매매), `list_disclosures`(공시 유형별).
+            넣을 만한 것:
+              · TelegramLens — `telegram_stock_buzz`(언급 원문·telegram_link 를 url 로),
+                `telegram_timeline`(확산 흐름)
+              · DartLens — `get_major_holders`(5%룰: 연기금·행동주의 진입),
+                `get_insider_trades`(임원·주요주주 매매 = 안에서 먼저 움직인 흔적),
+                `list_disclosures`(정기·수시 공시), `get_order_backlog`(수주잔고 추이)
+              · StockLens — `get_us_short`(미국 공매도), `get_event_reactions`(공시 반응)
+            행은 `["값", ...]` 또는 `{"cells": [...], "url": "원문 링크"}` 로 넣습니다.
             ⚠️ 원문에 있는 내용만 옮기고, 없는 것을 지어내지 마세요.
         filename: 파일명 (비우면 제목으로 자동 생성)
     """
@@ -2759,6 +2764,7 @@ async def save_analysis_to_excel(
                     "이평배열": (ind.get("ma_phase") or {}).get("phase_label"),
                     "거래량배수": vol.get("ratio_vs_avg_20b"),
                     "저점가": pos.get("low_52w"),
+                    "고점가": pos.get("high_52w"),
                 }
             except Exception:
                 pass
@@ -2979,6 +2985,28 @@ async def save_analysis_to_excel(
                     out["extras"] = [x for x in ex if isinstance(x, dict)]
             return c, out
 
+        # 업종·시장 등락률은 종목마다 다시 부를 필요가 없다 — 한 번만 받아 나눠 쓴다.
+        sector_rate: dict = {}
+        market_rate = None
+        try:
+            for s_ in (await naver_list_sectors() or []):
+                nm = s_.get("name")
+                rate = s_.get("change_rate")
+                if nm is None or rate is None:
+                    continue
+                try:
+                    sector_rate[str(nm)] = float(str(rate).replace("%", "").replace("+", ""))
+                except ValueError:
+                    continue
+        except Exception:
+            pass
+        try:
+            for idx_ in (await get_market_index() or []):
+                if idx_.get("index") == "KOSPI" and idx_.get("change_rate") is not None:
+                    market_rate = float(idx_["change_rate"])
+        except Exception:
+            pass
+
         results = await asyncio.gather(*[one_detail(c) for c in picks])
         wb = load_workbook(saved)
         for c, payload in results:
@@ -2991,7 +3019,21 @@ async def save_analysis_to_excel(
                 if rc == c:
                     summary = list(row.items())
                     if payload.get("price") is not None:
-                        payload["price"]["등락률"] = row.get("등락률")
+                        chg_ = row.get("등락률")
+                        payload["price"]["등락률"] = chg_
+                        p_ = payload["price"]
+                        hi, lo, cur = p_.get("고점가"), p_.get("저점가"), p_.get("현재가")
+                        if all(isinstance(x, (int, float)) for x in (hi, lo, cur)) and hi > lo:
+                            payload["price"]["52주위치"] = (cur - lo) / (hi - lo) * 100
+                        sec_nm = (payload.get("valuation") or {}).get("_업종")
+                        rel = {}
+                        if isinstance(chg_, (int, float)):
+                            if sec_nm and sec_nm in sector_rate:
+                                rel["업종"] = chg_ - sector_rate[sec_nm]
+                            if market_rate is not None:
+                                rel["시장"] = chg_ - market_rate
+                        if rel:
+                            payload["price"]["상대성과"] = rel
                     break
             try:
                 add_detail_sheet(wb, f"{label}", summary, payload)
