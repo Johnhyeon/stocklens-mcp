@@ -82,6 +82,7 @@ from stock_mcp_server.licensing import is_licensed, locked_message
 from stock_mcp_server._update_check import get_update_notice
 import asyncio
 import json
+import datetime as _dt
 import sys
 import pandas as pd
 
@@ -3334,6 +3335,41 @@ async def get_consensus(code: str) -> str:
     tp = data.get("target_price")
     if tp:
         lines.append(f"**목표주가: {tp:,.0f}원**")
+
+    # 목표주가 추이 — 지금까지 수집만 하고 버렸던 값이다. 현재 목표가 하나로는
+    # "기대가 올라가는 중인지 내려가는 중인지"를 알 수 없는데, 방향과 속도가
+    # 수준보다 중요할 때가 많다. 전원 매수 의견인데 목표가만 내려가는 경우도 있다.
+    hist = data.get("target_price_history") or []
+    points = []
+    for h in hist:
+        y, d = h.get("price"), h.get("date")
+        if y is None or d is None:
+            continue
+        try:
+            label = _dt.datetime.fromtimestamp(float(d) / 1000, _dt.timezone.utc).strftime("%Y-%m")
+        except (ValueError, OSError, OverflowError):
+            continue
+        points.append((label, float(y)))
+    if len(points) >= 2:
+        first, last = points[0], points[-1]
+        chg = (last[1] - first[1]) / first[1] * 100 if first[1] else None
+        prev = points[-2][1]
+        recent = (last[1] - prev) / prev * 100 if prev else None
+        lines.append("")
+        lines.append("### 📈 목표주가 추이 (기대의 방향)")
+        lines.append("기준월 | 목표주가(원)")
+        lines.append("---|---:")
+        for label, y in points:
+            lines.append(f"{label} | {y:,.0f}")
+        if chg is not None:
+            arrow = "상향" if chg > 1 else ("하향" if chg < -1 else "보합")
+            lines.append("")
+            lines.append(f"- 전체 구간({first[0]}→{last[0]}): **{chg:+.1f}% {arrow}**")
+        if recent is not None:
+            arrow2 = "상향" if recent > 1 else ("하향" if recent < -1 else "보합")
+            lines.append(f"- 직전 대비: **{recent:+.1f}% {arrow2}**")
+        lines.append("- ※ 목표주가는 증권사 추정치이며, 이 표는 그 추정이 "
+                     "**어느 방향으로 바뀌어 왔는지**를 보여줍니다.")
 
     # 투자의견
     opinion = data.get("opinion", {})
