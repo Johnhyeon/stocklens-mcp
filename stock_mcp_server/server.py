@@ -773,6 +773,7 @@ def _kr_meta(
     coverage: dict | None = None,
     bar_state: dict | None = None,
     price_adjustment: dict | None = None,
+    extra: dict | None = None,
     warnings: list[str] | None = None,
 ) -> dict:
     """KRX 도구용 메타. 세션 상태에서 data_basis를 자동 판정한다.
@@ -837,6 +838,10 @@ def _kr_meta(
         meta["bar_state"] = bar_state
     if price_adjustment:
         meta["price_adjustment"] = price_adjustment
+    # 판정에 영향을 주지 않는 v3 부가 필드(period_coverage 등). 도구가 완전성을
+    # 직접 정한 뒤 사실만 실어 보낸다.
+    for key, value in (extra or {}).items():
+        meta[key] = value
     return meta
 
 
@@ -1607,6 +1612,9 @@ async def get_financial_batch(codes: list[str]) -> str:
     lines = [f"재무 비교 ({len(results)}종목)", "", header,
              "---|---|" + "|".join(["---:"] * len(_FIN_COMPARE_ROWS)) + "|---"]
     failed = 0
+    # 종목마다 기준 분기가 다르면 이 표는 비교표가 아니다. A는 2026.06 확정인데
+    # B는 아직 2026.03 이면 PER 을 나란히 놓는 순간 서로 다른 시점을 비교하게 된다.
+    period_by_code: dict[str, str] = {}
     for code, data in results:
         if not data or data.get("_error"):
             failed += 1
@@ -1622,6 +1630,8 @@ async def get_financial_batch(codes: list[str]) -> str:
                 basis = basis or p
             else:
                 cells.append(str(val) if val else "-")
+        if basis:
+            period_by_code[code] = basis
         star = "⭐ " if code in wl.codes() else ""
         lines.append(f"{code} | {star}{data.get('name', code)} | " + " | ".join(cells) + f" | {basis or '-'}")
 
@@ -1631,10 +1641,26 @@ async def get_financial_batch(codes: list[str]) -> str:
     if failed:
         lines.append(f"※ {failed}종목 조회 실패 — 상장폐지·거래정지 등일 수 있습니다.")
 
+    uniq = sorted(set(period_by_code.values()))
+    consistency = "unknown" if not uniq else ("uniform" if len(uniq) == 1 else "mixed")
+    if consistency == "mixed":
+        lines.append(
+            "※ 종목마다 기준 기간이 다릅니다(" + " / ".join(uniq) + "). "
+            "서로 다른 시점의 값이라 PER·ROE 를 그대로 나란히 놓고 비교하면 안 됩니다."
+        )
+    period_coverage = {
+        "consistency": consistency,
+        "periods": period_by_code,
+        "oldest": uniq[0] if uniq else None,
+        "newest": uniq[-1] if uniq else None,
+    }
+    incomplete = bool(failed) or consistency == "mixed"
+
     return _append_result_meta(
         "\n".join(lines),
         _kr_meta(kind="filing",
-                 data_completeness=rmeta.PARTIAL if failed else rmeta.COMPLETE),
+                 data_completeness=rmeta.PARTIAL if incomplete else rmeta.COMPLETE,
+                 extra={"period_coverage": period_coverage}),
     )
 
 
@@ -2348,6 +2374,9 @@ async def get_indicators(
         return f"차트 데이터를 가져올 수 없습니다: {code}"
 
     result = compute_indicators(ohlcv, include, params=params)
+    ind_cov = _indicator_coverage(
+        include=include, available_bars=len(ohlcv), params=params
+    )
     payload = {
         "code": code,
         "timeframe": timeframe,
@@ -2361,6 +2390,13 @@ async def get_indicators(
                 timeframe=timeframe, rows=ohlcv, market_calendar=krx_calendar()
             ),
             price_adjustment=price_adjustment_meta(),
+            data_completeness=rmeta.PARTIAL if ind_cov["insufficient"] else rmeta.COMPLETE,
+            warnings=([
+                "봉이 모자라 계산되지 않은 지표: " + ", ".join(ind_cov["insufficient"])
+                + f" (보유 {ind_cov['available_bars']}봉). 값이 빠진 것은 "
+                "'그런 신호가 없다'가 아니라 '아직 계산할 이력이 없다'는 뜻입니다."
+            ] if ind_cov["insufficient"] else None),
+            extra={"indicator_coverage": ind_cov},
         ),
     }
     _mark_intraday_volume(result, payload["_meta"])
@@ -2386,6 +2422,51 @@ def _market_cap_eok(value) -> float | None:
     if m2:
         total += float(m2.group(1))
     return total if total > 0 else None
+
+
+# 지표 하나를 계산하려면 최소 몇 봉이 있어야 하는가. 값은 _indicators.py 의
+# 가드(len(df) < N)와 같은 수여야 한다. 모자라면 그 지표는 조용히 사라지는데,
+# 사라진 자리를 읽는 쪽은 "이평선이 안 만들어졌다"가 아니라 "그런 신호가 없다"로
+# 읽는다. 주봉 104개로 ma120 을 부르면 정확히 그 일이 벌어진다.
+_INDICATOR_MIN_BARS = {
+    "ma": lambda o: {f"ma{n}": n for n in o.get("periods") or (5, 20, 60, 120, 240)},
+    "ma_phase": lambda o: {f"ma{n}": n for n in (5, 20, 60, 120)},
+    "ma_slope": lambda o: {"ma20_slope": 30, "ma60_slope": 80, "ma120_slope": 140},
+    "ma_cross": lambda o: {"ma20_60_cross": 90, "ma60_120_cross": 180},
+    "rsi": lambda o: {"rsi": int(o.get("period", 14)) + 1},
+    "macd": lambda o: {"macd": int(o.get("slow", 26)) + int(o.get("signal", 9))},
+    "bollinger": lambda o: {"bollinger": int(o.get("period", 20))},
+    "stochastic": lambda o: {"stochastic": int(o.get("k_period", 12))
+                             + int(o.get("slow_k_period", 5))
+                             + int(o.get("d_period", 3))},
+    "obv": lambda o: {"obv": int(o.get("window", 20)) + 1},
+    "volume": lambda o: {"volume_avg_20b": 20, "volume_rank_252b": 252},
+    "position": lambda o: {"position_52w": 252},
+    "candle": lambda o: {"candle": 2},
+    "support_resistance": lambda o: {"support_resistance": int(o.get("window", 10)) * 2 + 1},
+    "volume_profile": lambda o: {"volume_profile": 20},
+    "price_channel": lambda o: {"price_channel": int(o.get("period", 20))},
+}
+
+
+def _indicator_coverage(
+    *, include: list[str] | None, available_bars: int, params: dict | None = None
+) -> dict:
+    """요청한 지표가 이 봉 수로 실제 계산되는지. 부족 항목을 이름으로 돌려준다."""
+    required: dict[str, int] = {}
+    for key in include or []:
+        builder = _INDICATOR_MIN_BARS.get(key)
+        if builder is None:
+            continue
+        try:
+            required.update(builder((params or {}).get(key) or {}))
+        except Exception:
+            continue
+    return {
+        "available_bars": available_bars,
+        "required_bars": dict(sorted(required.items())),
+        "insufficient": sorted(k for k, n in required.items() if available_bars < n),
+    }
 
 
 def _now_kst():
@@ -2504,17 +2585,25 @@ async def get_indicators_bulk(
     codes = codes[:100]
     days = max(30, min(days, 500))
 
+    bars_seen: list[int] = []
+
     async def one(code: str) -> tuple[str, dict, str | None]:
         try:
             ohlcv = await get_ohlcv(code, timeframe=timeframe, count=days)
             if not ohlcv:
                 return code, {"error": "OHLCV 없음"}, None
+            bars_seen.append(len(ohlcv))
             return code, compute_indicators(ohlcv, include, params=params), ohlcv[-1].get("date")
         except Exception as e:
             return code, {"error": f"{type(e).__name__}: {e}"}, None
 
     results = await asyncio.gather(*[one(c) for c in codes])
     failed = sum(1 for _, data, _ in results if "error" in data)
+    # 종목마다 이력 길이가 다르다. 가장 짧은 종목을 기준으로 잡아야 "전 종목
+    # ma120 이 나왔다"는 과대 주장을 하지 않는다.
+    ind_cov = _indicator_coverage(
+        include=include, available_bars=min(bars_seen) if bars_seen else 0, params=params
+    )
     # 종목마다 마지막 봉이 다를 수 있다. 가장 최근 봉이 미완성이면 이 배치에는
     # 진행 중인 봉이 섞여 있다는 뜻이라, 그 기준으로 상태를 잡는다.
     last_dates = sorted(d for _, _, d in results if d)
@@ -2526,14 +2615,20 @@ async def get_indicators_bulk(
         "results": {code: data for code, data, _ in results},
         "_meta": _kr_meta(
             kind="bars",
-            data_completeness=rmeta.PARTIAL if failed else rmeta.COMPLETE,
-            warnings=[f"{failed}개 종목 조회 실패 — results의 error 필드 확인."] if failed else None,
+            data_completeness=(rmeta.PARTIAL
+                               if failed or ind_cov["insufficient"] else rmeta.COMPLETE),
+            warnings=([f"{failed}개 종목 조회 실패 — results의 error 필드 확인."] if failed else [])
+                     + ([
+                         "봉이 모자라 계산되지 않은 지표: " + ", ".join(ind_cov["insufficient"])
+                         + f" (가장 짧은 종목 {ind_cov['available_bars']}봉 기준)."
+                     ] if ind_cov["insufficient"] else []) or None,
             bar_state=_bar_state(
                 timeframe=timeframe,
                 rows=[{"date": d} for d in last_dates],
                 market_calendar=krx_calendar(),
             ),
             price_adjustment=price_adjustment_meta(),
+            extra={"indicator_coverage": ind_cov},
         ),
     }
     for _data in payload["results"].values():
@@ -4931,8 +5026,30 @@ async def get_disclosure(code: str) -> str:
 
     lines.append("")
     lines.append("※ 공시 본문은 DART(dart.fss.or.kr)에서 확인 가능합니다.")
+    # 네이버는 이 목록의 전체 건수를 알려주지 않는다. 20건이 왔다고 20건이 전부가
+    # 아니고, "최근 공시에 아무것도 없다"를 여기서 결론지을 수 없다.
+    lines.append(
+        "※ 위 목록은 네이버가 보여주는 **최근 표본**이며 전체 공시가 아니라 일부입니다. "
+        "기간·유형으로 빠짐없이 보려면 DartLens `list_disclosures` 를 쓰세요."
+    )
+    lines.append("※ 제목은 원문에서 잘려 있을 수 있습니다. 판단 전에 본문을 확인하세요.")
 
-    return _append_result_meta("\n".join(lines), _kr_meta(kind="filing", code=code))
+    return _append_result_meta(
+        "\n".join(lines),
+        _kr_meta(
+            kind="filing",
+            code=code,
+            data_completeness=rmeta.PARTIAL,
+            coverage={
+                "returned_count": len(items),
+                "total_count": None,      # 원천이 전체 건수를 주지 않는다
+                "truncated": None,        # 그래서 잘렸는지조차 확정할 수 없다
+                "coverage_complete": False,
+                "reason": "source_limit",
+            },
+            extra={"title_may_be_truncated": True},
+        ),
+    )
 
 
 # --- US Phase 3: 탐색/시장/재무제표/ETF/멀티 ---

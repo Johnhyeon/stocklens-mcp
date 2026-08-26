@@ -461,3 +461,157 @@ class PriceAdjustmentTests(unittest.IsolatedAsyncioTestCase):
 
         for bogus in (None, "", "adjusted", "수정주가", 3):
             self.assertEqual(price_adjustment_meta(bogus), _UNKNOWN_ADJ, bogus)
+
+
+# ---------------------------------------------------------------------------
+# SL-04/05/06. 재무 기간 혼재 · 공시 표본 · 지표 이력 부족
+# ---------------------------------------------------------------------------
+
+
+def _fin(name, periods_annual, periods_quarterly, per):
+    """get_financials 반환 흉내. 값 리스트는 라벨 수와 길이가 맞아야 한다."""
+    labels = list(periods_annual) + list(periods_quarterly)
+    return {
+        "name": name,
+        "_periods": {"annual": list(periods_annual), "quarterly": list(periods_quarterly)},
+        # 키는 _FIN_COMPARE_ROWS 의 첫 원소다(라벨이 아니라).
+        "PER(배)": [str(per)] * len(labels),
+        "PBR(배)": ["1.0"] * len(labels),
+        "ROE(지배주주)": ["10.0"] * len(labels),
+        "영업이익률": ["5.0"] * len(labels),
+        "부채비율": ["50.0"] * len(labels),
+        "시가배당률(%)": ["2.0"] * len(labels),
+    }
+
+
+class FinancialPeriodCoverageTests(unittest.IsolatedAsyncioTestCase):
+    """종목마다 기준 분기가 다르면 그 표는 비교표가 아니다.
+
+    A는 2026.06 확정, B는 아직 2026.03 이면 PER 을 나란히 놓는 순간 서로 다른
+    시점을 비교하게 된다. 표에는 '기준' 열이 있지만 열을 안 보면 그만이고,
+    메타에는 그 사실이 아예 없었다.
+    """
+
+    async def _run(self, mapping):
+        async def fake(code):
+            return mapping[code]
+
+        with patch.object(server, "get_financials", AsyncMock(side_effect=fake)), \
+             patch.object(server, "build_market_clock", return_value=_CLOSED):
+            return await server.get_financial_batch(list(mapping))
+
+    async def test_mixed_periods_are_partial(self):
+        text = await self._run({
+            "005930": _fin("삼성전자", ["2024.12", "2025.12"], ["2026.03", "2026.06"], 12),
+            "096770": _fin("SK이노베이션", ["2024.12", "2025.12"], ["2025.12", "2026.03"], 8),
+        })
+        meta = extract_meta(text)
+        pc = meta["period_coverage"]
+        self.assertEqual(pc["consistency"], "mixed")
+        self.assertEqual(pc["periods"], {"005930": "2026.06", "096770": "2026.03"})
+        self.assertEqual(pc["oldest"], "2026.03")
+        self.assertEqual(pc["newest"], "2026.06")
+        self.assertEqual(meta["data_completeness"], "partial")
+        self.assertIn("기준 기간", text)
+
+    async def test_uniform_periods_stay_complete(self):
+        text = await self._run({
+            "005930": _fin("삼성전자", ["2024.12", "2025.12"], ["2026.03", "2026.06"], 12),
+            "000660": _fin("SK하이닉스", ["2024.12", "2025.12"], ["2026.03", "2026.06"], 20),
+        })
+        meta = extract_meta(text)
+        self.assertEqual(meta["period_coverage"]["consistency"], "uniform")
+        self.assertEqual(meta["data_completeness"], "complete")
+
+    async def test_no_period_is_unknown_not_uniform(self):
+        """기준을 못 읽었으면 '전부 같다'가 아니라 '모른다'다."""
+        text = await self._run({"005930": {"name": "삼성전자", "_periods": {}}})
+        meta = extract_meta(text)
+        self.assertEqual(meta["period_coverage"]["consistency"], "unknown")
+
+
+class DisclosureSampleTests(unittest.IsolatedAsyncioTestCase):
+    """이 목록은 '최근 몇 건'이지 '전체'가 아니다."""
+
+    async def _run(self, items):
+        with patch.object(server, "naver_get_disclosure_list", AsyncMock(return_value=items)), \
+             patch.object(server, "build_market_clock", return_value=_CLOSED):
+            return await server.get_disclosure(code="005930")
+
+    async def test_disclosure_is_explicitly_a_recent_sample(self):
+        items = [{"date": f"2026.08.{d:02d}", "title": f"공시 {d}", "source": "코스콤"}
+                 for d in range(1, 21)]
+        text = await self._run(items)
+        meta = extract_meta(text)
+        self.assertFalse(meta["coverage"]["coverage_complete"])
+        self.assertIsNone(meta["coverage"]["total_count"])
+        self.assertEqual(meta["coverage"]["returned_count"], 20)
+        self.assertEqual(meta["coverage"]["reason"], "source_limit")
+        self.assertTrue(meta["title_may_be_truncated"])
+        self.assertEqual(meta["data_completeness"], "partial")
+        self.assertIn("전체 공시가 아니라", text)
+
+    async def test_single_item_is_still_a_sample(self):
+        """한 건만 왔다고 '이 종목 공시는 하나뿐'이 아니다."""
+        text = await self._run([{"date": "2026.08.26", "title": "단일판매", "source": "코스콤"}])
+        meta = extract_meta(text)
+        self.assertFalse(meta["coverage"]["coverage_complete"])
+        self.assertEqual(meta["data_completeness"], "partial")
+
+
+class IndicatorCoverageTests(unittest.IsolatedAsyncioTestCase):
+    """봉이 모자라면 지표는 조용히 없어진다. 없는 것과 안 나온 것은 다르다."""
+
+    def _rows(self, n):
+        return [_bar(f"2026{(i // 28) % 12 + 1:02d}{i % 28 + 1:02d}") for i in range(n)]
+
+    async def test_ma120_with_104_weekly_bars_exposes_shortfall(self):
+        with patch.object(server, "get_ohlcv", AsyncMock(return_value=self._rows(104))), \
+             patch.object(server, "build_market_clock", return_value=_CLOSED), \
+             patch.object(server, "_now_kst", return_value=_WED_EVENING):
+            payload = json.loads(await server.get_indicators(
+                code="005930", days=104, include=["ma"], timeframe="week"
+            ))
+        coverage = payload["_meta"]["indicator_coverage"]
+        self.assertEqual(coverage["available_bars"], 104)
+        self.assertEqual(coverage["required_bars"]["ma120"], 120)
+        self.assertIn("ma120", coverage["insufficient"])
+        self.assertNotIn("ma60", coverage["insufficient"])
+        self.assertEqual(payload["_meta"]["data_completeness"], "partial")
+
+    async def test_enough_bars_is_complete(self):
+        with patch.object(server, "get_ohlcv", AsyncMock(return_value=self._rows(300))), \
+             patch.object(server, "build_market_clock", return_value=_CLOSED), \
+             patch.object(server, "_now_kst", return_value=_WED_EVENING):
+            payload = json.loads(await server.get_indicators(
+                code="005930", days=300, include=["ma", "rsi"]
+            ))
+        coverage = payload["_meta"]["indicator_coverage"]
+        self.assertEqual(coverage["insufficient"], [])
+        self.assertEqual(coverage["required_bars"]["rsi"], 15)
+
+    async def test_params_override_changes_requirement(self):
+        with patch.object(server, "get_ohlcv", AsyncMock(return_value=self._rows(40))), \
+             patch.object(server, "build_market_clock", return_value=_CLOSED), \
+             patch.object(server, "_now_kst", return_value=_WED_EVENING):
+            payload = json.loads(await server.get_indicators(
+                code="005930", days=40, include=["rsi"], params={"rsi": {"period": 60}}
+            ))
+        coverage = payload["_meta"]["indicator_coverage"]
+        self.assertEqual(coverage["required_bars"]["rsi"], 61)
+        self.assertIn("rsi", coverage["insufficient"])
+
+    async def test_bulk_uses_worst_case_bars(self):
+        """배치에서는 가장 짧은 종목을 기준으로 잡는다. 과대 주장을 하지 않는다."""
+        async def uneven(code, timeframe="day", count=260):
+            return self._rows(300 if code == "005930" else 40)
+
+        with patch.object(server, "get_ohlcv", AsyncMock(side_effect=uneven)), \
+             patch.object(server, "build_market_clock", return_value=_CLOSED), \
+             patch.object(server, "_now_kst", return_value=_WED_EVENING):
+            payload = json.loads(await server.get_indicators_bulk(
+                codes=["005930", "000660"], days=300, include=["ma"]
+            ))
+        coverage = payload["_meta"]["indicator_coverage"]
+        self.assertEqual(coverage["available_bars"], 40)
+        self.assertIn("ma60", coverage["insufficient"])
