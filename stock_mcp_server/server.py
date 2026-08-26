@@ -1420,10 +1420,14 @@ async def get_index() -> str:
         value = item.get("value")
         # 못 읽은 지수를 '-'로만 두면 휴장인지 파싱 실패인지 구분이 안 된다.
         value_str = f"{value:,.2f}" if isinstance(value, float) else "데이터 없음"
-        change = item.get("change_raw") or ""
+        # change_raw(네이버 원문)를 그대로 쓰면 방향 라벨이 값과 어긋난다 —
+        # 하락한 날에도 원문 끝에 "상승"이 남아 있고, 퍼센트도 두 번 찍힌다.
+        # 부호를 이미 적용해 둔 change_value 를 쓴다.
         rate = item.get("change_rate")
         rate_str = f" ({rate:+.2f}%)" if rate is not None else ""
-        lines.append(f"  {item['index']}: {value_str}{rate_str} {change}".rstrip())
+        point = item.get("change_value")
+        point_str = f" {point:+,.2f}p" if isinstance(point, (int, float)) else ""
+        lines.append(f"  {item['index']}: {value_str}{rate_str}{point_str}".rstrip())
         if miss:
             warns.append(f"{item['index']} 읽지 못한 항목: {', '.join(miss)}")
 
@@ -1479,6 +1483,11 @@ async def get_theme_stocks(
     """테마종목 — 특정 테마에 속한 종목 리스트를 가져옵니다.
     "반도체 테마 종목", "2차전지 관련주", "AI 테마주" 같은 질문에 사용합니다.
     테마명 부분 매칭을 지원합니다.
+
+    ⚠️ **등락률 내림차순**으로 반환합니다. count로 자르면 그날 많이 오른 종목만 남고
+    **소외된(많이 내린) 종목은 목록에서 빠집니다.** 저평가·소외 종목을 찾는 용도라면
+    count를 테마 전체 종목 수 이상으로 주거나, 시가총액 기준
+    `get_market_cap_ranking`을 모집단으로 쓰세요.
 
     Args:
         theme_name: 테마명 (예: "2차전지", "AI", "반도체")
@@ -1551,6 +1560,10 @@ async def get_sector_stocks(sector_name: str, count: int = 30) -> str:
     """업종종목 — 특정 업종에 속한 종목 리스트를 가져옵니다.
     "통신장비 업종 종목", "반도체 업종", "제약 섹터 종목" 같은 질문에 사용합니다.
     업종명 부분 매칭을 지원합니다.
+
+    ⚠️ **등락률 내림차순**으로 반환합니다. count로 자르면 그날 많이 오른 종목만 남고
+    **소외된(많이 내린) 종목은 목록에서 빠집니다.** 업종 전체를 보려면 `list_sectors`로
+    그 업종의 종목 수를 먼저 확인하고 count를 그 이상으로 주세요.
 
     Args:
         sector_name: 업종명 (예: "통신장비", "반도체", "제약")
@@ -1842,7 +1855,29 @@ async def get_indicators(
         # in_progress_bar가 되어 "이 판정은 마감 때 뒤집힐 수 있다"가 명시된다.
         "_meta": _kr_meta(kind="bars", code=code, data_as_of=ohlcv[-1].get("date")),
     }
+    _mark_intraday_volume(result, payload["_meta"])
     return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+
+
+def _mark_intraday_volume(indicators: dict, meta: dict) -> None:
+    """장중이면 거래량 파생 필드에 '미완성' 표식을 단다.
+
+    장이 열려 있는 동안 마지막 봉의 거래량은 아직 쌓이는 중이라
+    ratio_vs_avg_20b·volume_rank_252b가 실제보다 훨씬 낮게 나온다
+    (오전 조회 시 대형주가 252봉 중 **252위**로 찍히는 식).
+    _meta의 data_basis만으로는 필드를 그대로 옮겨 적는 소비자가
+    "거래량이 바닥"이라는 틀린 사실을 읽게 된다 — 값 옆에 표식을 붙인다.
+    """
+    if not isinstance(meta, dict) or meta.get("data_basis") != rmeta.BASIS_IN_PROGRESS_BAR:
+        return
+    vol = indicators.get("volume") if isinstance(indicators, dict) else None
+    if isinstance(vol, dict) and vol.get("latest") is not None:
+        vol["intraday_incomplete"] = True
+        vol["intraday_note"] = (
+            "장중 미완성 봉 — 오늘 거래량이 아직 쌓이는 중이라 "
+            "ratio_vs_avg_20b·volume_rank_252b가 실제보다 낮게 나옵니다. "
+            "거래량 기준으로 판단하려면 장 마감 후 다시 조회하세요."
+        )
 
 
 @mcp.tool()
@@ -1902,6 +1937,8 @@ async def get_indicators_bulk(
             warnings=[f"{failed}개 종목 조회 실패 — results의 error 필드 확인."] if failed else None,
         ),
     }
+    for _data in payload["results"].values():
+        _mark_intraday_volume(_data, payload["_meta"])
     return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
 
 
@@ -2971,6 +3008,34 @@ async def get_us_insider(ticker: str) -> str:
             lines.append(f"- {label}: {sh_str}{tr_str}")
 
     tx = data.get("recent_transactions") or []
+
+    def _tx_action(row: dict) -> str:
+        a = (row.get("transaction") or "").strip()
+        if not a:
+            a = (row.get("text") or "").split(" at price")[0].strip() or "-"
+        return a
+
+    # 위 요약의 "Net Shares Purchased"에는 무상 부여(Stock Award/Grant)와 증여(Gift)가
+    # 섞여 있다. 그대로 읽으면 대금 $0짜리 부여를 매수로 세게 되고, 실제로는 임원이
+    # 팔고 있는 종목이 "내부자 대량 순매수"로 뒤집혀 보인다. 자기 돈으로 산 것만
+    # 따로 세어 준다.
+    if tx:
+        buys = [r for r in tx
+                if "purchase" in _tx_action(r).lower()
+                and isinstance(r.get("value"), (int, float)) and r["value"] > 0]
+        sells = [r for r in tx
+                 if "sale" in _tx_action(r).lower()
+                 and isinstance(r.get("value"), (int, float)) and r["value"] > 0]
+        buy_val = sum(r["value"] for r in buys)
+        sell_val = sum(r["value"] for r in sells)
+        lines.append("")
+        lines.append("## 💵 실제 현금 거래만 (부여·증여 제외)")
+        lines.append(f"- 공개시장 매수(Purchase): {len(buys)}건, ${buy_val:,.0f}")
+        lines.append(f"- 매도(Sale): {len(sells)}건, ${sell_val:,.0f}")
+        if not buys:
+            lines.append("- ⚠️ 대금이 실제로 지급된 **매수는 없습니다** — 위 요약의 순매수는 부여·증여입니다.")
+        lines.append("- ※ 위 '최근 6개월 요약'은 무상 부여(Grant)·증여(Gift)를 포함한 수치입니다.")
+
     if tx:
         lines.append("")
         lines.append(f"## 🗓️ 최근 거래 ({len(tx)}건)")
@@ -2983,9 +3048,7 @@ async def get_us_insider(ticker: str) -> str:
             # transaction이 빈 문자열인 경우가 많은데, text에 "Stock Gift at price
             # 0.00 per share" 같은 진짜 유형이 들어 있다. 이걸 버리면 대금이 $0인
             # 이유(증여·무상지급)를 알 수 없어 "왜 0원이지?"가 된다.
-            action = (t.get("transaction") or "").strip()
-            if not action:
-                action = (t.get("text") or "").split(" at price")[0].strip() or "-"
+            action = _tx_action(t)
             shares = t.get("shares") or 0
             value = t.get("value")
             val_s = f"${value:,.0f}" if isinstance(value, (int, float)) else "-"
@@ -3611,8 +3674,14 @@ async def get_us_search(query: str) -> str:
 @safe_us_tool
 @track_metrics("get_us_market")
 async def get_us_market() -> str:
-    """US market indices — 미국 주요 지수 스냅샷 (S&P 500, Dow, Nasdaq, VIX).
-    "시장 지수", "S&P 지금", "Nasdaq 얼마", "VIX" 같은 질문에 사용합니다.
+    """US market indices — 미국 시장 스냅샷 (Dow·Russell 2000 선물, VIX, Gold).
+
+    "미국 시장 어때", "VIX 얼마", "금값" 같은 질문에 사용합니다.
+
+    ⚠️ **S&P 500·Nasdaq 지수는 이 도구가 반환하지 않습니다.** 실제 항목은
+    소스가 주는 대로이며 보통 Dow Futures / Russell 2000 Futures / VIX / Gold 입니다.
+    반환된 표에 없는 지수를 답변에 쓰지 마세요. S&P·Nasdaq이 필요하면
+    `get_us_chart`로 SPY·QQQ 같은 ETF를 조회하세요.
     """
     data = await us.get_market_summary()
     indices = data.get("indices", [])

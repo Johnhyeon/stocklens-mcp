@@ -1518,7 +1518,15 @@ async def get_market_index() -> list[dict]:
             if point is None:
                 missing.append("change_value")
             else:
-                item["change_value"] = -abs(point) if "하락" in word else abs(point)
+                # 방향은 **퍼센트 부호**에서 가져온다. .blind(상승/하락) 텍스트는
+                # 값과 어긋난 채 내려오는 경우가 실제로 관찰됐다 — 코스닥이
+                # -0.41%인 날에도 blind 는 '상승'이었다. 퍼센트에는 네이버가
+                # 부호를 직접 붙여 주므로 그쪽이 더 믿을 만하다.
+                rate_signed = item.get("change_rate")
+                if rate_signed is not None:
+                    item["change_value"] = -abs(point) if rate_signed < 0 else abs(point)
+                else:
+                    item["change_value"] = -abs(point) if "하락" in word else abs(point)
 
         if missing:
             item[PARSE_MISS_KEY] = missing
