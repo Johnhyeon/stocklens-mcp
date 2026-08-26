@@ -2627,6 +2627,101 @@ async def scan_to_excel(
 
 @mcp.tool()
 @safe_tool
+@track_metrics("save_analysis_to_excel")
+async def save_analysis_to_excel(
+    title: str,
+    rows: list[dict],
+    notes: list[str] | None = None,
+    sources: list[str] | None = None,
+    filename: str = "",
+) -> str:
+    """분석결과저장 — **당신이 정리한 표**를 그대로 Excel로 저장합니다.
+
+    `scan_to_excel` 은 정해진 지표를 종목별로 담는 도구입니다. 이 도구는 그와 달리,
+    여러 도구를 돌려 **직접 판단하고 정리한 결과**(후보 목록, 단계 판정, 겹침 분석
+    같은 것)를 사용자가 파일로 가져갈 수 있게 만듭니다.
+
+    ## 반드시 지킬 것
+
+    1. **rows 의 숫자는 도구가 돌려준 값만 씁니다.** 기억이나 추정으로 채우지 마세요.
+       확인 못 한 칸은 `"-"` 또는 `"확인 안 됨"` 으로 두고, 0 으로 채우지 않습니다.
+    2. **`sources` 에 어떤 도구를 썼는지 적습니다.** 파일만 남았을 때 이 숫자가
+       어디서 왔는지 알 수 있어야 합니다. 예: `["screen_by_flow", "get_indicators_bulk"]`
+    3. **판단 근거와 한계를 `notes` 에 적습니다.** 무엇을 걸렀고 무엇을 못 봤는지,
+       장중 잠정치인지 같은 것. 표만 남으면 나중에 잘못 읽힙니다.
+    4. 매수·매도 권유, 목표가·손절가는 넣지 않습니다.
+
+    ## rows 구성 요령
+
+    - 각 dict 의 키가 곧 열 이름입니다. **한글로 쓰세요**(예: `"종목명"`, `"수급(2일)"`).
+    - 모든 행이 같은 키를 갖도록 맞춥니다. 빠진 키는 빈칸이 됩니다.
+    - 숫자는 숫자 그대로 넣으세요(문자열 `"12.5%"` 대신 `12.5`). 자릿점·색은 저장할 때
+      자동으로 붙습니다. 단위는 열 이름에 넣으세요(`"기간수익률(%)"`).
+    - 종목이 20개 이하면 비교 그래프가 자동으로 함께 저장됩니다.
+
+    Args:
+        title: 파일 제목. 첫 시트 이름과 요약에 쓰입니다. 예: "기대 부상후보 스캔"
+        rows: 표 데이터. `[{"종목명": "성광벤드", "기간수익률(%)": -8.9}, ...]`
+        notes: 판단 근거·제외 기준·한계. 한 줄에 하나씩.
+        sources: 근거가 된 도구 이름들.
+        filename: 파일명 (비우면 제목으로 자동 생성)
+    """
+    if not rows or not isinstance(rows, list):
+        return "rows 가 비어 있습니다. 표로 만들 행을 넘겨주세요."
+    clean = [r for r in rows if isinstance(r, dict) and r]
+    if not clean:
+        return "rows 에 사전(dict) 형태의 행이 없습니다."
+
+    df = pd.DataFrame(clean)
+    base = filename or generate_filename(re.sub(r"[^\w가-힣]+", "_", title)[:40] or "분석결과")
+    if not base.endswith(".xlsx"):
+        base += ".xlsx"
+    file_path = get_snapshot_dir() / base
+
+    meta = {"제목": title, "행 수": len(df)}
+    if sources:
+        meta["근거 도구"] = ", ".join(str(s) for s in sources)
+    meta["작성 주체"] = "AI가 도구 결과를 정리한 표 (원본 조회 결과 아님)"
+
+    sheet = (title[:28] or "분석").replace("/", "-").replace("\\", "-")
+    saved = save_dataframe_to_excel(df, file_path, sheet_name=sheet, metadata=meta)
+
+    # 근거·한계는 별도 시트에 남긴다 — 표만 떨어져 나가면 맥락이 사라진다.
+    if notes or sources:
+        from openpyxl import load_workbook
+        wb = load_workbook(saved)
+        ws = wb.create_sheet("근거와 한계")
+        ws.column_dimensions["A"].width = 110
+        r = 1
+        ws.cell(row=r, column=1, value=f"[{title}]"); r += 2
+        if sources:
+            ws.cell(row=r, column=1, value="■ 이 표를 만든 도구"); r += 1
+            for s in sources:
+                ws.cell(row=r, column=1, value=f"  · {s}"); r += 1
+            r += 1
+        if notes:
+            ws.cell(row=r, column=1, value="■ 판단 근거와 한계"); r += 1
+            for n in notes:
+                ws.cell(row=r, column=1, value=f"  · {n}"); r += 1
+        r += 1
+        ws.cell(row=r, column=1,
+                value="※ 이 표는 조회 결과를 정리한 것이며 매수·매도 권유가 아닙니다.")
+        wb.save(saved)
+
+    out = [f"✓ 저장 완료 — {title} ({len(df)}행)",
+           f"경로: {saved}",
+           f"열: {', '.join(str(c) for c in df.columns)}"]
+    if sources:
+        out.append(f"근거 도구: {', '.join(str(s) for s in sources)}")
+    if not notes:
+        out.append("⚠️ notes 가 비어 있습니다 — 무엇을 걸렀고 무엇을 못 봤는지 적어주세요. "
+                   "표만 남으면 나중에 잘못 읽힙니다.")
+    return "\n".join(out)
+
+
+
+@mcp.tool()
+@safe_tool
 @track_metrics("query_excel")
 async def query_excel(
     file_path: str,

@@ -70,6 +70,64 @@ for _k, _v in COLUMN_LABELS_KO.items():
     LABEL_TO_KEY.setdefault(_v, _k)
 
 
+# 열 이름을 미리 다 알 수 없다 — AI 가 정리한 표는 "등락률", "기관2일" 처럼
+# 그때그때 다른 이름을 쓴다. 고정 목록으로만 판정하면 서식이 통째로 빠지므로,
+# 이름의 힌트와 값의 성격을 함께 보고 정한다.
+_PCT_HINTS = ("%", "률", "낙폭", "수익", "등락", "증감", "비율", "rsi", "RSI")
+_MONEY_HINTS = ("가", "금액", "시총", "시가총액", "순매매", "거래량", "주식", "잔량", "봉")
+
+
+def _guess_number_format(col_name, values) -> str | None:
+    """열 하나에 맞는 숫자 서식. 판단이 안 서면 None(서식 없음)."""
+    name = str(col_name)
+    if name in _SIGNED_PCT:
+        return _SIGNED_FMT
+    if name in ("기관순매매", "외국인순매매"):
+        return _SIGNED_INT_FMT
+    if name in _INT_LIKE:
+        return "#,##0"
+    if name in _DEC_LIKE:
+        return "#,##0.00"
+
+    nums = [v for v in values
+            if isinstance(v, (int, float)) and not isinstance(v, bool)]
+    if not nums:
+        return None
+    has_neg = any(v < 0 for v in nums)
+    has_frac = any(float(v) != int(v) for v in nums)
+    low = name.lower()
+    pct_like = any(h.lower() in low for h in _PCT_HINTS)
+    money_like = any(h in name for h in _MONEY_HINTS)
+
+    if pct_like:
+        return _SIGNED_FMT if has_neg else "#,##0.00"
+    if has_neg and money_like:
+        return _SIGNED_INT_FMT
+    if has_frac:
+        return "#,##0.00"
+    if money_like or max(abs(v) for v in nums) >= 1000:
+        return "#,##0"
+    return None
+
+
+def _chartable_columns(df) -> list[str]:
+    """종목 간 비교가 되는 숫자 열. 가격·거래량처럼 자릿수가 제각각인 값은 뺀다."""
+    out = []
+    for c in df.columns:
+        name = str(c)
+        vals = [v for v in df[c]
+                if isinstance(v, (int, float)) and not isinstance(v, bool)]
+        if len(vals) < 2:
+            continue
+        low = name.lower()
+        if not any(h.lower() in low for h in _PCT_HINTS + ("per", "pbr", "roe", "배수")):
+            continue
+        if max(abs(v) for v in vals) > 100000:   # 금액 단위는 비교 차트에 안 맞는다
+            continue
+        out.append(name)
+    return out
+
+
 def _polish_sheet(ws, df) -> None:
     """열자마자 쓸 수 있는 상태로 만든다 — 필터·헤더고정·열너비·숫자서식.
 
@@ -102,15 +160,10 @@ def _polish_sheet(ws, df) -> None:
         width = min(max(len(str(col_name)) * 1.6, longest * 1.3, 8), 30)
         ws.column_dimensions[letter].width = width
 
-        fmt = None
-        if col_name in ("기관순매매", "외국인순매매"):
-            fmt = _SIGNED_INT_FMT
-        elif col_name in _SIGNED_PCT:
-            fmt = _SIGNED_FMT
-        elif col_name in _INT_LIKE:
-            fmt = "#,##0"
-        elif col_name in _DEC_LIKE:
-            fmt = "#,##0.00"
+        try:
+            fmt = _guess_number_format(col_name, list(df[col_name]))
+        except Exception:
+            fmt = None
         if fmt:
             for row in ws.iter_rows(min_row=2, min_col=idx, max_col=idx):
                 for cell in row:
@@ -165,6 +218,16 @@ def _add_charts(wb, ws_data, df, sheet_name: str) -> None:
             break
         if label in cols and not any(label in ttl for _, ttl in picked):
             picked.append(([cols.index(label) + 1], title))
+    # 고정 목록에 없는 이름(AI 가 정리한 표)도 비교 가능한 열이면 그린다.
+    if len(picked) < 2:
+        used = {c for cs, _ in picked for c in cs}
+        for name in _chartable_columns(df):
+            if len(picked) >= 2:
+                break
+            idx = cols.index(name) + 1
+            if idx in used:
+                continue
+            picked.append(([idx], f"{name} 비교"))
     if not picked:
         return
 
