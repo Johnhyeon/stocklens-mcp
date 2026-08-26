@@ -615,3 +615,149 @@ class IndicatorCoverageTests(unittest.IsolatedAsyncioTestCase):
         coverage = payload["_meta"]["indicator_coverage"]
         self.assertEqual(coverage["available_bars"], 40)
         self.assertIn("ma60", coverage["insufficient"])
+# ---------------------------------------------------------------------------
+# 회귀 - 리뷰에서 나온 허위 complete 5건
+# ---------------------------------------------------------------------------
+
+
+class BatchBarStateTests(unittest.IsolatedAsyncioTestCase):
+    """배치는 종목별로 봉 상태를 계산한 뒤 합쳐야 한다.
+
+    종목들의 "마지막 날짜"만 모아 하나의 시계열인 척 넘기면, 두 종목이 같은
+    미완성 봉을 가질 때 직전 원소가 자기 자신이 되어 확정 봉 날짜가 미완성 봉
+    날짜로 나온다.
+    """
+
+    WEEK_ROWS = [_bar("20260814"), _bar("20260821"), _bar("20260826")]
+
+    async def test_bulk_reports_the_real_previous_completed_bar(self):
+        with patch.object(server, "get_ohlcv", AsyncMock(return_value=self.WEEK_ROWS * 12)), \
+             patch.object(server, "build_market_clock", return_value=_CLOSED), \
+             patch.object(server, "_now_kst", return_value=_WED_EVENING):
+            payload = json.loads(await server.get_indicators_bulk(
+                codes=["005930", "000660"], days=60, timeframe="week"
+            ))
+        state = payload["_meta"]["bar_state"]
+        self.assertEqual(state["last_bar_date"], "2026-08-26")
+        self.assertFalse(state["last_bar_complete"])
+        self.assertEqual(state["last_completed_bar_date"], "2026-08-21")
+
+    async def test_bulk_takes_the_newest_entity_as_the_batch_state(self):
+        """한 종목만 최신 봉을 갖고 있어도 배치에는 미완성 봉이 섞인 것이다."""
+        async def uneven(code, timeframe="day", count=260):
+            if code == "005930":
+                return self.WEEK_ROWS * 12
+            return [_bar("20260814"), _bar("20260821")] * 18
+
+        with patch.object(server, "get_ohlcv", AsyncMock(side_effect=uneven)), \
+             patch.object(server, "build_market_clock", return_value=_CLOSED), \
+             patch.object(server, "_now_kst", return_value=_WED_EVENING):
+            payload = json.loads(await server.get_indicators_bulk(
+                codes=["005930", "000660"], days=60, timeframe="week"
+            ))
+        state = payload["_meta"]["bar_state"]
+        self.assertEqual(state["last_bar_date"], "2026-08-26")
+        self.assertFalse(state["last_bar_complete"])
+        self.assertEqual(state["last_completed_bar_date"], "2026-08-21")
+
+    async def test_multi_chart_stats_names_the_previous_trading_day(self):
+        stats = [{
+            "code": c, "bars_count": 260, "current_price": 70000,
+            "current_date": "20260826", "high": 90000, "high_date": "20260101",
+            "low": 60000, "low_date": "20260601", "drawdown_pct": -22.2,
+            "recovery_pct": 16.6, "period_return_pct": 5.0, "avg_volume": 100,
+        } for c in ("005930", "000660")]
+        with patch.object(server, "naver_get_multi_chart_stats", AsyncMock(return_value=stats)), \
+             patch.object(server, "build_market_clock", return_value=_CLOSED), \
+             patch.object(server, "_now_kst", return_value=_WED_SESSION):
+            text = await server.get_multi_chart_stats(codes=["005930", "000660"], days=260)
+        state = extract_meta(text)["bar_state"]
+        self.assertFalse(state["last_bar_complete"])
+        self.assertEqual(state["last_completed_bar_date"], "2026-08-25")
+
+    def test_repeated_dates_never_point_at_themselves(self):
+        """같은 날짜가 겹쳐 들어와도 확정 봉이 자기 자신이 되면 안 된다."""
+        from stock_mcp_server import market_clock as mc
+
+        state = server._bar_state(
+            timeframe="week",
+            rows=[_bar("20260826"), _bar("20260826")],
+            now=_kst(2026, 8, 26, 21),
+            market_calendar=mc.krx_calendar(),
+        )
+        self.assertFalse(state["last_bar_complete"])
+        self.assertIsNone(state["last_completed_bar_date"])
+
+
+class FalseCompleteRegressionTests(unittest.IsolatedAsyncioTestCase):
+    """모른다와 일부만 왔다를 complete 로 적던 자리들."""
+
+    async def test_short_rows_for_one_stock_make_the_batch_partial(self):
+        """20일을 요청해 3일만 온 종목이 섞였는데 전체가 complete 일 수 없다."""
+        async def uneven(code, days):
+            return _flow_rows(20 if code == "005930" else 3)
+
+        with patch.object(server, "get_investor_flow", AsyncMock(side_effect=uneven)), \
+             patch.object(server, "naver_get_multi_stocks", AsyncMock(return_value=[])), \
+             patch.object(server, "build_market_clock", return_value=_CLOSED):
+            text = await server.get_flow_batch(["005930", "000660"], days=20)
+        meta = extract_meta(text)
+        self.assertEqual(meta["coverage"]["per_entity_returned_count"],
+                         {"005930": 20, "000660": 3})
+        self.assertFalse(meta["coverage"]["coverage_complete"])
+        self.assertEqual(meta["coverage"]["reason"], "source_limit")
+        self.assertEqual(meta["data_completeness"], "partial")
+
+    async def test_full_rows_everywhere_stay_complete(self):
+        with patch.object(server, "get_investor_flow",
+                          AsyncMock(return_value=_flow_rows(20))), \
+             patch.object(server, "naver_get_multi_stocks", AsyncMock(return_value=[])), \
+             patch.object(server, "build_market_clock", return_value=_CLOSED):
+            text = await server.get_flow_batch(["005930", "000660"], days=20)
+        meta = extract_meta(text)
+        self.assertTrue(meta["coverage"]["coverage_complete"])
+        self.assertEqual(meta["data_completeness"], "complete")
+
+    async def test_unknown_bar_completion_is_partial(self):
+        """봉 마감 여부를 판별 못 했으면 확정치라고 말할 수 없다."""
+        with patch.object(server, "get_ohlcv",
+                          AsyncMock(return_value=[_bar("20260825"), _bar("20260826")])), \
+             patch.object(server, "build_market_clock", return_value=_CLOSED), \
+             patch.object(server, "krx_calendar", lambda: None), \
+             patch.object(server, "_now_kst", return_value=_WED_EVENING):
+            text = await server.get_chart(code="005930", timeframe="week", count=2)
+        meta = extract_meta(text)
+        self.assertIsNone(meta["bar_state"]["last_bar_complete"])
+        self.assertEqual(meta["data_completeness"], "partial")
+        self.assertFalse(meta["coverage"]["coverage_complete"])
+        self.assertEqual(meta["coverage"]["reason"], "unknown")
+
+    async def test_unknown_financial_period_is_partial(self):
+        """기준 기간을 하나도 못 읽었으면 전부 같다가 아니라 모른다다."""
+        async def fake(code):
+            return {"name": "삼성전자", "_periods": {}}
+
+        with patch.object(server, "get_financials", AsyncMock(side_effect=fake)), \
+             patch.object(server, "build_market_clock", return_value=_CLOSED):
+            text = await server.get_financial_batch(["005930"])
+        meta = extract_meta(text)
+        self.assertEqual(meta["period_coverage"]["consistency"], "unknown")
+        self.assertEqual(meta["data_completeness"], "partial")
+        self.assertFalse(meta["coverage"]["coverage_complete"])
+        self.assertEqual(meta["coverage"]["reason"], "unknown")
+
+    async def test_mixed_financial_period_reason_is_mixed_periods(self):
+        mapping = {
+            "005930": _fin("삼성전자", ["2024.12", "2025.12"], ["2026.03", "2026.06"], 12),
+            "096770": _fin("SK이노베이션", ["2024.12", "2025.12"], ["2025.12", "2026.03"], 8),
+        }
+
+        async def one(code):
+            return mapping[code]
+
+        with patch.object(server, "get_financials", AsyncMock(side_effect=one)), \
+             patch.object(server, "build_market_clock", return_value=_CLOSED):
+            text = await server.get_financial_batch(list(mapping))
+        meta = extract_meta(text)
+        self.assertEqual(meta["coverage"]["reason"], "mixed_periods")
+        self.assertEqual(meta["data_completeness"], "partial")

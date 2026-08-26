@@ -188,6 +188,25 @@ class MarketCalendar:
             cursor -= timedelta(days=1)
         return None
 
+    def previous_closed_period_end(
+        self, day: date, timeframe: str, now: datetime
+    ) -> date | None:
+        """`day` 가 속한 구간 **직전**의, 이미 마감된 구간의 마지막 거래일.
+
+        집계값만 오고 시계열이 없는 도구(get_multi_chart_stats)가 "확정된 마지막
+        봉이 언제냐"에 답하려면 이게 필요하다. 봉을 지어내는 게 아니라 거래소
+        달력에서 읽는 값이다.
+        """
+        start, _ = self.period_bounds(day, timeframe)
+        cursor = start - timedelta(days=1)
+        for _ in range(400):
+            last = self.period_last_trading_day(cursor, timeframe)
+            if last is not None and self.is_period_closed(cursor, timeframe, now):
+                return last
+            start, _ = self.period_bounds(cursor, timeframe)
+            cursor = start - timedelta(days=1)
+        return None
+
     def is_period_closed(self, day: date, timeframe: str, now: datetime) -> bool | None:
         """`day`가 속한 `timeframe` 구간이 `now` 시점에 마감됐는가. 모르면 None."""
         last = self.period_last_trading_day(day, timeframe)

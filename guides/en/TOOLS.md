@@ -303,8 +303,10 @@ rejected at validation time, so it cannot appear.
 **Example: `get_flow_batch(codes=[...], days=60)`**
 This tool caps at 20 days. Asking for 60 returns 20, says so in the first line of the
 body, and reports `requested=60 / effective=20 / partial`.
-`per_entity_returned_count` gives the real row count per stock, since recently listed
-or halted names are shorter even inside the cap.
+`per_entity_returned_count` gives the real row count per stock and `short_entities`
+lists the ones that came back shorter than the requested window. **If any stock is
+short the whole batch is `partial`** (`reason=source_limit`): 3 days out of a requested
+20 for one name is not "we got everything".
 
 **Example: `get_disclosure(code=...)`**
 Naver never reports a total, so this is always `coverage_complete=false`,
@@ -326,7 +328,8 @@ filings" from it. Use DartLens `list_disclosures` for exhaustive coverage.
 `data_basis=in_progress_bar` only appears **during** a session. On a Wednesday evening
 the market is closed but that week's bar still has two trading days to go, and any MA
 or RSI computed on it will change by Friday. When `last_bar_complete=false` you also
-get `coverage.reason=incomplete_tail` and `partial`. Exchange holidays are honoured, so
+get `coverage.reason=incomplete_tail` and `partial`. **A `null` (could not determine)
+is also `partial`** with `reason=unknown`: an unknown is never reported as settled. Exchange holidays are honoured, so
 a Chuseok week that closes on Wednesday ends its weekly bar there. If the exchange
 calendar cannot be resolved the value is `null` rather than a guess.
 
@@ -349,7 +352,9 @@ stitch periods across splits or rights issues. `status` is one of `raw`,
 ### `period_coverage` - are all stocks on the same reporting period?
 
 `get_financial_batch` only. When `consistency` is `mixed`, the stocks closed different
-quarters and their PER or ROE cannot be lined up directly (that response is `partial`).
+quarters and their PER or ROE cannot be lined up directly. **Both `mixed` and `unknown`
+(no basis could be read at all) return `partial`**, with `coverage.reason` set to
+`mixed_periods` or `unknown` respectively.
 
 ```json
 "period_coverage": {
@@ -375,6 +380,10 @@ history yet".
 ```
 
 Batch calls use the **shortest** stock as the baseline so nothing is over-claimed.
+
+`bar_state` is likewise computed **per stock and then merged.** If any single name still
+holds an unfinished bar, the batch calculation includes one, and
+`last_completed_bar_date` is the most recent settled bar the stocks actually have.
 
 ---
 

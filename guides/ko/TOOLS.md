@@ -354,8 +354,10 @@ ETF 전용 상세 (top holdings, 섹터 비중, 자산 배분, 보수율, YTD �
 **예: `get_flow_batch(codes=[...], days=60)`**
 이 도구의 상한은 20일입니다. 60일을 요청하면 20일치가 오고, 본문 첫 줄에 그 사실이
 적히며 메타는 위와 같이 `requested=60 / effective=20 / partial` 이 됩니다.
-`per_entity_returned_count` 로 종목별 실제 행 수도 함께 옵니다(상한 안이어도 신규
-상장·거래정지 종목은 짧습니다).
+`per_entity_returned_count` 로 종목별 실제 행 수가, `short_entities` 로 요청 기간보다
+짧게 온 종목 목록이 함께 옵니다. **한 종목이라도 짧으면 그 배치는 `partial`**
+(`reason=source_limit`)입니다 - 20일을 요청해 3일만 온 종목이 섞였는데 전체를
+"다 받았다"고 말할 수는 없습니다.
 
 **예: `get_disclosure(code=...)`**
 네이버는 전체 건수를 알려주지 않으므로 항상 `coverage_complete=false`,
@@ -377,7 +379,8 @@ ETF 전용 상세 (top holdings, 섹터 비중, 자산 배분, 보수율, YTD �
 `data_basis=in_progress_bar` 는 **장중일 때만** 붙습니다. 수요일 저녁이면 장은 닫혔지만
 그 주 주봉은 금요일까지 남아 있습니다. 그 주봉으로 계산한 이평·RSI 는 금요일에 값이
 바뀝니다. `last_bar_complete=false` 면 `coverage.reason=incomplete_tail` 과 `partial` 이
-함께 붙습니다. 휴장일을 반영하므로, 추석으로 목·금이 쉬는 주는 수요일 마감으로 그
+함께 붙습니다. **마감 여부를 판별하지 못했을 때(`null`)도 `partial`**
+(`reason=unknown`)입니다 - 모르는 것을 확정치로 내보내지 않습니다. 휴장일을 반영하므로, 추석으로 목·금이 쉬는 주는 수요일 마감으로 그
 주봉이 끝납니다. 거래소 달력을 확인하지 못하면 추측하지 않고 `null`(모름)입니다.
 
 대상: `get_chart` · `get_indicators` · `get_indicators_bulk` · `get_multi_chart_stats`
@@ -399,7 +402,9 @@ ETF 전용 상세 (top holdings, 섹터 비중, 자산 배분, 보수율, YTD �
 ### `period_coverage` - 종목마다 기준 기간이 같은가
 
 `get_financial_batch` 전용입니다. `consistency` 가 `mixed` 면 종목마다 확정 분기가
-달라 PER·ROE 를 그대로 나란히 놓을 수 없습니다(그때 `partial`).
+달라 PER·ROE 를 그대로 나란히 놓을 수 없습니다. **`mixed` 와 `unknown`(기준을 하나도
+못 읽음) 둘 다 `partial`** 이고, `coverage.reason` 은 각각 `mixed_periods` /
+`unknown` 입니다.
 
 ```json
 "period_coverage": {
@@ -424,6 +429,10 @@ ETF 전용 상세 (top holdings, 섹터 비중, 자산 배분, 보수율, YTD �
 ```
 
 배치에서는 **가장 짧은 종목**을 기준으로 잡습니다(과대 주장 방지).
+
+`bar_state` 도 마찬가지로 **종목별로 계산한 뒤 합칩니다.** 한 종목이라도 미완성 봉을
+물고 있으면 그 배치의 계산에는 미완성 봉이 섞인 것이고, `last_completed_bar_date` 는
+종목들이 실제로 가진 확정 봉 중 가장 최근 것입니다.
 
 ---
 

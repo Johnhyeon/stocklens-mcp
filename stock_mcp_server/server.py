@@ -853,6 +853,12 @@ def _kr_meta(
                 f"마지막 {tf_label}의 마감 여부를 확인하지 못했습니다. "
                 "이 봉이 확정치인지 진행 중인지 알 수 없습니다."
             )
+            # 모르는 것을 확정치로 내보내지 않는다. 판별 실패는 partial 이다.
+            data_completeness = rmeta.PARTIAL
+            coverage = dict(coverage or {})
+            coverage.setdefault("truncated", False)
+            coverage["coverage_complete"] = False
+            coverage["reason"] = coverage.get("reason") or "unknown"
 
     meta = rmeta.build_meta(
         lens="stocklens",
@@ -1339,6 +1345,12 @@ async def get_flow_batch(codes: list[str], days: int = 5) -> str:
         lines.append(f"  합계({len(data)}일)  {total_inst:+,}  {total_frgn:+,}")
         lines.append("")
 
+    # 20일을 요청해 3일만 온 종목이 섞였으면 그 배치는 요청 범위를 못 채운 것이다.
+    # 상한과 조회 실패만 보면 이 경우가 통째로 새어 나간다.
+    short_entities = sorted(
+        c for c, n in per_entity.items() if 0 < n < effective_days
+    )
+
     if matched_count == 0:
         msg = "조회 가능한 종목이 없습니다."
         if failed:
@@ -1347,9 +1359,15 @@ async def get_flow_batch(codes: list[str], days: int = 5) -> str:
 
     if failed:
         lines.append(f"※ 조회 실패: {', '.join(failed)}")
+    if short_entities:
+        lines.append(
+            f"※ 요청한 {effective_days}일보다 짧게 온 종목: "
+            + ", ".join(f"{c}({per_entity[c]}일)" for c in short_entities)
+            + ". 상장한 지 얼마 안 됐거나 거래정지 구간이 있을 수 있습니다."
+        )
 
     truncated = days_truncated or codes_truncated
-    has_gap = truncated or bool(failed)
+    has_gap = truncated or bool(failed) or bool(short_entities)
     coverage = {
         "requested": {"unit": "day", "value": requested_days},
         "effective": {"unit": "day", "value": effective_days},
@@ -1359,8 +1377,14 @@ async def get_flow_batch(codes: list[str], days: int = 5) -> str:
         "returned_count": sum(per_entity.values()),
         "total_count": None,
         "truncated": truncated,
+        "short_entities": short_entities,
         "coverage_complete": not has_gap,
-        "reason": "server_cap" if truncated else ("unknown" if failed else None),
+        "reason": (
+            "server_cap" if truncated
+            else "source_limit" if short_entities
+            else "unknown" if failed
+            else None
+        ),
     }
 
     return _append_result_meta(
@@ -1687,12 +1711,24 @@ async def get_financial_batch(codes: list[str]) -> str:
         "oldest": uniq[0] if uniq else None,
         "newest": uniq[-1] if uniq else None,
     }
-    incomplete = bool(failed) or consistency == "mixed"
+    # 기준을 하나도 못 읽었으면 "전부 같다"가 아니라 "모른다"다. 판별 실패는
+    # complete 가 될 수 없다(설계 5.2).
+    incomplete = bool(failed) or consistency in ("mixed", "unknown")
+    fin_coverage = None
+    if consistency in ("mixed", "unknown"):
+        fin_coverage = {
+            "returned_count": len(period_by_code),
+            "total_count": len(results),
+            "truncated": False,
+            "coverage_complete": False,
+            "reason": "mixed_periods" if consistency == "mixed" else "unknown",
+        }
 
     return _append_result_meta(
         "\n".join(lines),
         _kr_meta(kind="filing",
                  data_completeness=rmeta.PARTIAL if incomplete else rmeta.COMPLETE,
+                 coverage=fin_coverage,
                  extra={"period_coverage": period_coverage}),
     )
 
@@ -2300,6 +2336,7 @@ async def get_multi_chart_stats(codes: list[str], days: int = 260) -> str:
     stats = await naver_get_multi_chart_stats(codes, days=days)
     if not stats:
         return "차트 통계를 가져올 수 없습니다."
+    _cal_stats = krx_calendar()
 
     # 요청한 기간만큼 데이터가 실제로 있는지는 종목마다 다르다. 신규 상장·거래정지
     # 종목은 260일을 요청해도 몇 봉밖에 없는데, 헤더에 "최근 260일 집계"라고만 쓰면
@@ -2345,12 +2382,11 @@ async def get_multi_chart_stats(codes: list[str], days: int = 260) -> str:
         _kr_meta(kind="bars",
                  data_completeness=rmeta.PARTIAL if short else rmeta.COMPLETE,
                  warnings=warns,
-                 bar_state=_bar_state(
-                     timeframe="day",
-                     rows=[{"date": d} for d in
-                           sorted(s.get("current_date") for s in stats if s.get("current_date"))],
-                     market_calendar=krx_calendar(),
-                 ),
+                 bar_state=_merge_bar_states([
+                     _bar_state(timeframe="day", rows=[{"date": s.get("current_date")}],
+                                market_calendar=_cal_stats, calendar_fallback=True)
+                     for s in stats if s.get("current_date")
+                 ]),
                  price_adjustment=price_adjustment_meta()),
     )
 
@@ -2513,6 +2549,7 @@ def _bar_state(
     rows: list[dict] | None,
     now=None,
     market_calendar=None,
+    calendar_fallback: bool = False,
 ) -> dict | None:
     """마지막 봉이 끝났는지, 끝난 봉 중 가장 최근 것은 언제인지.
 
@@ -2558,9 +2595,61 @@ def _bar_state(
     state["calculation_includes_incomplete"] = not closed
     if closed:
         state["last_completed_bar_date"] = last
-    elif len(dates) > 1:
-        state["last_completed_bar_date"] = dates[-2]
+        return state
+
+    # 직전 원소를 그냥 집으면 안 된다. 같은 날짜가 겹쳐 들어오면(배치에서 종목별
+    # 마지막 날짜를 모아 넘기던 경우) 확정 봉이 자기 자신이 된다. 실제로 마감된
+    # 구간에 속한 가장 최근 봉을 찾는다.
+    for prior in reversed(dates[:-1]):
+        try:
+            if market_calendar.is_period_closed(
+                _dt.date.fromisoformat(prior), timeframe, moment
+            ):
+                state["last_completed_bar_date"] = prior
+                break
+        except Exception:
+            break
+
+    # 집계값만 오고 시계열이 없는 도구는 직전 봉을 행에서 찾을 수 없다. 그때만
+    # 거래소 달력에서 직전 마감 구간을 읽는다(봉을 지어내는 게 아니다).
+    if state["last_completed_bar_date"] is None and calendar_fallback:
+        try:
+            prev = market_calendar.previous_closed_period_end(
+                _dt.date.fromisoformat(last), timeframe, moment
+            )
+            if prev is not None:
+                state["last_completed_bar_date"] = prev.isoformat()
+        except Exception:
+            pass
     return state
+
+
+def _merge_bar_states(states: list[dict | None]) -> dict | None:
+    """종목별 봉 상태를 배치 하나로 합친다.
+
+    기준은 가장 최근 봉을 가진 종목이다. 한 종목이라도 미완성 봉을 물고 있으면
+    이 배치의 계산에는 미완성 봉이 섞인 것이다. 확정 봉 날짜는 종목들이 실제로
+    가진 확정 봉 중 가장 최근 것을 쓴다.
+    """
+    live = [s for s in states if s]
+    if not live:
+        return None
+    newest = max(live, key=lambda s: s.get("last_bar_date") or "")
+    done = [s.get("last_completed_bar_date") for s in live if s.get("last_completed_bar_date")]
+    completes = [s.get("last_bar_complete") for s in live]
+    if any(c is False for c in completes):
+        complete = False
+    elif any(c is None for c in completes):
+        complete = None
+    else:
+        complete = True
+    return {
+        "timeframe": newest.get("timeframe"),
+        "last_bar_date": newest.get("last_bar_date"),
+        "last_bar_complete": complete,
+        "last_completed_bar_date": max(done) if done else None,
+        "calculation_includes_incomplete": None if complete is None else not complete,
+    }
 
 
 def _mark_intraday_volume(indicators: dict, meta: dict) -> None:
@@ -2619,14 +2708,19 @@ async def get_indicators_bulk(
     days = max(30, min(days, 500))
 
     bars_seen: list[int] = []
+    cal = krx_calendar()
 
-    async def one(code: str) -> tuple[str, dict, str | None]:
+    async def one(code: str) -> tuple[str, dict, dict | None]:
         try:
             ohlcv = await get_ohlcv(code, timeframe=timeframe, count=days)
             if not ohlcv:
                 return code, {"error": "OHLCV 없음"}, None
             bars_seen.append(len(ohlcv))
-            return code, compute_indicators(ohlcv, include, params=params), ohlcv[-1].get("date")
+            # 봉 상태는 **그 종목의 시계열로** 계산해야 한다. 종목별 마지막
+            # 날짜만 모아 한 시계열인 척 넘기면, 두 종목이 같은 미완성 봉을
+            # 가질 때 확정 봉이 자기 자신으로 나온다.
+            state = _bar_state(timeframe=timeframe, rows=ohlcv, market_calendar=cal)
+            return code, compute_indicators(ohlcv, include, params=params), state
         except Exception as e:
             return code, {"error": f"{type(e).__name__}: {e}"}, None
 
@@ -2637,9 +2731,9 @@ async def get_indicators_bulk(
     ind_cov = _indicator_coverage(
         include=include, available_bars=min(bars_seen) if bars_seen else 0, params=params
     )
-    # 종목마다 마지막 봉이 다를 수 있다. 가장 최근 봉이 미완성이면 이 배치에는
-    # 진행 중인 봉이 섞여 있다는 뜻이라, 그 기준으로 상태를 잡는다.
-    last_dates = sorted(d for _, _, d in results if d)
+    # 봉 상태는 종목별로 계산한 뒤 합친다. 한 종목이라도 미완성 봉을 물고
+    # 있으면 이 배치의 계산에는 미완성 봉이 섞인 것이다.
+    batch_bar_state = _merge_bar_states([s for _, _, s in results])
     payload = {
         "timeframe": timeframe,
         "days": days,
@@ -2655,11 +2749,7 @@ async def get_indicators_bulk(
                          "봉이 모자라 계산되지 않은 지표: " + ", ".join(ind_cov["insufficient"])
                          + f" (가장 짧은 종목 {ind_cov['available_bars']}봉 기준)."
                      ] if ind_cov["insufficient"] else []) or None,
-            bar_state=_bar_state(
-                timeframe=timeframe,
-                rows=[{"date": d} for d in last_dates],
-                market_calendar=krx_calendar(),
-            ),
+            bar_state=batch_bar_state,
             price_adjustment=price_adjustment_meta(),
             extra={"indicator_coverage": ind_cov},
         ),
