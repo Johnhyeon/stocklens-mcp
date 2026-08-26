@@ -2633,6 +2633,8 @@ async def save_analysis_to_excel(
     rows: list[dict],
     notes: list[str] | None = None,
     sources: list[str] | None = None,
+    detail_codes: list[str] | None = None,
+    detail_days: int = 60,
     filename: str = "",
 ) -> str:
     """분석결과저장 — **당신이 정리한 표**를 그대로 Excel로 저장합니다.
@@ -2664,6 +2666,11 @@ async def save_analysis_to_excel(
         rows: 표 데이터. `[{"종목명": "성광벤드", "기간수익률(%)": -8.9}, ...]`
         notes: 판단 근거·제외 기준·한계. 한 줄에 하나씩.
         sources: 근거가 된 도구 이름들.
+        detail_codes: **종목별 흐름 시트**를 만들 6자리 코드들(최대 8개).
+            각 시트에 종가 추이·기관/외국인 순매매 그래프와 원자료가 들어갑니다.
+            목록만 있으면 "그래서 어떻게 움직이고 있나"를 다시 조회해야 하므로,
+            사용자가 더 볼지 정할 수 있게 **후보 상위 몇 개는 넣어 주세요**.
+        detail_days: 흐름 시트에 담을 거래일 수 (기본 60, 최대 120).
         filename: 파일명 (비우면 제목으로 자동 생성)
     """
     if not rows or not isinstance(rows, list):
@@ -2708,9 +2715,63 @@ async def save_analysis_to_excel(
                 value="※ 이 표는 조회 결과를 정리한 것이며 매수·매도 권유가 아닙니다.")
         wb.save(saved)
 
+    # 종목별 흐름 시트 — 목록만으로는 "그래서 어떻게 움직이나"를 못 본다.
+    made_detail: list[str] = []
+    if detail_codes:
+        from openpyxl import load_workbook
+        from stock_mcp_server._excel import add_detail_sheet
+        detail_days = max(20, min(int(detail_days), 120))
+        picks = [str(c).strip() for c in detail_codes if str(c).strip()][:8]
+        name_of = {}
+        for row in clean:
+            c = str(row.get("코드") or row.get("code") or "").strip()
+            if c:
+                name_of[c] = str(row.get("종목명") or row.get("name") or c)
+
+        async def one_detail(c: str):
+            try:
+                bars = await get_ohlcv(c, "day", detail_days)
+            except Exception:
+                return c, None, None
+            try:
+                flows = await get_investor_flow(c, min(detail_days, 60))
+            except Exception:
+                flows = []
+            return c, bars, flows
+
+        results = await asyncio.gather(*[one_detail(c) for c in picks])
+        wb = load_workbook(saved)
+        for c, bars, flows in results:
+            if not bars:
+                continue
+            label = name_of.get(c, c)
+            summary = []
+            for row in clean:
+                rc = str(row.get("코드") or row.get("code") or "").strip()
+                if rc == c:
+                    summary = [(k, v) for k, v in row.items()][:10]
+                    break
+            try:
+                add_detail_sheet(wb, f"{label}", summary, bars, flows or [])
+                made_detail.append(label)
+            except Exception:
+                continue
+        if made_detail:
+            # 탭을 넘기며 훑는 순서로 맞춘다 — 요약·차트 다음에 종목들,
+            # 관리용 시트(근거·메타)는 뒤로. 안 그러면 종목 시트가 맨 끝에 밀린다.
+            tail = [n for n in ("근거와 한계", "Metadata") if n in wb.sheetnames]
+            front = [n for n in wb.sheetnames if n not in tail and n not in made_detail]
+            try:
+                wb._sheets = [wb[n] for n in front + made_detail + tail]
+            except Exception:
+                pass
+            wb.save(saved)
+
     out = [f"✓ 저장 완료 — {title} ({len(df)}행)",
            f"경로: {saved}",
            f"열: {', '.join(str(c) for c in df.columns)}"]
+    if made_detail:
+        out.append(f"종목별 흐름 시트: {', '.join(made_detail)} (종가·수급 그래프 포함)")
     if sources:
         out.append(f"근거 도구: {', '.join(str(s) for s in sources)}")
     if not notes:

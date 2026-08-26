@@ -252,6 +252,92 @@ def _add_charts(wb, ws_data, df, sheet_name: str) -> None:
         anchor_row += 23
 
 
+def add_detail_sheet(wb, sheet_title: str, summary: list[tuple],
+                     bars: list[dict], flows: list[dict]) -> None:
+    """종목 한 개의 '흐름' 시트 — 요약 + 종가 추이 + 수급 추이 + 원자료.
+
+    목록만 있는 파일은 "누가 후보인가"까지만 답한다. 그 종목이 어떻게 움직여
+    왔는지, 누가 사고팔았는지를 같은 파일에서 보지 못하면 결국 다시 조회해야
+    한다. 탭만 넘기며 훑고 다음에 뭘 볼지 정할 수 있게 만든다.
+    """
+    from openpyxl.chart import BarChart, LineChart, Reference
+    from openpyxl.styles import Font
+    from openpyxl.utils import get_column_letter
+
+    ws = wb.create_sheet(sheet_title[:31])
+    ws["A1"] = sheet_title
+    ws["A1"].font = Font(bold=True, size=13)
+
+    r = 3
+    for label, value in summary:
+        ws.cell(row=r, column=1, value=str(label)).font = Font(bold=True)
+        ws.cell(row=r, column=2, value=value)
+        r += 1
+    ws.column_dimensions["A"].width = 18
+    ws.column_dimensions["B"].width = 22
+
+    # 원자료는 오른쪽에 둔다 — 차트가 왼쪽 위를 차지한다.
+    head_row = 3
+    cols = ["날짜", "종가", "거래량", "기관순매매", "외국인순매매"]
+    for i, c in enumerate(cols):
+        cell = ws.cell(row=head_row, column=5 + i, value=c)
+        cell.font = Font(bold=True)
+        ws.column_dimensions[get_column_letter(5 + i)].width = 14
+
+    flow_by_date = {str(f.get("date", "")).replace(".", "-"): f for f in (flows or [])}
+    n = 0
+    for b in bars or []:
+        day = str(b.get("date", ""))
+        if len(day) == 8 and day.isdigit():
+            day = f"{day[:4]}-{day[4:6]}-{day[6:]}"
+        fl = flow_by_date.get(day, {})
+        row = head_row + 1 + n
+        ws.cell(row=row, column=5, value=day)
+        ws.cell(row=row, column=6, value=b.get("close"))
+        ws.cell(row=row, column=7, value=b.get("volume"))
+        # 수급은 없는 날이 있다 — 0 으로 채우면 '순매매 0'과 구분되지 않는다.
+        inst, forg = fl.get("institutional"), fl.get("foreign")
+        if inst is not None:
+            ws.cell(row=row, column=8, value=inst)
+        if forg is not None:
+            ws.cell(row=row, column=9, value=forg)
+        n += 1
+    if n < 2:
+        return
+
+    last = head_row + n
+    for col, fmt in ((6, "#,##0"), (7, "#,##0"),
+                     (8, _SIGNED_INT_FMT), (9, _SIGNED_INT_FMT)):
+        for row in ws.iter_rows(min_row=head_row + 1, max_row=last,
+                                min_col=col, max_col=col):
+            for cell in row:
+                cell.number_format = fmt
+
+    cats = Reference(ws, min_col=5, min_row=head_row + 1, max_row=last)
+
+    price = LineChart()
+    price.title = "종가 추이"
+    price.height, price.width = 8, 20
+    price.add_data(Reference(ws, min_col=6, min_row=head_row, max_row=last),
+                   titles_from_data=True)
+    price.set_categories(cats)
+    price.y_axis.title = None
+    ws.add_chart(price, "A12")
+
+    if any(ws.cell(row=x, column=8).value is not None
+           for x in range(head_row + 1, last + 1)):
+        flow_chart = BarChart()
+        flow_chart.type = "col"
+        flow_chart.grouping = "clustered"
+        flow_chart.title = "기관·외국인 순매매 (주)"
+        flow_chart.height, flow_chart.width = 8, 20
+        flow_chart.add_data(Reference(ws, min_col=8, max_col=9,
+                                      min_row=head_row, max_row=last),
+                            titles_from_data=True)
+        flow_chart.set_categories(cats)
+        ws.add_chart(flow_chart, "A29")
+
+
 def save_dataframe_to_excel(
     df: pd.DataFrame,
     file_path: Path | str,
