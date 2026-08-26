@@ -1761,6 +1761,8 @@ async def get_sector_valuation(
     # 지금까지는 사용자가 업종 이름을 미리 알아야만 이 도구를 쓸 수 있었다.
     focus_code = (code or "").strip()
     focus_name = ""
+    focus_per_ttm = None
+    focus_sector_per = None
     if focus_code:
         sec = await naver_get_stock_sector(focus_code)
         if not sec.get("sector_name"):
@@ -1769,6 +1771,8 @@ async def get_sector_valuation(
                     f"업종명을 직접 넘기거나, ETF라면 get_etf_info 를 쓰세요.")
         sector_name = sec["sector_name"]
         kind = "sector"
+        focus_per_ttm = sec.get("per_ttm")
+        focus_sector_per = sec.get("sector_per_naver")
     if not sector_name:
         return "업종·테마 이름이나 종목코드(code) 중 하나는 필요합니다."
 
@@ -1815,7 +1819,11 @@ async def get_sector_valuation(
     pbr = series("pbr", positive_only=True)
     roe = series("roe")
     neg_per = [s for s in snap if isinstance(s.get("per"), (int, float)) and s["per"] <= 0]
-    periods = sorted({s.get("fin_period") for s in snap if s.get("fin_period")})
+    # 분기 기준을 쓰면 종목마다 최신 분기가 다를 수 있다(실적 발표 시점 차이).
+    # 서로 다른 시점의 PER 을 한 표에서 비교하게 되므로 분포를 그대로 보여준다.
+    from collections import Counter as _Counter
+    period_counts = _Counter(s.get("fin_period") for s in snap if s.get("fin_period"))
+    periods = [p for p, _ in sorted(period_counts.items(), reverse=True)]
 
     def stat_line(label, arr, unit=""):
         if not arr:
@@ -1840,10 +1848,35 @@ async def get_sector_valuation(
             f"전체를 보려면 top_n={min(universe, 80)} 로 다시 부르세요."
         )
     if periods:
-        lines.append(f"- 재무 기준 기간: {', '.join(periods)}")
+        parts = [f"{p}({period_counts[p]}개)" for p in periods]
+        lines.append(f"- 재무 기준 기간: {', '.join(parts)}")
+        if len(periods) > 1:
+            newest = periods[0]
+            share = period_counts[newest] / max(1, sum(period_counts.values())) * 100
+            lines.append(
+                f"  ⚠️ 기준 시점이 종목마다 다릅니다 — 최신 `{newest}` 기준이 {share:.0f}%. "
+                f"실적 발표가 늦은 종목은 오래된 분기로 계산돼 비교가 완전히 공정하지는 않습니다."
+            )
     if neg_per:
         names = ", ".join(f"{s.get('name')}" for s in neg_per[:6])
         lines.append(f"- **PER 집계 제외(적자) {len(neg_per)}개**: {names}")
+    lines.append("- 계산 방식: **종목별 지표의 중앙값** (가장 최근 확정 분기 재무 기준)")
+    if focus_per_ttm or focus_sector_per:
+        lines.append("")
+        lines.append("### 참고 — 네이버 기준값 (계산 방식이 다릅니다)")
+        lines.append("구분 | 값 | 방식")
+        lines.append("---|---:|---")
+        if focus_per_ttm:
+            lines.append(f"{focus_name or focus_code} PER | {focus_per_ttm:,.2f} | "
+                         f"현재가 ÷ **최근 4분기 합산** EPS (TTM)")
+        if focus_sector_per:
+            lines.append(f"동일업종 PER | {focus_sector_per:,.2f} | "
+                         f"업종 **집계**(합산 시총÷합산 순이익 계열)")
+        lines.append("")
+        lines.append("⚠️ 위 집계 PER 은 **적자 기업이 있으면 크게 부풀 수 있습니다**. "
+                     "분모(순이익 합계)가 깎이기 때문이며, 그러면 업종 내 대부분 종목이 "
+                     "'할인'으로 보입니다. 실측에서 기계 업종은 113.39배였습니다. "
+                     "아래 중앙값과 함께 보고, 두 값이 크게 다르면 그 이유부터 확인하세요.")
     lines.append("")
     lines.append("지표 | 중앙값 | 평균 | 최소~최대 | 표본")
     lines.append("---|---:|---:|---|---:")
@@ -1898,6 +1931,9 @@ async def get_sector_valuation(
             lines[-1] += f" | {cap:,.0f}" if cap is not None else " | -"
 
     lines.append("")
+    lines.append("※ **기준이 다르면 결론이 뒤집힙니다.** 같은 종목이라도 연간 확정 재무로는")
+    lines.append("  할증, 최근 분기·TTM 기준으로는 할인으로 보일 수 있습니다. 이 표는")
+    lines.append("  **최근 확정 분기**를 기준으로 하며, 위 `재무 기준 기간`에 적혀 있습니다.")
     lines.append("※ 낮은 PER이 곧 저평가는 아닙니다. 이익이 정점이거나 성장이 멈출 것이라는")
     lines.append("  기대가 반영된 결과일 수 있습니다. **왜 그 숫자인지**를 함께 확인하세요.")
     lines.append("※ 적자 기업(PER 음수)은 집계에서 빠져 있습니다 — 위 제외 목록을 보세요.")

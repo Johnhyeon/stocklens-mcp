@@ -911,7 +911,27 @@ async def get_stock_sector(code: str) -> dict:
     resp = await fetch(f"{BASE_URL}/item/main.naver", params={"code": code})
     soup = BeautifulSoup(resp.text, "lxml")
 
-    out: dict = {"code": code, "sector_name": None, "sector_id": None}
+    out: dict = {"code": code, "sector_name": None, "sector_id": None,
+                 "per_ttm": None, "sector_per_naver": None}
+
+    # 네이버가 이미 계산해 둔 두 값을 같은 페이지에서 함께 가져온다.
+    #  - #_per      : 현재가 ÷ 최근 4분기 합산 EPS (TTM). 시장이 보는 PER 이다.
+    #  - 동일업종 PER: 업종 집계 PER(Σ시총÷Σ순이익 계열). 우리가 내는 중앙값과
+    #                 방식이 달라 값이 크게 벌어질 수 있다.
+    # 연간 확정 재무로만 PER 을 계산하면 실적이 급변한 기업에서 1년 가까이 낡은
+    # 값이 나온다(한화오션: 연간 27.94 vs TTM 12.84 — 할증/할인이 뒤집힌다).
+    per_el = soup.select_one("#_per")
+    if per_el is not None:
+        out["per_ttm"] = _parse_float(per_el.get_text(strip=True), default=None)
+    for cell in soup.select("th, td"):
+        label = cell.get_text(" ", strip=True)
+        if label.startswith("동일업종 PER"):
+            # 라벨과 값이 같은 행(tr)의 다른 칸에 나뉘어 있다 — 행 전체에서 읽는다.
+            row_text = cell.parent.get_text(" ", strip=True) if cell.parent else label
+            m_per = re.search(r"동일업종\s*PER[^\d\-]*(-?[\d,]+\.?\d*)", row_text)
+            if m_per:
+                out["sector_per_naver"] = _parse_float(m_per.group(1), default=None)
+            break
     link = soup.select_one('a[href*="type=upjong"]')
     if link is not None:
         name = link.get_text(strip=True)
@@ -1082,7 +1102,12 @@ async def get_multi_stocks(codes: list[str]) -> list[dict]:
 
 
 def _latest_confirmed_annual(fin: dict, key: str) -> tuple[float | None, str | None]:
-    """재무 시계열에서 **가장 최근 확정 연간값**과 그 기준 기간을 뽑는다.
+    """재무 시계열에서 **가장 최근 확정값**과 그 기준 기간을 뽑는다(분기 우선).
+
+    ⚠️ 연간 확정치만 쓰면 실적이 급변한 기업에서 1년 가까이 낡은 값이 나온다.
+    한화오션은 2025.12 연간 PER 이 27.94 인데 2026.06 분기 기준은 14.82,
+    네이버가 쓰는 TTM 기준은 12.84 다 — 같은 종목이 '할증'과 '할인' 양쪽으로
+    읽힌다. 그래서 분기 구간에 확정치가 있으면 그쪽을 먼저 쓴다.
 
     네이버 재무 dict의 값은 [연간 n개 … 분기 m개] 로 이어 붙은 리스트이고,
     `_periods`가 그 구간 이름을 준다(annual/quarterly). 뒤에서부터 집으면
@@ -1090,22 +1115,36 @@ def _latest_confirmed_annual(fin: dict, key: str) -> tuple[float | None, str | N
     추정·결측을 건너뛰며 최신 확정치를 찾는다. 기준 기간을 함께 돌려주는 이유는
     숫자만 남으면 "언제 것인지" 모르는 값이 되기 때문이다.
     """
-    periods = (fin.get("_periods") or {}).get("annual") or []
+    meta = fin.get("_periods") or {}
+    annual = meta.get("annual") or []
+    quarterly = meta.get("quarterly") or []
     series = fin.get(key) or []
     if not isinstance(series, list):
         return None, None
-    for i in range(min(len(periods), len(series)) - 1, -1, -1):
-        label = str(periods[i])
-        if "(E)" in label:          # 추정치는 확정 수치로 쓰지 않는다
-            continue
-        raw = str(series[i]).replace(",", "").replace("%", "").strip()
-        if not raw or raw == "-":   # 결측은 0이 아니다
-            continue
-        try:
-            return float(raw), label
-        except ValueError:
-            continue
-    return None, None
+
+    def pick(labels, offset):
+        """labels 구간을 뒤에서부터 훑어 (E)·결측을 건너뛴 최신 확정치."""
+        for i in range(len(labels) - 1, -1, -1):
+            idx = offset + i
+            if idx >= len(series):
+                continue
+            label = str(labels[i])
+            if "(E)" in label:          # 추정치는 확정 수치로 쓰지 않는다
+                continue
+            raw = str(series[idx]).replace(",", "").replace("%", "").strip()
+            if not raw or raw == "-":   # 결측은 0이 아니다
+                continue
+            try:
+                return float(raw), label
+            except ValueError:
+                continue
+        return None, None
+
+    # 값 배열은 [연간 …, 분기 …] 순으로 이어 붙어 온다.
+    val, label = pick(quarterly, len(annual))
+    if val is not None:
+        return val, label
+    return pick(annual, 0)
 
 
 async def scan_stocks_to_snapshot(
