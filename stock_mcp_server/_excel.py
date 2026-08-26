@@ -96,6 +96,24 @@ def load_excel(file_path: Path | str, sheet_name: str | int = 0) -> pd.DataFrame
     return df
 
 
+def unknown_filter_columns(df: pd.DataFrame, filters: dict | None) -> list[str]:
+    """필터에 적혔지만 이 파일에 없는 컬럼 목록.
+
+    없는 컬럼은 조용히 무시되므로, 알려주지 않으면 "조건이 걸린 결과"로 읽힌다.
+    PER 컬럼이 없는 스냅샷에 per_max=10 을 걸면 전 종목이 그대로 나오는데,
+    사용자는 그게 저PER 목록인 줄 안다.
+    """
+    cols = set(df.columns)
+    unknown: list[str] = []
+    for key, cond in (filters or {}).items():
+        base = key
+        if not isinstance(cond, dict) and (key.endswith("_max") or key.endswith("_min")):
+            base = key[:-4]
+        if base not in cols:
+            unknown.append(key)
+    return unknown
+
+
 def apply_filters(df: pd.DataFrame, filters: dict) -> pd.DataFrame:
     """DataFrame에 필터 조건을 적용.
 

@@ -1040,6 +1040,33 @@ async def get_multi_stocks(codes: list[str]) -> list[dict]:
     return ok
 
 
+def _latest_confirmed_annual(fin: dict, key: str) -> tuple[float | None, str | None]:
+    """재무 시계열에서 **가장 최근 확정 연간값**과 그 기준 기간을 뽑는다.
+
+    네이버 재무 dict의 값은 [연간 n개 … 분기 m개] 로 이어 붙은 리스트이고,
+    `_periods`가 그 구간 이름을 준다(annual/quarterly). 뒤에서부터 집으면
+    분기값이나 '(E)' 추정치가 섞여 들어오므로, **annual 구간만** 보고
+    추정·결측을 건너뛰며 최신 확정치를 찾는다. 기준 기간을 함께 돌려주는 이유는
+    숫자만 남으면 "언제 것인지" 모르는 값이 되기 때문이다.
+    """
+    periods = (fin.get("_periods") or {}).get("annual") or []
+    series = fin.get(key) or []
+    if not isinstance(series, list):
+        return None, None
+    for i in range(min(len(periods), len(series)) - 1, -1, -1):
+        label = str(periods[i])
+        if "(E)" in label:          # 추정치는 확정 수치로 쓰지 않는다
+            continue
+        raw = str(series[i]).replace(",", "").replace("%", "").strip()
+        if not raw or raw == "-":   # 결측은 0이 아니다
+            continue
+        try:
+            return float(raw), label
+        except ValueError:
+            continue
+    return None, None
+
+
 async def scan_stocks_to_snapshot(
     codes: list[str],
     days: int = 260,
@@ -1131,19 +1158,22 @@ async def scan_stocks_to_snapshot(
 
         if code in financial_map:
             f = financial_map[code]
-            # 재무지표에서 숫자만 추출 (네이버는 문자열 반환하기도 함)
-            for key in ("PER", "PBR", "시가총액", "배당수익률", "EPS", "BPS"):
-                if key in f:
-                    val = f[key]
-                    if isinstance(val, str):
-                        # 콤마, %, 원 등 제거 후 숫자 파싱 시도
-                        cleaned = val.replace(",", "").replace("%", "").replace("원", "").strip()
-                        try:
-                            row[key.lower()] = float(cleaned)
-                        except ValueError:
-                            row[key.lower()] = val
-                    else:
-                        row[key.lower()] = val
+            # 실제 키에는 단위가 붙어 온다 — 'PER(배)', 'EPS(원)'. 예전에는 'PER'로
+            # 찾아서 단위 없는 '시가총액'만 걸리고 PER·PBR은 통째로 빠졌다.
+            # 값도 단일 숫자가 아니라 [연간…, 분기…] 시계열이라, 위치로 집으면
+            # 추정치((E))나 엉뚱한 기간이 확정 수치로 들어간다.
+            for out_key, src_key in (
+                ("per", "PER(배)"), ("pbr", "PBR(배)"),
+                ("eps", "EPS(원)"), ("bps", "BPS(원)"),
+                ("roe", "ROE(지배주주)"), ("배당수익률", "시가배당률(%)"),
+            ):
+                val, period = _latest_confirmed_annual(f, src_key)
+                if val is not None:
+                    row[out_key] = val
+                    row.setdefault("fin_period", period)
+            mc = f.get("시가총액")
+            if mc is not None:
+                row["시가총액"] = mc
 
         if row.get("name"):
             merged.append(row)

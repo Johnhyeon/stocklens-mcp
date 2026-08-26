@@ -54,6 +54,7 @@ from stock_mcp_server._excel import (
     save_dataframe_to_excel,
     load_excel,
     apply_filters,
+    unknown_filter_columns,
 )
 from stock_mcp_server._metrics import (
     track_metrics,
@@ -2100,6 +2101,8 @@ async def query_excel(
     except Exception as e:
         return f"파일 로드 실패: {type(e).__name__}: {e}"
 
+    unapplied = unknown_filter_columns(df, filters) if filters else []
+    available_cols = list(df.columns)
     if filters:
         df = apply_filters(df, filters)
 
@@ -2109,7 +2112,15 @@ async def query_excel(
     df = df.head(limit)
 
     if df.empty:
-        return f"조건에 맞는 종목이 없습니다. (원본: {file_path})"
+        msg = f"조건에 맞는 종목이 없습니다. (원본: {file_path})"
+        if unapplied:
+            msg += (
+                "\n\n⚠️ 이 파일에 없는 컬럼이라 **적용되지 않은 조건**: "
+                + ", ".join(unapplied)
+                + "\n사용 가능한 컬럼: "
+                + ", ".join(available_cols)
+            )
+        return msg
 
     # 주요 컬럼만 표시
     display_cols = [
@@ -2122,6 +2133,15 @@ async def query_excel(
         df_display = df
 
     lines = [f"쿼리 결과 ({len(df)}개 종목, 파일: {Path(file_path).name}):", ""]
+    if unapplied:
+        # 없는 컬럼 조건은 조용히 무시된다 — 알려주지 않으면 걸리지도 않은 조건을
+        # 걸린 것으로 읽는다(PER 없는 파일에 per_max=10 → 전 종목이 그대로 나옴).
+        lines.append(
+            f"⚠️ **적용되지 않은 조건**: {', '.join(unapplied)} — 이 파일에 없는 컬럼입니다. "
+            f"아래 결과는 이 조건이 **빠진 채** 걸러진 것입니다."
+        )
+        lines.append(f"사용 가능한 컬럼: {', '.join(available_cols)}")
+        lines.append("")
     lines.append("| " + " | ".join(df_display.columns) + " |")
     lines.append("|" + "|".join(["---"] * len(df_display.columns)) + "|")
     for _, row in df_display.iterrows():
