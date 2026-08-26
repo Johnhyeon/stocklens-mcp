@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import sys
 import unittest
+from datetime import datetime
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
@@ -131,3 +132,235 @@ class FlowBatchCoverageTests(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+# ---------------------------------------------------------------------------
+# SL-02. 마지막 봉이 아직 안 끝났다는 사실
+# ---------------------------------------------------------------------------
+
+
+def _bar(date: str) -> dict:
+    return {"date": date, "open": 100, "high": 101, "low": 99, "close": 100, "volume": 10}
+
+
+def _kst(y, m, d, hh, mm=0):
+    return datetime(y, m, d, hh, mm, tzinfo=rmeta.KST)
+
+
+class BarStateTests(unittest.TestCase):
+    """장이 닫혔다고 봉이 끝난 것은 아니다.
+
+    수요일 저녁이면 `data_basis`는 last_close 라서 "확정치"로 읽힌다. 그런데
+    그 시점의 **주봉**은 금요일까지 두 거래일이 더 남아 있어 아직 안 끝났다.
+    같은 주봉으로 계산한 이평·RSI는 금요일에 값이 바뀐다. 세션 상태만으로는
+    이 구분이 안 나와서, 봉 구간이 닫혔는지를 따로 계산해 싣는다.
+    """
+
+    def setUp(self):
+        from stock_mcp_server import market_clock as mc
+        self.cal = mc.krx_calendar()
+
+    def test_current_week_bar_is_incomplete_on_wednesday(self):
+        state = server._bar_state(
+            timeframe="week",
+            rows=[_bar("20260821"), _bar("20260826")],
+            now=_kst(2026, 8, 26, 21),
+            market_calendar=self.cal,
+        )
+        self.assertEqual(state, {
+            "timeframe": "week",
+            "last_bar_date": "2026-08-26",
+            "last_bar_complete": False,
+            "last_completed_bar_date": "2026-08-21",
+            "calculation_includes_incomplete": True,
+        })
+
+    def test_daily_bar_during_session_is_incomplete(self):
+        state = server._bar_state(
+            timeframe="day",
+            rows=[_bar("20260825"), _bar("20260826")],
+            now=_kst(2026, 8, 26, 11),
+            market_calendar=self.cal,
+        )
+        self.assertFalse(state["last_bar_complete"])
+        self.assertEqual(state["last_completed_bar_date"], "2026-08-25")
+        self.assertTrue(state["calculation_includes_incomplete"])
+
+    def test_daily_bar_after_close_is_complete(self):
+        state = server._bar_state(
+            timeframe="day",
+            rows=[_bar("20260825"), _bar("20260826")],
+            now=_kst(2026, 8, 26, 21),
+            market_calendar=self.cal,
+        )
+        self.assertTrue(state["last_bar_complete"])
+        self.assertEqual(state["last_completed_bar_date"], "2026-08-26")
+        self.assertFalse(state["calculation_includes_incomplete"])
+
+    def test_month_bar_in_progress(self):
+        state = server._bar_state(
+            timeframe="month",
+            rows=[_bar("20260731"), _bar("20260826")],
+            now=_kst(2026, 8, 26, 21),
+            market_calendar=self.cal,
+        )
+        self.assertFalse(state["last_bar_complete"])
+        self.assertEqual(state["last_completed_bar_date"], "2026-07-31")
+
+    def test_month_bar_on_last_trading_day_after_close(self):
+        state = server._bar_state(
+            timeframe="month",
+            rows=[_bar("20260731"), _bar("20260831")],
+            now=_kst(2026, 8, 31, 21),
+            market_calendar=self.cal,
+        )
+        self.assertTrue(state["last_bar_complete"])
+
+    def test_holiday_shortened_week_closes_early(self):
+        """추석으로 목·금이 쉬는 주. 수요일 마감이면 그 주봉은 끝난 것이다.
+
+        달력을 안 보고 '금요일이어야 끝'이라고 두면 여기서 틀린다.
+        """
+        state = server._bar_state(
+            timeframe="week",
+            rows=[_bar("20260918"), _bar("20260923")],
+            now=_kst(2026, 9, 23, 21),
+            market_calendar=self.cal,
+        )
+        self.assertTrue(state["last_bar_complete"], "2026-09-24/25는 추석 휴장")
+
+    def test_holiday_shortened_week_still_open_midsession(self):
+        state = server._bar_state(
+            timeframe="week",
+            rows=[_bar("20260918"), _bar("20260923")],
+            now=_kst(2026, 9, 23, 11),
+            market_calendar=self.cal,
+        )
+        self.assertFalse(state["last_bar_complete"])
+
+    def test_unknown_calendar_does_not_guess_completion(self):
+        """달력을 못 구했으면 모른다고 한다. 추측한 값이 확정치로 읽힌다."""
+        state = server._bar_state(
+            timeframe="week",
+            rows=[_bar("20260821"), _bar("20260826")],
+            now=_kst(2026, 8, 26, 21),
+            market_calendar=None,
+        )
+        self.assertIsNone(state["last_bar_complete"])
+        self.assertIsNone(state["calculation_includes_incomplete"])
+        self.assertEqual(state["last_bar_date"], "2026-08-26")
+
+    def test_broken_calendar_does_not_raise(self):
+        class Boom:
+            def is_period_closed(self, *a, **k):
+                raise RuntimeError("달력 조회 실패")
+
+        state = server._bar_state(
+            timeframe="day",
+            rows=[_bar("20260826")],
+            now=_kst(2026, 8, 26, 21),
+            market_calendar=Boom(),
+        )
+        self.assertIsNone(state["last_bar_complete"])
+
+    def test_no_rows_yields_no_state(self):
+        self.assertIsNone(
+            server._bar_state(timeframe="day", rows=[], market_calendar=self.cal)
+        )
+
+
+_WED_EVENING = _kst(2026, 8, 26, 21)      # 수요일 장 마감 후. 일봉은 끝났고 주봉은 남았다
+_WED_SESSION = _kst(2026, 8, 26, 11)      # 수요일 장중
+
+
+class BarStateInToolsTests(unittest.IsolatedAsyncioTestCase):
+    """봉 상태가 실제 도구 응답까지 실려 나가는가."""
+
+    def _patches(self, ohlcv, now):
+        return (
+            patch.object(server, "get_ohlcv", AsyncMock(return_value=ohlcv)),
+            patch.object(server, "build_market_clock", return_value=_CLOSED),
+            patch.object(server, "_now_kst", return_value=now),
+        )
+
+    async def _chart(self, timeframe, rows, now, count=None):
+        a, b, c = self._patches(rows, now)
+        with a, b, c:
+            return await server.get_chart(
+                code="005930", timeframe=timeframe, count=count or len(rows)
+            )
+
+    async def test_weekly_chart_after_close_still_flags_open_bar(self):
+        """장은 닫혔다. 그래도 이번 주 주봉은 금요일까지 안 끝났다."""
+        text = await self._chart("week", [_bar("20260821"), _bar("20260826")], _WED_EVENING)
+        meta = extract_meta(text)
+        self.assertEqual(meta["bar_state"]["timeframe"], "week")
+        self.assertFalse(meta["bar_state"]["last_bar_complete"])
+        self.assertEqual(meta["bar_state"]["last_completed_bar_date"], "2026-08-21")
+        self.assertEqual(meta["data_completeness"], "partial")
+        self.assertEqual(meta["coverage"]["reason"], "incomplete_tail")
+        self.assertFalse(meta["coverage"]["coverage_complete"])
+        self.assertIn("2026-08-21", text)
+
+    async def test_daily_chart_after_close_is_complete(self):
+        text = await self._chart("day", [_bar("20260825"), _bar("20260826")], _WED_EVENING)
+        meta = extract_meta(text)
+        self.assertTrue(meta["bar_state"]["last_bar_complete"])
+        self.assertEqual(meta["data_completeness"], "complete")
+        self.assertNotIn("coverage", meta)
+
+    async def test_daily_chart_during_session_is_partial(self):
+        text = await self._chart("day", [_bar("20260825"), _bar("20260826")], _WED_SESSION)
+        meta = extract_meta(text)
+        self.assertFalse(meta["bar_state"]["last_bar_complete"])
+        self.assertEqual(meta["coverage"]["reason"], "incomplete_tail")
+        self.assertEqual(meta["data_completeness"], "partial")
+
+    async def test_indicators_carry_bar_state(self):
+        rows = [_bar(f"2026{m:02d}{d:02d}") for m in (6, 7) for d in range(1, 29)]
+        rows.append(_bar("20260826"))
+        a, b, c = self._patches(rows, _WED_EVENING)
+        with a, b, c:
+            payload = json.loads(
+                await server.get_indicators(code="005930", days=60, timeframe="week")
+            )
+        state = payload["_meta"]["bar_state"]
+        self.assertEqual(state["timeframe"], "week")
+        self.assertTrue(state["calculation_includes_incomplete"])
+        self.assertEqual(payload["_meta"]["data_completeness"], "partial")
+
+    async def test_indicators_bulk_carries_bar_state(self):
+        rows = [_bar(f"202607{d:02d}") for d in range(1, 29)] + [_bar("20260826")]
+        a, b, c = self._patches(rows, _WED_EVENING)
+        with a, b, c:
+            payload = json.loads(
+                await server.get_indicators_bulk(
+                    codes=["005930", "000660"], days=60, timeframe="week"
+                )
+            )
+        state = payload["_meta"]["bar_state"]
+        self.assertEqual(state["last_bar_date"], "2026-08-26")
+        self.assertTrue(state["calculation_includes_incomplete"])
+        self.assertEqual(payload["_meta"]["data_completeness"], "partial")
+
+    async def test_multi_chart_stats_carries_bar_state(self):
+        stats = [{
+            "code": "005930", "bars_count": 260, "current_price": 70000,
+            "current_date": "20260826", "high": 90000, "high_date": "20260101",
+            "low": 60000, "low_date": "20260601", "drawdown_pct": -22.2,
+            "recovery_pct": 16.6, "period_return_pct": 5.0, "avg_volume": 100,
+        }]
+        with patch.object(server, "naver_get_multi_chart_stats", AsyncMock(return_value=stats)), \
+             patch.object(server, "build_market_clock", return_value=_CLOSED), \
+             patch.object(server, "_now_kst", return_value=_WED_SESSION):
+            text = await server.get_multi_chart_stats(codes=["005930"], days=260)
+        meta = extract_meta(text)
+        self.assertEqual(meta["bar_state"]["timeframe"], "day")
+        self.assertFalse(meta["bar_state"]["last_bar_complete"])
+        self.assertEqual(meta["data_completeness"], "partial")
+
+    async def test_bar_values_are_untouched(self):
+        """메타만 늘어난다. 봉 값과 본문 표는 그대로다."""
+        rows = [_bar("20260825"), _bar("20260826")]
+        text = await self._chart("week", rows, _WED_EVENING)
+        self.assertIn("종목 005930 주봉 OHLCV (2개 봉)", text)

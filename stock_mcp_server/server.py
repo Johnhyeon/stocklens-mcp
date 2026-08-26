@@ -71,7 +71,12 @@ from stock_mcp_server._indicators import (
     AVAILABLE_INDICATORS,
 )
 from stock_mcp_server._chart_html import render_chart_html, render_multi_chart_html
-from stock_mcp_server.market_clock import format_market_clock, get_market_clock as build_market_clock, KST
+from stock_mcp_server.market_clock import (  # noqa: E402
+    format_market_clock,
+    get_market_clock as build_market_clock,
+    krx_calendar,
+    KST,
+)
 from stock_mcp_server import _result_meta as rmeta
 from stock_mcp_server import _watchlist as wl
 from stock_mcp_server.event_reaction import (
@@ -641,6 +646,9 @@ async def get_chart(
     meta = _kr_meta(
         kind="bars", code=code, data_as_of=data[-1].get("date"),
         data_completeness=completeness, warnings=warnings,
+        bar_state=_bar_state(
+            timeframe=timeframe, rows=data, market_calendar=krx_calendar()
+        ),
     )
     return _append_result_meta("\n".join(lines), meta)
 
@@ -760,6 +768,7 @@ def _kr_meta(
     name: str | None = None,
     data_completeness: str = rmeta.COMPLETE,
     coverage: dict | None = None,
+    bar_state: dict | None = None,
     warnings: list[str] | None = None,
 ) -> dict:
     """KRX 도구용 메타. 세션 상태에서 data_basis를 자동 판정한다.
@@ -784,7 +793,31 @@ def _kr_meta(
     if kind != "filing":
         warns = _kr_market_note(krx) + warns
 
-    return rmeta.build_meta(
+    # 봉 구간이 안 끝났다는 사실은 세션 상태와 별개다. 수요일 저녁이면 장은
+    # 닫혔지만(basis=last_close) 그 주 주봉은 금요일까지 남아 있다.
+    if bar_state:
+        tf_label = {"day": "일봉", "week": "주봉", "month": "월봉"}.get(
+            bar_state.get("timeframe"), bar_state.get("timeframe") or "봉"
+        )
+        if bar_state.get("calculation_includes_incomplete") is True:
+            done = bar_state.get("last_completed_bar_date")
+            warns.append(
+                f"마지막 {tf_label}({bar_state.get('last_bar_date')})이 아직 진행 중입니다"
+                + (f". 확정된 마지막 {tf_label}은 {done}입니다." if done else ".")
+                + " 이 봉이 포함된 지표·낙폭·신고가 판정은 구간이 끝나면 달라질 수 있습니다."
+            )
+            data_completeness = rmeta.PARTIAL
+            coverage = dict(coverage or {})
+            coverage.setdefault("truncated", False)
+            coverage["coverage_complete"] = False
+            coverage["reason"] = coverage.get("reason") or "incomplete_tail"
+        elif bar_state.get("last_bar_complete") is None:
+            warns.append(
+                f"마지막 {tf_label}의 마감 여부를 확인하지 못했습니다. "
+                "이 봉이 확정치인지 진행 중인지 알 수 없습니다."
+            )
+
+    meta = rmeta.build_meta(
         lens="stocklens",
         data_basis=basis,
         data_as_of=data_as_of or (None if kind == "filing" else krx.get("last_trading_day")),
@@ -796,6 +829,9 @@ def _kr_meta(
         entity_info=rmeta.entity(stock_code=code, name=name),
         warnings=warns,
     )
+    if bar_state:
+        meta["bar_state"] = bar_state
+    return meta
 
 
 @mcp.tool()
@@ -2241,7 +2277,13 @@ async def get_multi_chart_stats(codes: list[str], days: int = 260) -> str:
         "\n".join(lines),
         _kr_meta(kind="bars",
                  data_completeness=rmeta.PARTIAL if short else rmeta.COMPLETE,
-                 warnings=warns),
+                 warnings=warns,
+                 bar_state=_bar_state(
+                     timeframe="day",
+                     rows=[{"date": d} for d in
+                           sorted(s.get("current_date") for s in stats if s.get("current_date"))],
+                     market_calendar=krx_calendar(),
+                 )),
     )
 
 
@@ -2304,7 +2346,12 @@ async def get_indicators(
         "indicators": result,
         # JSON 도구라 텍스트 봉투 대신 payload 안에 넣는다. 장중이면 data_basis가
         # in_progress_bar가 되어 "이 판정은 마감 때 뒤집힐 수 있다"가 명시된다.
-        "_meta": _kr_meta(kind="bars", code=code, data_as_of=ohlcv[-1].get("date")),
+        "_meta": _kr_meta(
+            kind="bars", code=code, data_as_of=ohlcv[-1].get("date"),
+            bar_state=_bar_state(
+                timeframe=timeframe, rows=ohlcv, market_calendar=krx_calendar()
+            ),
+        ),
     }
     _mark_intraday_volume(result, payload["_meta"])
     return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
@@ -2329,6 +2376,67 @@ def _market_cap_eok(value) -> float | None:
     if m2:
         total += float(m2.group(1))
     return total if total > 0 else None
+
+
+def _now_kst():
+    """지금 시각(KST). 봉 마감 판정의 기준점이라 한 군데로 모아 둔다."""
+    return _dt.datetime.now(KST)
+
+
+def _bar_state(
+    *,
+    timeframe: str,
+    rows: list[dict] | None,
+    now=None,
+    market_calendar=None,
+) -> dict | None:
+    """마지막 봉이 끝났는지, 끝난 봉 중 가장 최근 것은 언제인지.
+
+    `data_basis=in_progress_bar`는 **장중일 때만** 붙는다. 그래서 수요일 저녁의
+    주봉처럼 "장은 닫혔는데 봉은 안 끝난" 경우를 못 잡는다. 그 주봉으로 계산한
+    이평·RSI는 금요일에 값이 바뀌는데 응답에는 확정치로 적혀 나간다.
+
+    값 자체는 건드리지 않는다. 상태만 계산해 돌려주고, 경고를 붙일지는 도구가
+    정한다. 달력을 못 구했거나 조회가 깨지면 예외를 올리지 않고 `None`으로
+    "모른다"고 적는다 - 추측한 값이 확정치로 읽히는 게 더 나쁘다.
+    """
+    dates = [
+        rmeta.normalize_day(r.get("date"))
+        for r in (rows or [])
+        if isinstance(r, dict)
+    ]
+    dates = [d for d in dates if d]
+    if not dates:
+        return None
+
+    last = dates[-1]
+    state = {
+        "timeframe": timeframe,
+        "last_bar_date": last,
+        "last_bar_complete": None,
+        "last_completed_bar_date": None,
+        "calculation_includes_incomplete": None,
+    }
+    if market_calendar is None:
+        return state
+
+    try:
+        moment = now or _now_kst()
+        closed = market_calendar.is_period_closed(
+            _dt.date.fromisoformat(last), timeframe, moment
+        )
+    except Exception:
+        return state
+    if closed is None:
+        return state
+
+    state["last_bar_complete"] = bool(closed)
+    state["calculation_includes_incomplete"] = not closed
+    if closed:
+        state["last_completed_bar_date"] = last
+    elif len(dates) > 1:
+        state["last_completed_bar_date"] = dates[-2]
+    return state
 
 
 def _mark_intraday_volume(indicators: dict, meta: dict) -> None:
@@ -2386,27 +2494,35 @@ async def get_indicators_bulk(
     codes = codes[:100]
     days = max(30, min(days, 500))
 
-    async def one(code: str) -> tuple[str, dict]:
+    async def one(code: str) -> tuple[str, dict, str | None]:
         try:
             ohlcv = await get_ohlcv(code, timeframe=timeframe, count=days)
             if not ohlcv:
-                return code, {"error": "OHLCV 없음"}
-            return code, compute_indicators(ohlcv, include, params=params)
+                return code, {"error": "OHLCV 없음"}, None
+            return code, compute_indicators(ohlcv, include, params=params), ohlcv[-1].get("date")
         except Exception as e:
-            return code, {"error": f"{type(e).__name__}: {e}"}
+            return code, {"error": f"{type(e).__name__}: {e}"}, None
 
     results = await asyncio.gather(*[one(c) for c in codes])
-    failed = sum(1 for _, data in results if "error" in data)
+    failed = sum(1 for _, data, _ in results if "error" in data)
+    # 종목마다 마지막 봉이 다를 수 있다. 가장 최근 봉이 미완성이면 이 배치에는
+    # 진행 중인 봉이 섞여 있다는 뜻이라, 그 기준으로 상태를 잡는다.
+    last_dates = sorted(d for _, _, d in results if d)
     payload = {
         "timeframe": timeframe,
         "days": days,
         "include": include,
         "count": len(results),
-        "results": {code: data for code, data in results},
+        "results": {code: data for code, data, _ in results},
         "_meta": _kr_meta(
             kind="bars",
             data_completeness=rmeta.PARTIAL if failed else rmeta.COMPLETE,
             warnings=[f"{failed}개 종목 조회 실패 — results의 error 필드 확인."] if failed else None,
+            bar_state=_bar_state(
+                timeframe=timeframe,
+                rows=[{"date": d} for d in last_dates],
+                market_calendar=krx_calendar(),
+            ),
         ),
     }
     for _data in payload["results"].values():

@@ -146,6 +146,61 @@ KRX_YEAR_SPECIFIC_HOLIDAYS = {
 }
 
 
+@dataclass(frozen=True)
+class MarketCalendar:
+    """거래일과 정규장 마감만 판정하는 최소 캘린더.
+
+    봉이 끝났는지는 "지금 장이 닫혀 있는가"로 정해지지 않는다. 수요일 저녁이면
+    장은 닫혀 있지만 그 주의 **주봉**은 금요일까지 두 거래일이 더 남아 아직
+    진행 중이다. 같은 주봉으로 계산한 이평·RSI는 금요일에 값이 바뀐다.
+    세션 상태(is_open)와 봉 구간 마감은 별개라서 따로 계산한다.
+
+    휴장일을 반영해야 맞는다. 추석으로 목·금이 쉬는 주는 수요일 마감으로 그
+    주봉이 끝난다. "금요일이어야 끝"이라고 두면 그런 주에서 틀린다.
+    """
+
+    tz: object
+    hours: SessionHours
+    holiday_name_func: object
+
+    def is_trading_day(self, day: date) -> bool:
+        return day.weekday() < 5 and self.holiday_name_func(day) is None
+
+    def close_datetime(self, day: date) -> datetime:
+        return datetime.combine(day, self.hours.regular_close, tzinfo=self.tz)
+
+    def period_bounds(self, day: date, timeframe: str) -> tuple[date, date]:
+        if timeframe == "week":
+            start = day - timedelta(days=day.weekday())
+            return start, start + timedelta(days=6)
+        if timeframe == "month":
+            last = calendar.monthrange(day.year, day.month)[1]
+            return day.replace(day=1), day.replace(day=last)
+        return day, day
+
+    def period_last_trading_day(self, day: date, timeframe: str) -> date | None:
+        """그 봉이 덮는 구간의 마지막 거래일. 구간이 통째로 휴장이면 None."""
+        start, end = self.period_bounds(day, timeframe)
+        cursor = end
+        while cursor >= start:
+            if self.is_trading_day(cursor):
+                return cursor
+            cursor -= timedelta(days=1)
+        return None
+
+    def is_period_closed(self, day: date, timeframe: str, now: datetime) -> bool | None:
+        """`day`가 속한 `timeframe` 구간이 `now` 시점에 마감됐는가. 모르면 None."""
+        last = self.period_last_trading_day(day, timeframe)
+        if last is None:
+            return None
+        return now.astimezone(self.tz) >= self.close_datetime(last)
+
+
+def krx_calendar() -> MarketCalendar:
+    """KRX 거래일 캘린더. 봉 마감 판정에 쓴다."""
+    return MarketCalendar(tz=KST, hours=KRX_HOURS, holiday_name_func=_krx_holiday_name)
+
+
 def get_market_clock(now: datetime | None = None) -> dict:
     """Return KRX and US equity market session state for a point in time."""
     base = _coerce_datetime(now)
