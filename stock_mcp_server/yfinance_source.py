@@ -12,7 +12,7 @@ from __future__ import annotations
 import asyncio
 import math
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 import pandas as pd
@@ -176,6 +176,16 @@ async def get_history(
     return await _in_thread(_sync)
 
 
+def _epoch_day(value) -> str | None:
+    """epoch 초 -> "YYYY-MM-DD". 못 읽으면 None(추측하지 않는다)."""
+    if not isinstance(value, (int, float)) or value <= 0:
+        return None
+    try:
+        return datetime.fromtimestamp(float(value), tz=timezone.utc).strftime("%Y-%m-%d")
+    except (OverflowError, OSError, ValueError):
+        return None
+
+
 async def get_financial_info(ticker: str) -> dict | None:
     info = await get_info_raw(ticker)
     if info is None:
@@ -188,6 +198,10 @@ async def get_financial_info(ticker: str) -> dict | None:
         # 통화를 반드시 표시해 혼합 여부를 읽는 쪽이 알 수 있게 한다.
         "currency": info.get("currency"),
         "financial_currency": info.get("financialCurrency"),
+        # 비율(ROE·마진·D/E 등)의 재무 항목이 어느 분기말 기준인지. yfinance 는
+        # epoch 초로 주는데, 이게 없으면 이 비율들이 언제 것인지 말할 수 없다.
+        "most_recent_quarter": _epoch_day(info.get("mostRecentQuarter")),
+        "last_fiscal_year_end": _epoch_day(info.get("lastFiscalYearEnd")),
         "trailing_pe": _clean(info.get("trailingPE")),
         "forward_pe": _clean(info.get("forwardPE")),
         "peg_ratio": _clean(info.get("trailingPegRatio")),

@@ -864,6 +864,23 @@ def _emit_coverage_counters(lens: str, meta: dict) -> None:
         pass
 
 
+def _period_coverage_of(periods_by_entity: dict[str, str]) -> dict:
+    """종목별 최신 기간에서 uniform/mixed/unknown 을 판정한다.
+
+    KR 재무 배치가 쓰는 판정이고, 미국 재무 배치가 생기면 같은 헬퍼를 쓴다
+    (SL-03). 서로 다른 분기의 값을 나란히 놓는 순간 비교가 아니게 되는 것은
+    시장이 어디든 같다.
+    """
+    clean = {k: v for k, v in (periods_by_entity or {}).items() if v}
+    uniq = sorted(set(clean.values()))
+    return {
+        "consistency": "unknown" if not uniq else ("uniform" if len(uniq) == 1 else "mixed"),
+        "periods": clean,
+        "oldest": uniq[0] if uniq else None,
+        "newest": uniq[-1] if uniq else None,
+    }
+
+
 def _bar_state_effects(
     bar_state: dict | None,
     data_completeness: str,
@@ -1837,19 +1854,14 @@ async def get_financial_batch(codes: list[str]) -> str:
     if failed:
         lines.append(f"※ {failed}종목 조회 실패 — 상장폐지·거래정지 등일 수 있습니다.")
 
-    uniq = sorted(set(period_by_code.values()))
-    consistency = "unknown" if not uniq else ("uniform" if len(uniq) == 1 else "mixed")
+    period_coverage = _period_coverage_of(period_by_code)
+    consistency = period_coverage["consistency"]
     if consistency == "mixed":
+        uniq = sorted(set(period_by_code.values()))
         lines.append(
             "※ 종목마다 기준 기간이 다릅니다(" + " / ".join(uniq) + "). "
             "서로 다른 시점의 값이라 PER·ROE 를 그대로 나란히 놓고 비교하면 안 됩니다."
         )
-    period_coverage = {
-        "consistency": consistency,
-        "periods": period_by_code,
-        "oldest": uniq[0] if uniq else None,
-        "newest": uniq[-1] if uniq else None,
-    }
     # 기준을 하나도 못 읽었으면 "전부 같다"가 아니라 "모른다"다. 판별 실패는
     # complete 가 될 수 없다(설계 5.2).
     incomplete = bool(failed) or consistency in ("mixed", "unknown")
@@ -4389,7 +4401,40 @@ async def get_us_financials(ticker: str) -> str:
     lines.append(f"- Dividend Yield: {_fmt_yield(data.get('dividend_yield'))}")
     lines.append(f"- Payout Ratio: {_fmt_ratio(data.get('payout_ratio'))}")
 
-    return _append_result_meta("\n".join(lines), _us_meta(kind="filing", ticker=ticker))
+    # 이 비율들의 재무 항목이 어느 분기말 기준인지(SL-03). 공급자가 기준일을
+    # 안 주면 "언제 것인지 모르는 숫자"이고, 그걸 조용히 complete 로 내보내지
+    # 않는다. P/E 등 가격 결합 비율의 가격 쪽은 현재가 기준이다.
+    basis_q = data.get("most_recent_quarter")
+    lines.append("")
+    if basis_q:
+        lines.append(f"※ 재무 항목 기준: 최근 분기말 {basis_q}"
+                     + (f" (회계연도말 {data.get('last_fiscal_year_end')})"
+                        if data.get("last_fiscal_year_end") else "")
+                     + ". 가격 결합 비율(P/E·P/B·P/S)의 가격 쪽은 현재가 기준입니다.")
+        completeness, coverage, warns = rmeta.COMPLETE, None, None
+    else:
+        lines.append("※ 공급자가 이 비율들의 기준일을 주지 않았습니다. 언제 것인지 확인되지 않은 값입니다.")
+        completeness = rmeta.PARTIAL
+        coverage = {"truncated": False, "coverage_complete": False, "reason": "unknown"}
+        warns = ["비율 데이터의 기준일이 확인되지 않습니다. 최신 실적 반영 여부를 알 수 없습니다."]
+    return _append_result_meta(
+        "\n".join(lines),
+        _us_meta(
+            kind="filing",
+            ticker=ticker,
+            data_as_of=basis_q,
+            data_completeness=completeness,
+            coverage=coverage,
+            extra=({"period_coverage": {
+                "cycle": "ttm_or_mrq",
+                "latest_period": basis_q,
+                "fiscal_year_end": data.get("last_fiscal_year_end"),
+                "currency": data.get("financial_currency") or data.get("currency"),
+                "basis": "period_end",
+            }} if basis_q else None),
+            warnings=warns,
+        ),
+    )
 
 
 @mcp.tool()
@@ -5606,7 +5651,35 @@ async def get_us_financial_statement(
                 vals.append(str(v))
         lines.append(f"{r['item']} | " + " | ".join(vals))
 
-    return _append_result_meta("\n".join(lines), _us_meta(kind="filing"))
+    # 최신 열이 언제 것인지가 메타에 있어야 한다(SL-03). 본문 표에는 기간이
+    # 있지만 그 줄을 안 읽으면 그만이고, 배치 비교의 mixed 판정도 이 값에서 나온다.
+    latest = max(periods) if periods else None
+    if latest:
+        completeness, coverage = rmeta.COMPLETE, None
+        warns = None
+    else:
+        completeness = rmeta.PARTIAL
+        coverage = {"truncated": False, "coverage_complete": False, "reason": "unknown"}
+        warns = ["재무제표의 기간 열을 읽지 못했습니다. 이 값들이 언제 것인지 알 수 없습니다."]
+    return _append_result_meta(
+        "\n".join(lines),
+        _us_meta(
+            kind="filing",
+            ticker=ticker,
+            data_as_of=latest,
+            data_completeness=completeness,
+            coverage=coverage,
+            extra={"period_coverage": {
+                "cycle": period,
+                "latest_period": latest,
+                "periods_returned": len(periods),
+                "currency": data.get("currency"),
+                # yfinance 는 접수일을 주지 않는다. 이 날짜는 기간말이다.
+                "basis": "period_end",
+            }},
+            warnings=warns,
+        ),
+    )
 
 
 @mcp.tool()
