@@ -2444,51 +2444,163 @@ async def export_to_excel(
 @track_metrics("scan_to_excel")
 async def scan_to_excel(
     codes: list[str],
+    fields: list[str] | None = None,
     days: int = 260,
     include_financial: bool = True,
     filename: str = "",
 ) -> str:
-    """시장스캔 — 여러 종목의 기본정보+차트통계+재무지표를 한 번에 수집해 Excel로 저장.
+    """시장스캔 — **원하는 항목만 골라** 여러 종목을 Excel 한 장으로 저장.
 
     로컬 캐시 패턴: 한 번 스캔 → 이후 query_excel(파일경로, 조건)로 즉시 반복 필터링.
 
+    ## fields — 넣을 항목을 직접 고른다
+
+    | 값 | 들어가는 열 | 추가 조회 비용 |
+    |---|---|---|
+    | `price` | 현재가·거래량 | 기본 (항상 수집) |
+    | `chart` | 기간 최고/최저·낙폭·기간수익률·평균거래량·집계봉수 | 기본 (항상 수집) |
+    | `financial` | PER·PBR·EPS·BPS·ROE·배당수익률·시가총액·재무기준기간 | 종목당 1회 |
+    | `flow` | 기관·외국인 순매매 누적(20일) | 30종목당 1회 |
+    | `sector` | 업종 | 종목당 1회 |
+    | `indicators` | 이평배열·RSI·거래량배수 | 100종목당 1회 |
+
+    생략하면 `["price", "chart", "financial"]` 이 들어갑니다(기존과 동일).
+    **필요 없는 항목을 빼면 그만큼 조회가 줄어 빨라집니다** — 수급만 볼 거면
+    `fields=["price", "flow"]` 처럼 주세요.
+
     Args:
         codes: 종목코드 리스트 (최대 500개)
+        fields: 넣을 항목. 위 표의 값들 중에서 고릅니다. 생략 시 기본 세트.
         days: 차트 통계 과거 일수 (기본 260 = 52주)
-        include_financial: 재무지표(PER/PBR) 포함 여부
+        include_financial: (구버전 호환) fields 를 안 줬을 때만 적용됩니다.
         filename: 파일명 (비우면 자동 생성)
     """
     if not codes:
         return "종목코드 리스트가 비어 있습니다."
 
-    rows = await naver_scan_snapshot(codes, days=days, include_financial=include_financial)
+    ALL_FIELDS = ("price", "chart", "financial", "flow", "sector", "indicators")
+    if fields:
+        chosen = [f for f in fields if f in ALL_FIELDS]
+        unknown = [f for f in fields if f not in ALL_FIELDS]
+        if not chosen:
+            return (f"알 수 없는 항목입니다: {', '.join(fields)}"
+                    f"\n쓸 수 있는 값: {', '.join(ALL_FIELDS)}")
+    else:
+        chosen = ["price", "chart"] + (["financial"] if include_financial else [])
+        unknown = []
+    want = set(chosen) | {"price", "chart"}   # 뼈대는 항상 남긴다
+
+    rows = await naver_scan_snapshot(codes, days=days,
+                                     include_financial="financial" in want)
     if not rows:
         return "데이터를 수집하지 못했습니다."
+    by_code = {r.get("code"): r for r in rows}
 
-    df = pd.DataFrame(rows)
+    # ── 선택 항목만 추가로 수집한다 ──────────────────────────────
+    if "flow" in want:
+        async def one_flow(c: str):
+            try:
+                return c, await get_investor_flow(c, 20)
+            except Exception:
+                return c, None
+        for code_, series in await asyncio.gather(*[one_flow(c) for c in by_code]):
+            r = by_code.get(code_)
+            if not r or not isinstance(series, list) or not series:
+                continue
+            # 결측을 0으로 채우면 '순매매 0'과 구분이 안 된다 — 값이 있는 날만 더한다.
+            inst = [d.get("institutional") for d in series if d.get("institutional") is not None]
+            forg = [d.get("foreign") for d in series if d.get("foreign") is not None]
+            if inst:
+                r["inst_net"] = int(sum(inst))
+            if forg:
+                r["foreign_net"] = int(sum(forg))
+
+    if "sector" in want:
+        async def one_sector(c):
+            try:
+                return c, (await naver_get_stock_sector(c)).get("sector_name")
+            except Exception:
+                return c, None
+        for c, nm in await asyncio.gather(*[one_sector(c) for c in by_code]):
+            if nm and c in by_code:
+                by_code[c]["sector"] = nm
+
+    if "indicators" in want:
+        async def one_ind(c: str):
+            try:
+                ohlcv = await get_ohlcv(c, timeframe="day", count=max(days, 120))
+                return c, compute_indicators(ohlcv, ["ma_phase", "rsi", "volume"])
+            except Exception:
+                return c, None
+        for code_, ind in await asyncio.gather(*[one_ind(c) for c in by_code]):
+            if True:
+                r = by_code.get(code_)
+                if not r or not isinstance(ind, dict):
+                    continue
+                ph = (ind.get("ma_phase") or {}).get("phase_label")
+                if ph:
+                    r["ma_phase"] = ph
+                rsi = (ind.get("rsi") or {}).get("value")
+                if rsi is not None:
+                    r["rsi"] = rsi
+                vr = (ind.get("volume") or {}).get("ratio_vs_avg_20b")
+                if vr is not None:
+                    r["vol_ratio"] = vr
+
+    # ── 고른 항목의 열만 남긴다 ─────────────────────────────────
+    FIELD_COLUMNS = {
+        "price": ["current_price", "volume"],
+        "chart": ["high", "high_date", "low", "low_date", "drawdown_pct",
+                  "recovery_pct", "period_return_pct", "avg_volume", "bars_count"],
+        "financial": ["per", "per_basis", "pbr", "eps", "bps", "roe",
+                      "배당수익률", "시가총액", "fin_period"],
+        "flow": ["inst_net", "foreign_net"],
+        "sector": ["sector"],
+        "indicators": ["ma_phase", "rsi", "vol_ratio"],
+    }
+    keep = ["code", "name"]
+    for f in ALL_FIELDS:
+        if f in want:
+            keep += FIELD_COLUMNS[f]
+
+    df = pd.DataFrame(list(by_code.values()))
+    df = df[[c for c in keep if c in df.columns]]
+
     fname = filename or generate_filename(f"snapshot_{len(df)}stocks")
     if not fname.endswith(".xlsx"):
         fname += ".xlsx"
     file_path = get_snapshot_dir() / fname
 
     saved = save_dataframe_to_excel(
-        df,
-        file_path,
-        sheet_name="Snapshot",
-        metadata={
-            "days": days,
-            "include_financial": include_financial,
-            "requested_codes": len(codes),
-        },
+        df, file_path, sheet_name="Snapshot",
+        metadata={"days": days, "fields": ", ".join(chosen),
+                  "requested_codes": len(codes)},
     )
 
-    return (
-        f"✓ 스냅샷 저장 완료 ({len(df)}개 종목)\n"
-        f"경로: {saved}\n"
-        f"컬럼: {', '.join(df.columns)}\n\n"
-        f"💡 이 파일을 query_excel 도구로 조건 필터링하면 즉시 분석 가능합니다.\n"
-        f"예시: query_excel(file_path='{saved}', filters={{'per_max': 10, 'drawdown_pct_max': -30}})"
-    )
+    msg = [f"✓ 스냅샷 저장 완료 ({len(df)}개 종목)",
+           f"경로: {saved}",
+           f"넣은 항목: {', '.join(chosen)}",
+           f"컬럼: {', '.join(df.columns)}"]
+    if unknown:
+        msg.append(f"⚠️ 알 수 없어 무시한 항목: {', '.join(unknown)} "
+                   f"(쓸 수 있는 값: {', '.join(ALL_FIELDS)})")
+    msg.append("")
+    msg.append("💡 다른 항목이 더 필요하면 fields 를 바꿔 다시 부르세요. "
+               "예: fields=[\"price\", \"flow\", \"sector\"]")
+    # 파일에 없는 컬럼으로 예시를 주면 그 조건이 조용히 무시된다 —
+    # 실제로 들어간 열 중에서 골라 안내한다.
+    sample = None
+    for key, cond in (("per", "{'per': {'min': 0, 'max': 15}}"),
+                      ("drawdown_pct", "{'drawdown_pct_max': -30}"),
+                      ("foreign_net", "{'foreign_net_min': 0}"),
+                      ("period_return_pct", "{'period_return_pct_min': 0}")):
+        if key in df.columns:
+            sample = cond
+            break
+    if sample:
+        msg.append(f"💡 조건 검색: query_excel(file_path='{saved}', filters={sample})")
+    return "\n".join(msg)
+
 
 
 @mcp.tool()
