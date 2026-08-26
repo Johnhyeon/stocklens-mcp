@@ -759,6 +759,7 @@ def _kr_meta(
     code: str | None = None,
     name: str | None = None,
     data_completeness: str = rmeta.COMPLETE,
+    coverage: dict | None = None,
     warnings: list[str] | None = None,
 ) -> dict:
     """KRX 도구용 메타. 세션 상태에서 data_basis를 자동 판정한다.
@@ -791,6 +792,7 @@ def _kr_meta(
         market="KR",
         session=krx.get("status"),
         data_completeness=data_completeness,
+        coverage=coverage,
         entity_info=rmeta.entity(stock_code=code, name=name),
         warnings=warns,
     )
@@ -1185,8 +1187,16 @@ async def get_flow_batch(codes: list[str], days: int = 5) -> str:
     if not valid:
         return "유효한 종목코드가 없습니다 (6자리 영숫자)."
 
+    # 상한에 걸려 잘린 사실은 보정 전 값을 들고 있어야만 말할 수 있다.
+    # 지금까지 본문에는 "최근 20일"만 적혀서, 60일을 물어본 사람은 그 20일치를
+    # 자기가 요청한 범위로 읽었다.
+    requested_codes = len(codes)
     valid = valid[:30]
-    days = max(1, min(days, 20))
+    requested_days = days
+    effective_days = max(1, min(days, 20))
+    days = effective_days
+    days_truncated = requested_days != effective_days
+    codes_truncated = requested_codes > len(valid) + len(invalid)
 
     async def fetch_one(code: str) -> tuple[str, list[dict] | None]:
         try:
@@ -1205,7 +1215,20 @@ async def get_flow_batch(codes: list[str], days: int = 5) -> str:
     except Exception:
         pass
 
-    lines = [
+    lines: list[str] = []
+    if days_truncated:
+        lines.append(
+            f"⚠️ {requested_days}일을 요청했지만 이 도구의 상한은 {effective_days}일입니다. "
+            f"아래는 최근 {effective_days}일치입니다 (더 긴 구간은 get_flow 로 종목별 조회)."
+        )
+    if codes_truncated:
+        lines.append(
+            f"⚠️ {requested_codes}종목을 요청했지만 한 번에 30종목까지만 조회합니다. "
+            f"앞 {len(valid)}종목만 아래에 있습니다."
+        )
+    if lines:
+        lines.append("")
+    lines += [
         f"수급 배치 ({len(valid)}종목, 최근 {days}일):",
         "각 행: 날짜 | 기관 순매매(주) | 외국인 순매매(주)  ※ 양수=순매수",
         "",
@@ -1213,9 +1236,13 @@ async def get_flow_batch(codes: list[str], days: int = 5) -> str:
 
     failed: list[str] = list(invalid)
     matched_count = 0
+    # 상한 안이어도 종목마다 실제 행 수는 다르다(신규 상장·거래정지). 합계만
+    # 보여주면 3일치와 20일치가 같은 무게로 읽힌다.
+    per_entity: dict[str, int] = {}
     for code, data in results:
         name = name_map.get(code, "")
         header = f"[{code}] {name}".rstrip()
+        per_entity[code] = len(data or [])
         if not data:
             failed.append(code)
             continue
@@ -1240,7 +1267,29 @@ async def get_flow_batch(codes: list[str], days: int = 5) -> str:
     if failed:
         lines.append(f"※ 조회 실패: {', '.join(failed)}")
 
-    return _append_result_meta("\n".join(lines), _kr_meta(kind="bars"))
+    truncated = days_truncated or codes_truncated
+    has_gap = truncated or bool(failed)
+    coverage = {
+        "requested": {"unit": "day", "value": requested_days},
+        "effective": {"unit": "day", "value": effective_days},
+        "requested_entities": requested_codes,
+        "returned_entities": matched_count,
+        "per_entity_returned_count": per_entity,
+        "returned_count": sum(per_entity.values()),
+        "total_count": None,
+        "truncated": truncated,
+        "coverage_complete": not has_gap,
+        "reason": "server_cap" if truncated else ("unknown" if failed else None),
+    }
+
+    return _append_result_meta(
+        "\n".join(lines),
+        _kr_meta(
+            kind="bars",
+            data_completeness=rmeta.PARTIAL if has_gap else rmeta.COMPLETE,
+            coverage=coverage,
+        ),
+    )
 
 
 @mcp.tool()
