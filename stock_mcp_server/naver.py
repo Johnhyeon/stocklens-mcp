@@ -897,6 +897,47 @@ async def list_sectors() -> list[dict]:
 
 
 @cached(ttl_market=300, ttl_closed=3600)  # 장중 5분, 장마감 1시간
+@cached(ttl_market=1800, ttl_closed=7200)
+async def get_stock_sector(code: str) -> dict:
+    """종목 → 소속 업종(네이버 기준). 역방향 조회가 없어 비교 기준을 못 잡던 구멍.
+
+    네이버 종목 페이지에는 업종 상세로 가는 링크가 있고, 그 href 의 `no=` 가
+    업종 ID다. 이걸 못 읽으면 "이 종목이 동종 대비 싼가"를 물어볼 때 사용자가
+    업종 이름을 직접 알고 있어야 한다.
+
+    Returns:
+        {"code", "sector_name", "sector_id"} — 못 찾으면 sector_name 이 None.
+    """
+    resp = await fetch(f"{BASE_URL}/item/main.naver", params={"code": code})
+    soup = BeautifulSoup(resp.text, "lxml")
+
+    out: dict = {"code": code, "sector_name": None, "sector_id": None}
+    link = soup.select_one('a[href*="type=upjong"]')
+    if link is not None:
+        name = link.get_text(strip=True)
+        # '더보기'·'동일업종 PER' 같은 안내 링크도 같은 href 를 쓴다 — 업종명만 취한다.
+        if name and name not in ("더보기",) and not name.startswith("동일업종"):
+            out["sector_name"] = name
+        m = re.search(r"no=(\d+)", link.get("href") or "")
+        if m:
+            out["sector_id"] = m.group(1)
+    if out["sector_name"] is None:
+        # 첫 링크가 안내였다면 나머지에서 업종명을 찾는다.
+        for a in soup.select('a[href*="type=upjong"]'):
+            nm = a.get_text(strip=True)
+            if nm and nm != "더보기" and not nm.startswith("동일업종"):
+                out["sector_name"] = nm
+                break
+    # 업종 ID 가 없으면 업종 링크가 아니라 메뉴("업종별" 등)를 잡은 것이다.
+    # ETF·ETN 은 소속 업종이 없어 이 경로로 들어온다 — 이름만 남기면 오독한다.
+    if not out["sector_id"]:
+        out["sector_name"] = None
+        out["reason"] = "업종 정보 없음 (ETF·ETN이거나 업종 미분류)"
+    if out["sector_name"] is None:
+        out[PARSE_MISS_KEY] = ["sector_name"]
+    return out
+
+
 async def get_sector_stocks(sector_name: str, count: int = 30) -> dict:
     """특정 업종의 종목 리스트를 가져옵니다.
 

@@ -33,6 +33,7 @@ from stock_mcp_server.naver import (
     get_theme_stocks as naver_get_theme_stocks,
     list_sectors as naver_list_sectors,
     get_sector_stocks as naver_get_sector_stocks,
+    get_stock_sector as naver_get_stock_sector,
     get_volume_ranking as naver_get_volume_ranking,
     get_change_ranking as naver_get_change_ranking,
     get_alert_codes as naver_get_alert_codes,
@@ -1597,9 +1598,10 @@ async def get_sector_stocks(sector_name: str, count: int = 30) -> str:
 @safe_tool
 @track_metrics("get_sector_valuation")
 async def get_sector_valuation(
-    sector_name: str,
+    sector_name: str = "",
     top_n: int = 40,
     kind: str = "sector",
+    code: str = "",
 ) -> str:
     """업종밸류에이션 — 업종·테마의 PER·PBR·ROE **집계**와 종목별 할증/할인 위치.
 
@@ -1614,14 +1616,36 @@ async def get_sector_valuation(
     종목 쪽으로 치우칩니다. 업종 전체를 보려면 `list_sectors`로 종목 수를 확인하고
     top_n 을 그 이상으로 주세요.
 
+    ⭐ **종목코드만 넘겨도 됩니다** — `code="005930"` 이면 그 종목의 업종을 찾아
+    집계한 뒤, 그 종목이 업종 안에서 어디에 있는지 표시합니다.
+    업종명을 모를 때 이 방식을 쓰세요(ETF·ETN은 소속 업종이 없어 조회되지 않습니다).
+
     Args:
-        sector_name: 업종명 또는 테마명 (예: "반도체와반도체장비", "건설")
+        sector_name: 업종명 또는 테마명 (예: "반도체와반도체장비", "건설").
+            code 를 주면 생략할 수 있습니다.
         top_n: 집계에 쓸 최대 종목 수 (기본 40, 최대 80). 클수록 느립니다.
         kind: "sector"(업종, 기본) / "theme"(테마)
+        code: 6자리 종목코드. 주면 업종을 자동 판정합니다.
     """
     import statistics as _st
 
     top_n = max(5, min(top_n, 80))
+
+    # 종목코드로 업종을 자동 판정한다. 네이버에는 종목→업종 역방향 조회가 없어
+    # 지금까지는 사용자가 업종 이름을 미리 알아야만 이 도구를 쓸 수 있었다.
+    focus_code = (code or "").strip()
+    focus_name = ""
+    if focus_code:
+        sec = await naver_get_stock_sector(focus_code)
+        if not sec.get("sector_name"):
+            return (f"종목 {focus_code}의 업종을 찾지 못했습니다 — "
+                    f"{sec.get('reason', '업종 정보 없음')}. "
+                    f"업종명을 직접 넘기거나, ETF라면 get_etf_info 를 쓰세요.")
+        sector_name = sec["sector_name"]
+        kind = "sector"
+    if not sector_name:
+        return "업종·테마 이름이나 종목코드(code) 중 하나는 필요합니다."
+
     if kind == "theme":
         rows = await naver_get_theme_stocks(sector_name, count=top_n, include_reason=False)
     else:
@@ -1633,6 +1657,10 @@ async def get_sector_valuation(
         return f"'{sector_name}'에 해당하는 종목을 찾지 못했습니다. list_sectors / list_themes 로 이름을 확인하세요."
 
     codes = [r.get("code") for r in rows if isinstance(r, dict) and r.get("code")][:top_n]
+    # 목록이 등락률 순이라, 기준 종목이 상위 top_n 밖으로 밀려 표에서 사라질 수 있다.
+    # (실제로 "조선" 상위 8개에 한화오션이 없었다.) 기준 종목은 반드시 포함시킨다.
+    if focus_code and focus_code not in codes:
+        codes = [focus_code] + codes[: max(0, top_n - 1)]
     if not codes:
         return f"'{sector_name}'에서 종목코드를 얻지 못했습니다."
 
@@ -1665,7 +1693,11 @@ async def get_sector_valuation(
         return (f"{label} | {med:,.2f}{unit} | {avg:,.2f}{unit} | "
                 f"{vals[0]:,.2f} ~ {vals[-1]:,.2f} | {len(vals)}")
 
+    if focus_code:
+        focus_name = next((s.get("name") for s in snap if s.get("code") == focus_code), focus_code)
     lines = [f"## {sector_name} 밸류에이션 집계", ""]
+    if focus_code:
+        lines.append(f"- 기준 종목: **{focus_name}({focus_code})** → 업종 `{sector_name}`")
     lines.append(f"- 대상 종목: {len(snap)}개 (요청 {len(codes)}개)")
     if periods:
         lines.append(f"- 재무 기준 기간: {', '.join(periods)}")
