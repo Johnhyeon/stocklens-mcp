@@ -68,6 +68,7 @@ from stock_mcp_server._metrics import (
     get_metrics_file,
 )
 from stock_mcp_server._indicators import (
+    split_valid_bars,
     compute_indicators,
     AVAILABLE_INDICATORS,
 )
@@ -630,7 +631,9 @@ async def get_chart(
         count: 가져올 봉 개수 (기본 120 ≈ 6개월, 최대 500)
     """
     count = min(count, 500)
-    data = await get_ohlcv(code, timeframe, count)
+    raw = await get_ohlcv(code, timeframe, count)
+    data, _excluded = split_valid_bars(raw)
+    exclusion_info, exclusion_warns = _bar_exclusion_info(_excluded)
     if not data:
         meta = _kr_meta(
             kind="bars", code=code, data_completeness=rmeta.NONE,
@@ -643,7 +646,13 @@ async def get_chart(
     lines = [header, ""]
     lines.extend(_format_ohlcv_rows(data, is_intraday=False, decimals=0))
 
-    warnings = []
+    if exclusion_info:
+        lines.append("")
+        lines.append(
+            f"※ 거래정지 placeholder 등 비정상 봉 {exclusion_info['count']}개 제외"
+            f" ({', '.join(b['date'] for b in exclusion_info['bars'][:5])})."
+        )
+    warnings = list(exclusion_warns)
     completeness = rmeta.COMPLETE
     if len(data) < count:
         completeness = rmeta.PARTIAL
@@ -656,6 +665,7 @@ async def get_chart(
             timeframe=timeframe, rows=data, market_calendar=krx_calendar()
         ),
         price_adjustment=price_adjustment_meta(),
+        extra={"bar_exclusions": exclusion_info} if exclusion_info else None,
     )
     return _append_result_meta("\n".join(lines), meta)
 
@@ -2423,10 +2433,16 @@ async def get_multi_chart_stats(codes: list[str], days: int = 260) -> str:
         "'52주 고점' 같은 표현을 쓰면 안 됩니다."
     )
     lines.append(f"※ {CORPORATE_ACTION_NOTE}")
-    warns = None
+    total_excluded = sum(s.get("excluded_bars", 0) or 0 for s in stats)
+    warns = []
+    if total_excluded:
+        warns.append(
+            f"거래정지 placeholder 등 비정상 봉 {total_excluded}개를 집계에서 "
+            "제외했습니다. 해당 날짜의 고가·저가는 실제 값이 아닙니다."
+        )
     if short:
         names = ", ".join(f"{s['code']}({s['bars_count']}봉)" for s in short[:8])
-        warns = [
+        warns += [
             f"요청 {days}일보다 데이터가 크게 짧은 종목 {len(short)}건: {names}"
             " — 신규 상장·거래정지 가능성. 낙폭·기간수익률이 짧은 구간 기준입니다."
         ]
@@ -2440,7 +2456,7 @@ async def get_multi_chart_stats(codes: list[str], days: int = 260) -> str:
         _kr_meta(kind="bars",
                  data_as_of=max(per_entity_as_of.values()) if per_entity_as_of else None,
                  data_completeness=rmeta.PARTIAL if short else rmeta.COMPLETE,
-                 warnings=warns,
+                 warnings=warns or None,
                  bar_state=_merge_bar_states([
                      _bar_state(timeframe="day", rows=[{"date": s.get("current_date")}],
                                 market_calendar=_cal_stats, calendar_fallback=True)
@@ -2498,11 +2514,17 @@ async def get_indicators(
         )
     days = max(30, min(days, 500))
 
-    ohlcv = await get_ohlcv(code, timeframe=timeframe, count=days)
-    if not ohlcv:
+    raw_ohlcv = await get_ohlcv(code, timeframe=timeframe, count=days)
+    if not raw_ohlcv:
         return f"차트 데이터를 가져올 수 없습니다: {code}"
+    ohlcv, _excluded = split_valid_bars(raw_ohlcv)
+    exclusion_info, exclusion_warns = _bar_exclusion_info(_excluded)
+    if not ohlcv:
+        return (f"종목 {code}: 조회된 봉 전체가 거래정지 placeholder 등 비정상이라 "
+                "지표를 계산할 수 없습니다.")
 
     result = compute_indicators(ohlcv, include, params=params)
+    ind_errors = _indicator_error_list(result)
     ind_cov = _indicator_coverage(
         include=include, available_bars=len(ohlcv), params=params
     )
@@ -2519,13 +2541,25 @@ async def get_indicators(
                 timeframe=timeframe, rows=ohlcv, market_calendar=krx_calendar()
             ),
             price_adjustment=price_adjustment_meta(),
-            data_completeness=rmeta.PARTIAL if ind_cov["insufficient"] else rmeta.COMPLETE,
+            data_completeness=(rmeta.PARTIAL
+                               if ind_cov["insufficient"] or ind_errors
+                               else rmeta.COMPLETE),
+            coverage=({"truncated": False, "coverage_complete": False,
+                       "reason": "indicator_error"} if ind_errors else None),
             warnings=([
                 "봉이 모자라 계산되지 않은 지표: " + ", ".join(ind_cov["insufficient"])
                 + f" (보유 {ind_cov['available_bars']}봉). 값이 빠진 것은 "
                 "'그런 신호가 없다'가 아니라 '아직 계산할 이력이 없다'는 뜻입니다."
-            ] if ind_cov["insufficient"] else None),
-            extra={"indicator_coverage": ind_cov},
+            ] if ind_cov["insufficient"] else [])
+            + ([
+                "계산에 실패한 지표: "
+                + ", ".join(f"{e['indicator']}({e['error']})" for e in ind_errors)
+                + " - 값이 없는 것이지 신호가 없는 것이 아닙니다."
+            ] if ind_errors else [])
+            + exclusion_warns or None,
+            extra={"indicator_coverage": ind_cov,
+                   **({"indicator_errors": ind_errors} if ind_errors else {}),
+                   **({"bar_exclusions": exclusion_info} if exclusion_info else {})},
         ),
     }
     _mark_intraday_volume(result, payload["_meta"])
@@ -2596,6 +2630,44 @@ def _indicator_coverage(
         "required_bars": dict(sorted(required.items())),
         "insufficient": sorted(k for k, n in required.items() if available_bars < n),
     }
+
+
+def _bar_exclusion_info(excluded: list[dict]) -> tuple[dict | None, list[str]]:
+    """제외한 placeholder 봉을 메타·경고로 만든다. 없으면 (None, []).
+
+    거래정지 구간 처리 정책은 exclude 로 고정한다 - 고가·저가가 0인 봉의
+    빈 자리를 지어내는(carry) 순간 그 값이 확정치로 읽힌다. 무엇을 왜 뺐는지는
+    메타와 경고 양쪽에 남긴다.
+    """
+    if not excluded:
+        return None, []
+    bars = [{"date": rmeta.normalize_day(e.get("date")) or str(e.get("date")),
+             "reason": e.get("reason")} for e in excluded]
+    info = {"policy": "exclude", "count": len(bars), "bars": bars[:10]}
+    dates = ", ".join(b["date"] for b in bars[:5])
+    warns = [
+        f"거래정지 placeholder 등 비정상 봉 {len(bars)}개를 계산에서 제외했습니다"
+        f"({dates}{' 외' if len(bars) > 5 else ''}). "
+        "해당 날짜의 고가·저가·거래량은 실제 값이 아니라 원천의 빈자리 표시입니다."
+    ]
+    return info, warns
+
+
+def _indicator_error_list(result: dict, code: str | None = None) -> list[dict]:
+    """지표 결과에서 {"error": ...} 로 삼켜진 실패를 끄집어낸다.
+
+    compute_indicators 는 지표 하나가 죽어도 나머지를 살리려고 오류를 값 안에
+    넣는데, 그대로 두면 응답은 complete 가 된다. "지표가 오류인데 완전"은
+    이 계약이 없애려는 거짓말이다.
+    """
+    out = []
+    for key, val in (result or {}).items():
+        if isinstance(val, dict) and isinstance(val.get("error"), str):
+            item = {"indicator": key, "error": val["error"]}
+            if code is not None:
+                item = {"code": code, **item}
+            out.append(item)
+    return out
 
 
 def _now_kst():
@@ -2770,11 +2842,19 @@ async def get_indicators_bulk(
     bars_seen: list[int] = []
     cal = krx_calendar()
 
+    excluded_by_code: dict[str, list[dict]] = {}
+
     async def one(code: str) -> tuple[str, dict, dict | None]:
         try:
-            ohlcv = await get_ohlcv(code, timeframe=timeframe, count=days)
-            if not ohlcv:
+            raw = await get_ohlcv(code, timeframe=timeframe, count=days)
+            if not raw:
                 return code, {"error": "OHLCV 없음"}, None
+            ohlcv, _exc = split_valid_bars(raw)
+            if _exc:
+                excluded_by_code[code] = _exc
+            if not ohlcv:
+                return code, {"error": f"봉 {len(_exc)}개 전체가 비정상 "
+                                       "(거래정지 placeholder 등 입력 데이터 이상)"}, None
             bars_seen.append(len(ohlcv))
             # 봉 상태는 **그 종목의 시계열로** 계산해야 한다. 종목별 마지막
             # 날짜만 모아 한 시계열인 척 넘기면, 두 종목이 같은 미완성 봉을
@@ -2786,6 +2866,19 @@ async def get_indicators_bulk(
 
     results = await asyncio.gather(*[one(c) for c in codes])
     failed = sum(1 for _, data, _ in results if "error" in data)
+    # 지표 하나가 죽어도 {"error": ...} 로 삼켜져 응답이 complete 가 되던
+    # 자리다(실측: 이월드 position ZeroDivisionError 인데 complete·경고 없음).
+    ind_errors: list[dict] = []
+    for code, data, _ in results:
+        if "error" not in data:
+            ind_errors += _indicator_error_list(data, code=code)
+    bulk_exclusions = None
+    if excluded_by_code:
+        bulk_exclusions = {
+            "policy": "exclude",
+            "count": sum(len(v) for v in excluded_by_code.values()),
+            "by_code": {c: len(v) for c, v in excluded_by_code.items()},
+        }
     # 종목마다 이력 길이가 다르다. 가장 짧은 종목을 기준으로 잡아야 "전 종목
     # ma120 이 나왔다"는 과대 주장을 하지 않는다.
     ind_cov = _indicator_coverage(
@@ -2809,16 +2902,30 @@ async def get_indicators_bulk(
             kind="bars",
             data_as_of=max(per_entity_as_of.values()) if per_entity_as_of else None,
             data_completeness=(rmeta.PARTIAL
-                               if failed or ind_cov["insufficient"] else rmeta.COMPLETE),
+                               if failed or ind_cov["insufficient"] or ind_errors
+                               else rmeta.COMPLETE),
+            coverage=({"truncated": False, "coverage_complete": False,
+                       "reason": "indicator_error"} if ind_errors else None),
             warnings=([f"{failed}개 종목 조회 실패 — results의 error 필드 확인."] if failed else [])
                      + ([
                          "봉이 모자라 계산되지 않은 지표: " + ", ".join(ind_cov["insufficient"])
                          + f" (가장 짧은 종목 {ind_cov['available_bars']}봉 기준)."
-                     ] if ind_cov["insufficient"] else []) or None,
+                     ] if ind_cov["insufficient"] else [])
+                     + ([
+                         "계산에 실패한 지표 "
+                         + ", ".join(f"{e['code']}:{e['indicator']}" for e in ind_errors[:8])
+                         + " - 값이 없는 것이지 신호가 없는 것이 아닙니다."
+                     ] if ind_errors else [])
+                     + ([
+                         f"거래정지 placeholder 등 비정상 봉 {bulk_exclusions['count']}개를 "
+                         "계산에서 제외했습니다(by_code 참고)."
+                     ] if bulk_exclusions else []) or None,
             bar_state=batch_bar_state,
             price_adjustment=price_adjustment_meta(),
             extra={"indicator_coverage": ind_cov,
-                   "per_entity_data_as_of": per_entity_as_of},
+                   "per_entity_data_as_of": per_entity_as_of,
+                   **({"indicator_errors": ind_errors} if ind_errors else {}),
+                   **({"bar_exclusions": bulk_exclusions} if bulk_exclusions else {})},
         ),
     }
     for _data in payload["results"].values():
@@ -5273,14 +5380,15 @@ async def get_us_search(query: str) -> str:
 @safe_us_tool
 @track_metrics("get_us_market")
 async def get_us_market() -> str:
-    """US market indices — 미국 시장 스냅샷 (Dow·Russell 2000 선물, VIX, Gold).
+    """US market indices — 미국 시장 스냅샷 (주요 지수·VIX·Gold).
 
     "미국 시장 어때", "VIX 얼마", "금값" 같은 질문에 사용합니다.
 
-    ⚠️ **S&P 500·Nasdaq 지수는 이 도구가 반환하지 않습니다.** 실제 항목은
-    소스가 주는 대로이며 보통 Dow Futures / Russell 2000 Futures / VIX / Gold 입니다.
-    반환된 표에 없는 지수를 답변에 쓰지 마세요. S&P·Nasdaq이 필요하면
-    `get_us_chart`로 SPY·QQQ 같은 ETF를 조회하세요.
+    ⚠️ **반환 항목은 소스가 주는 대로이며 고정이 아닙니다.** 실측(v0.8.2,
+    2026-08-27): S&P 500 / Dow Jones / NASDAQ / Russell 2000 / VIX / Gold.
+    예전에는 선물 4종만 오던 시기도 있었습니다. **반환된 표에 있는 항목만**
+    답변에 쓰고, 없는 지수를 학습지식으로 채우지 마세요. 이 값은 현재
+    스냅샷입니다. 과거 기간 수익률이 필요하면 `get_us_chart`로 조회하세요.
     """
     data = await us.get_market_summary()
     indices = data.get("indices", [])

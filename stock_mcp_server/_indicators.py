@@ -378,6 +378,11 @@ def compute_position(df: pd.DataFrame) -> dict:
     lookback = df.iloc[-252:] if len(df) >= 252 else df
     high_52w = float(lookback["high"].max())
     low_52w = float(lookback["low"].min())
+    if low_52w <= 0 or high_52w <= 0:
+        # split_valid_bars 를 거치면 올 수 없는 값이다. 계산 오류(ZeroDivision)
+        # 대신 입력 데이터 이상을 그대로 말한다.
+        return {"error": f"입력 데이터 이상 - 52주 저가 {low_52w:.0f} / "
+                         f"고가 {high_52w:.0f} (거래정지 placeholder 미분리 의심)"}
     high_idx = lookback["high"].idxmax()
     low_idx = lookback["low"].idxmin()
     high_date = str(lookback.loc[high_idx, "date"]) if "date" in lookback.columns else None
@@ -705,6 +710,50 @@ _INDICATOR_MAP = {
 AVAILABLE_INDICATORS = list(_INDICATOR_MAP.keys())
 
 
+def split_valid_bars(ohlcv: list[dict]) -> tuple[list[dict], list[dict]]:
+    """가격이 유효한 봉과 거래정지 placeholder·이상 봉을 나눈다.
+
+    실측(2026-08-27): 네이버는 거래정지 구간을 고가 0·저가 0(종가만 이월) 또는
+    시가·고가·저가 0인 봉으로 돌려준다(한화에어로 주봉 3개, 이월드 일봉 1개).
+    이 봉이 그대로 계산에 들어가면 52주 저가가 0이 되어 ZeroDivisionError 가
+    나고, 이동평균·낙폭·지지저항도 가짜 0에 오염된다.
+
+    검증: open/high/low/close 가 전부 유한한 양수이고
+    high >= max(open, close, low), low <= min(open, close, high).
+    o=h=l=c 에 거래량 0인 봉(기준가 표시)은 기하가 멀쩡하므로 남긴다.
+
+    Returns:
+        (valid, excluded) - excluded 원소는 {"date", "reason"}.
+    """
+    valid: list[dict] = []
+    excluded: list[dict] = []
+    for row in ohlcv or []:
+        if not isinstance(row, dict):
+            continue
+        prices = {}
+        reason = None
+        for key in ("open", "high", "low", "close"):
+            v = row.get(key)
+            if not isinstance(v, (int, float)) or isinstance(v, bool)                     or v != v or v in (float("inf"), float("-inf")):
+                reason = f"{key} 값이 숫자가 아님"
+                break
+            if v <= 0:
+                reason = f"{key}=0 (거래정지 placeholder 추정)" if v == 0                     else f"{key} 가 음수"
+                break
+            prices[key] = float(v)
+        if reason is None:
+            o, h, lo, c = prices["open"], prices["high"], prices["low"], prices["close"]
+            if h < max(o, c, lo):
+                reason = "고가가 시가·종가·저가보다 낮음"
+            elif lo > min(o, c, h):
+                reason = "저가가 시가·종가·고가보다 높음"
+        if reason is None:
+            valid.append(row)
+        else:
+            excluded.append({"date": row.get("date"), "reason": reason})
+    return valid, excluded
+
+
 def compute_indicators(
     ohlcv: list[dict],
     include: list[str],
@@ -719,7 +768,12 @@ def compute_indicators(
             {"rsi": {"period": 21}, "bollinger": {"std": 2.5}}
             지표 키별 dict가 그대로 compute_* 함수 kwargs로 전달됨.
     """
-    df = _to_df(ohlcv)
+    # 거래정지 placeholder(가격 0)를 실제 봉으로 계산하지 않는다.
+    valid, excluded = split_valid_bars(ohlcv)
+    if not valid and excluded:
+        return {"error": f"모든 봉({len(excluded)}개)이 비정상 - "
+                         "거래정지 placeholder 등 입력 데이터 이상"}
+    df = _to_df(valid)
     if df.empty:
         return {"error": "OHLCV 데이터가 비어 있습니다"}
 

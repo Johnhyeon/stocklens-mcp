@@ -1352,6 +1352,14 @@ async def get_multi_chart_stats(
             if not ohlcv:
                 return None
 
+            # 거래정지 placeholder(가격 0)를 빼지 않으면 저가 0이 52주 저가가
+            # 되고 낙폭·회복률이 통째로 허구가 된다.
+            from stock_mcp_server._indicators import split_valid_bars
+
+            ohlcv, _excluded = split_valid_bars(ohlcv)
+            if not ohlcv:
+                return None
+
             # 날짜 오름차순 정렬 보장 (네이버는 오래된 것 먼저)
             # 마지막 행이 최신
             highs = [r["high"] for r in ohlcv]
@@ -1361,6 +1369,7 @@ async def get_multi_chart_stats(
 
             current_price = closes[-1]
             current_date = ohlcv[-1]["date"]
+            excluded_bars = len(_excluded)
 
             high = max(highs)
             high_idx = highs.index(high)
@@ -1393,6 +1402,7 @@ async def get_multi_chart_stats(
                 "recovery_pct": round(recovery_pct, 2),
                 "period_return_pct": round(period_return_pct, 2),
                 "avg_volume": avg_volume,
+                "excluded_bars": excluded_bars,
             }
         except Exception as e:
             failures.append(e)
