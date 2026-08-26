@@ -259,6 +259,125 @@ Stored locally only. Nothing leaves your machine.
 
 ---
 
+## 🕐 Result metadata (`RESULT_META_JSON` / `_meta`) - contract v3
+
+Most tools append a `RESULT_META_JSON_START…END` block (JSON tools put it under the
+`_meta` key). `meta_v` is the contract version, currently **3**.
+
+**Every field added in v3 is optional.** Tools that have no such concept simply omit
+the key, and a v2-only consumer can ignore them. The meaning of the existing keys
+(`as_of`, `data_as_of`, `data_basis`, `data_completeness`, `warnings`, `entity`) is
+unchanged.
+
+### `data_completeness` is measured against the **requested** range
+
+It does not say "everything returned is intact". It says "did we cover what you
+asked for". Ask for 60 days, get 20, and it is `partial` even if those 20 are clean.
+
+| Value | Meaning |
+|---|---|
+| `complete` | The requested range was fully covered |
+| `partial` | Only part of it. Do not fill the gap with estimates |
+| `none` | Nothing applies. Not a fetch failure, there simply is no data |
+
+`coverage.coverage_complete=false` together with `data_completeness=complete` is
+rejected at validation time, so it cannot appear.
+
+### `coverage` - requested range vs. what actually came back
+
+```json
+"coverage": {
+  "requested": {"unit": "day", "value": 60},
+  "effective": {"unit": "day", "value": 20},
+  "returned_count": 20,
+  "total_count": null,
+  "truncated": true,
+  "coverage_complete": false,
+  "reason": "server_cap"
+}
+```
+
+`reason` is an enum: `server_cap` / `pagination` / `source_limit` /
+`incomplete_tail` / `mixed_periods` / `unknown`.
+
+**Example: `get_flow_batch(codes=[...], days=60)`**
+This tool caps at 20 days. Asking for 60 returns 20, says so in the first line of the
+body, and reports `requested=60 / effective=20 / partial`.
+`per_entity_returned_count` gives the real row count per stock, since recently listed
+or halted names are shorter even inside the cap.
+
+**Example: `get_disclosure(code=...)`**
+Naver never reports a total, so this is always `coverage_complete=false`,
+`total_count=null`, `reason=source_limit`. You cannot conclude "there are no recent
+filings" from it. Use DartLens `list_disclosures` for exhaustive coverage.
+
+### `bar_state` - is the last bar finished?
+
+```json
+"bar_state": {
+  "timeframe": "week",
+  "last_bar_date": "2026-08-26",
+  "last_bar_complete": false,
+  "last_completed_bar_date": "2026-08-21",
+  "calculation_includes_incomplete": true
+}
+```
+
+`data_basis=in_progress_bar` only appears **during** a session. On a Wednesday evening
+the market is closed but that week's bar still has two trading days to go, and any MA
+or RSI computed on it will change by Friday. When `last_bar_complete=false` you also
+get `coverage.reason=incomplete_tail` and `partial`. Exchange holidays are honoured, so
+a Chuseok week that closes on Wednesday ends its weekly bar there. If the exchange
+calendar cannot be resolved the value is `null` rather than a guess.
+
+Applies to `get_chart`, `get_indicators`, `get_indicators_bulk`, `get_multi_chart_stats`.
+
+### `price_adjustment` - what is this price adjusted for?
+
+```json
+"price_adjustment": {
+  "status": "unknown",
+  "corporate_actions_checked": false,
+  "cross_event_comparison_safe": false
+}
+```
+
+Naver does not state its adjustment basis, so the value is `unknown` today: do not
+stitch periods across splits or rights issues. `status` is one of `raw`,
+`split_adjusted`, `total_return_adjusted`, `unknown`.
+
+### `period_coverage` - are all stocks on the same reporting period?
+
+`get_financial_batch` only. When `consistency` is `mixed`, the stocks closed different
+quarters and their PER or ROE cannot be lined up directly (that response is `partial`).
+
+```json
+"period_coverage": {
+  "consistency": "mixed",
+  "periods": {"005930": "2026.06", "096770": "2026.03"},
+  "oldest": "2026.03",
+  "newest": "2026.06"
+}
+```
+
+### `indicator_coverage` - indicators that had too little history
+
+`get_indicators` and `get_indicators_bulk`. Ask for `ma120` on 104 weekly bars and the
+value is simply absent, which reads as "no such signal" when it means "not enough
+history yet".
+
+```json
+"indicator_coverage": {
+  "available_bars": 104,
+  "required_bars": {"ma5": 5, "ma20": 20, "ma60": 60, "ma120": 120, "ma240": 240},
+  "insufficient": ["ma120", "ma240"]
+}
+```
+
+Batch calls use the **shortest** stock as the baseline so nothing is over-claimed.
+
+---
+
 ## ⚠️ Known Limitations
 
 - **Naver HTML structure changes** may break some fields — re-verified each release

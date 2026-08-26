@@ -38,6 +38,11 @@ When you show AI a chart image, it **guesses the numbers and often gets them wro
 - 🚀 **Fast responses** — TTL cache + Semaphore optimization
 - 📁 **Excel snapshots** — Scan once, query instantly
 - 🤖 **Gemini/GPT compatible** — Export to Excel for use with other AIs
+- 🕐 **Result metadata v3** — every response carries the requested range vs. what
+  actually came back, whether the last bar is still forming, whether prices are
+  split-adjusted, and whether financial periods are mixed. Ask for 60 days, get 20,
+  and it says so. All v3 fields are **optional**, so existing consumers can ignore
+  them ([TOOLS.md](guides/en/TOOLS.md))
 
 ## Installation
 

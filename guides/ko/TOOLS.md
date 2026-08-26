@@ -309,6 +309,124 @@ ETF 전용 상세 (top holdings, 섹터 비중, 자산 배분, 보수율, YTD �
 
 ---
 
+## 🕐 결과 메타 (`RESULT_META_JSON` / `_meta`) - 규약 v3
+
+대부분의 도구는 응답 끝에 `RESULT_META_JSON_START…END` 블록을(JSON 도구는 payload 안
+`_meta` 키로) 붙입니다. `meta_v`가 규약 버전이고 현재 **3**입니다.
+
+**v3에서 늘어난 필드는 전부 선택적입니다.** 해당 개념이 없는 도구에는 키 자체가
+생기지 않고, v2만 아는 소비자는 그대로 무시해도 됩니다. 기존 키
+(`as_of`·`data_as_of`·`data_basis`·`data_completeness`·`warnings`·`entity`)의 의미는
+바뀌지 않았습니다.
+
+### `data_completeness` 는 **요청한 범위** 기준입니다
+
+돌려준 것이 다 왔는지가 아니라, **당신이 물어본 범위를 다 채웠는지**를 말합니다.
+60일을 요청해 20일이 왔으면 그 20일이 온전해도 `partial`입니다.
+
+| 값 | 뜻 |
+|---|---|
+| `complete` | 요청한 범위를 다 채웠다 |
+| `partial` | 일부만 왔다. 없는 부분을 추정으로 메우지 말 것 |
+| `none` | 해당 없음. 조회 실패가 아니라 데이터가 없는 것 |
+
+`coverage.coverage_complete=false` 인데 `data_completeness=complete` 인 조합은
+구조적으로 나올 수 없습니다(값 검증에서 막습니다).
+
+### `coverage` - 요청한 범위와 실제로 돌려준 범위
+
+```json
+"coverage": {
+  "requested": {"unit": "day", "value": 60},
+  "effective": {"unit": "day", "value": 20},
+  "returned_count": 20,
+  "total_count": null,
+  "truncated": true,
+  "coverage_complete": false,
+  "reason": "server_cap"
+}
+```
+
+`reason` 은 열거값입니다: `server_cap`(도구 상한) / `pagination`(원천이 페이지로 끊음)
+/ `source_limit`(원천이 전체 건수를 안 알려줌) / `incomplete_tail`(마지막 봉이 진행 중)
+/ `mixed_periods`(기준 기간 혼재) / `unknown`.
+
+**예: `get_flow_batch(codes=[...], days=60)`**
+이 도구의 상한은 20일입니다. 60일을 요청하면 20일치가 오고, 본문 첫 줄에 그 사실이
+적히며 메타는 위와 같이 `requested=60 / effective=20 / partial` 이 됩니다.
+`per_entity_returned_count` 로 종목별 실제 행 수도 함께 옵니다(상한 안이어도 신규
+상장·거래정지 종목은 짧습니다).
+
+**예: `get_disclosure(code=...)`**
+네이버는 전체 건수를 알려주지 않으므로 항상 `coverage_complete=false`,
+`total_count=null`, `reason=source_limit` 입니다. 여기서 "최근 공시에 아무것도 없다"를
+결론지을 수 없습니다. 빠짐없이 보려면 DartLens `list_disclosures` 를 쓰세요.
+
+### `bar_state` - 마지막 봉이 끝났는가
+
+```json
+"bar_state": {
+  "timeframe": "week",
+  "last_bar_date": "2026-08-26",
+  "last_bar_complete": false,
+  "last_completed_bar_date": "2026-08-21",
+  "calculation_includes_incomplete": true
+}
+```
+
+`data_basis=in_progress_bar` 는 **장중일 때만** 붙습니다. 수요일 저녁이면 장은 닫혔지만
+그 주 주봉은 금요일까지 남아 있습니다. 그 주봉으로 계산한 이평·RSI 는 금요일에 값이
+바뀝니다. `last_bar_complete=false` 면 `coverage.reason=incomplete_tail` 과 `partial` 이
+함께 붙습니다. 휴장일을 반영하므로, 추석으로 목·금이 쉬는 주는 수요일 마감으로 그
+주봉이 끝납니다. 거래소 달력을 확인하지 못하면 추측하지 않고 `null`(모름)입니다.
+
+대상: `get_chart` · `get_indicators` · `get_indicators_bulk` · `get_multi_chart_stats`
+
+### `price_adjustment` - 이 가격이 무엇으로 조정된 값인가
+
+```json
+"price_adjustment": {
+  "status": "unknown",
+  "corporate_actions_checked": false,
+  "cross_event_comparison_safe": false
+}
+```
+
+네이버는 조정 기준을 명시하지 않으므로 현재 값은 `unknown` 입니다. 액면분할·유상증자
+전후 구간을 이어 붙여 비교하면 안 된다는 뜻입니다. `status` 는
+`raw`/`split_adjusted`/`total_return_adjusted`/`unknown` 중 하나입니다.
+
+### `period_coverage` - 종목마다 기준 기간이 같은가
+
+`get_financial_batch` 전용입니다. `consistency` 가 `mixed` 면 종목마다 확정 분기가
+달라 PER·ROE 를 그대로 나란히 놓을 수 없습니다(그때 `partial`).
+
+```json
+"period_coverage": {
+  "consistency": "mixed",
+  "periods": {"005930": "2026.06", "096770": "2026.03"},
+  "oldest": "2026.03",
+  "newest": "2026.06"
+}
+```
+
+### `indicator_coverage` - 봉이 모자라 계산되지 않은 지표
+
+`get_indicators` · `get_indicators_bulk`. 주봉 104개로 `ma120` 을 부르면 값이 빠지는데,
+빠진 자리는 "그런 신호가 없다"가 아니라 "아직 계산할 이력이 없다"는 뜻입니다.
+
+```json
+"indicator_coverage": {
+  "available_bars": 104,
+  "required_bars": {"ma5": 5, "ma20": 20, "ma60": 60, "ma120": 120, "ma240": 240},
+  "insufficient": ["ma120", "ma240"]
+}
+```
+
+배치에서는 **가장 짧은 종목**을 기준으로 잡습니다(과대 주장 방지).
+
+---
+
 ## 📁 저장 파일 위치
 
 Excel 스냅샷·메트릭 로그:
