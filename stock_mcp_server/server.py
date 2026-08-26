@@ -2784,6 +2784,28 @@ async def save_analysis_to_excel(
                     except ValueError:
                         continue
                 out["quarters"] = qs[-6:]
+
+                def _last(key):
+                    v, _ = _latest_fin(fin, key)
+                    return v
+                out["stability"] = {"부채비율": _last("부채비율"),
+                                    "당좌비율": _last("당좌비율"),
+                                    "주당배당금": _last("주당배당금(원)"),
+                                    "시가배당률": _last("시가배당률(%)")}
+                # 연간 구간의 (E) 는 증권사 추정치다. 확정치와 섞지 않고 따로 담는다.
+                est_i = None
+                for i, lb in enumerate(ann):
+                    if "(E)" in str(lb):
+                        est_i = i
+                        break
+                if est_i is not None:
+                    def _est(series):
+                        try:
+                            return float(str(series[est_i]).replace(",", ""))
+                        except (ValueError, IndexError, TypeError):
+                            return None
+                    out["forecast"] = {"기간": str(ann[est_i]),
+                                       "매출액": _est(rev), "영업이익": _est(op)}
             except Exception:
                 pass
             try:
@@ -2931,6 +2953,23 @@ async def save_analysis_to_excel(
                 made_detail.append(label)
             except Exception:
                 continue
+        # 요약 표의 종목명에서 그 종목 시트로 바로 넘어가게 한다.
+        # 시트가 여럿이면 탭을 찾아 헤매게 되고, 훑는 흐름이 끊긴다.
+        if made_detail:
+            try:
+                from openpyxl.styles import Font as _F
+                first = wb[wb.sheetnames[0]]
+                head = [c.value for c in first[1]]
+                if "종목명" in head:
+                    ncol = head.index("종목명") + 1
+                    for row in first.iter_rows(min_row=2, min_col=ncol, max_col=ncol):
+                        for cell in row:
+                            if cell.value in made_detail:
+                                cell.hyperlink = f"#'{cell.value}'!A1"
+                                cell.font = _F(color="0563C1", underline="single")
+            except Exception:
+                pass
+
         if made_detail:
             # 탭을 넘기며 훑는 순서로 맞춘다 — 요약·차트 다음에 종목들,
             # 관리용 시트(근거·메타)는 뒤로. 안 그러면 종목 시트가 맨 끝에 밀린다.

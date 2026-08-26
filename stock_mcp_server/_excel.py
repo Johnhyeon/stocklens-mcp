@@ -391,6 +391,21 @@ def add_detail_sheet(wb, sheet_title: str, summary: list[tuple], data: dict) -> 
                 c.font = Font(bold=True, color=RED if c.value > 0 else BLUE)
         r += 1
 
+    fin = data.get("stability") or {}
+    if fin:
+        r = section(r, "재무 안정성 · 배당")
+        r = line(r, [("부채비율(%)", fin.get("부채비율")), ("당좌비율(%)", fin.get("당좌비율"))])
+        r = line(r, [("주당배당금(원)", fin.get("주당배당금")), ("시가배당률(%)", fin.get("시가배당률"))])
+        r += 1
+
+    fc_ = data.get("forecast") or {}
+    if fc_:
+        r = section(r, "컨센서스 전망 (증권사 추정)")
+        r = line(r, [("올해 매출(억)", fc_.get("매출액")), ("올해 영업이익(억)", fc_.get("영업이익"))])
+        if fc_.get("기간"):
+            r = wide(r, "추정 기준", str(fc_["기간"]) + " — 확정 실적이 아닙니다")
+        r += 1
+
     peers = data.get("peers") or []
     if peers:
         r = section(r, "같은 업종 주요 종목")
@@ -469,13 +484,27 @@ def add_detail_sheet(wb, sheet_title: str, summary: list[tuple], data: dict) -> 
                 hc.border = box
             r += 1
         for line_ in rows_[:8]:
-            cells = line_ if isinstance(line_, (list, tuple)) else [line_]
+            # 행은 리스트로도, {"cells": [...], "url": ...} 로도 받는다.
+            # 텔레그램 원문처럼 링크가 있으면 마지막 칸에서 바로 열리게 한다.
+            link = None
+            if isinstance(line_, dict):
+                cells = line_.get("cells") or []
+                link = line_.get("url")
+            elif isinstance(line_, (list, tuple)):
+                cells = list(line_)
+            else:
+                cells = [line_]
             span = len(cols_) if cols_ else min(len(cells), 6)
+            last_i = min(len(cells), 6) - 1
             for i, v in enumerate(cells[:6]):
                 vc = ws.cell(row=r, column=1 + i, value=v)
                 vc.border = box
-                vc.font = Font(size=9 if i == 0 else 10,
-                               color=GREY if i == 0 else "000000")
+                if link and i == last_i:
+                    vc.hyperlink = link
+                    vc.font = Font(size=10, color="0563C1", underline="single")
+                else:
+                    vc.font = Font(size=9 if i == 0 else 10,
+                                   color=GREY if i == 0 else "000000")
                 vc.alignment = Alignment(horizontal="left", vertical="center")
                 if isinstance(v, (int, float)) and not isinstance(v, bool):
                     vc.number_format = "#,##0.00" if float(v) != int(v) else "#,##0"
