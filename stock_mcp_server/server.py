@@ -1777,23 +1777,50 @@ async def get_multi_chart_stats(codes: list[str], days: int = 260) -> str:
     if not stats:
         return "차트 통계를 가져올 수 없습니다."
 
-    lines = [f"차트 통계 ({len(stats)}개 종목, 최근 {days}일 집계):", ""]
-    lines.append("코드 | 현재가 | 최고가(날짜) | 최저가(날짜) | 고점대비낙폭 | 기간수익률")
-    lines.append("---|---|---|---|---|---")
+    # 요청한 기간만큼 데이터가 실제로 있는지는 종목마다 다르다. 신규 상장·거래정지
+    # 종목은 260일을 요청해도 몇 봉밖에 없는데, 헤더에 "최근 260일 집계"라고만 쓰면
+    # 7일치 고점을 52주 고점으로 읽게 된다. 부족한 종목은 행에 표시하고 경고로 올린다.
+    short = [s for s in stats
+             if isinstance(s.get("bars_count"), int) and s["bars_count"] < days * 0.6]
+    lines = [f"차트 통계 ({len(stats)}개 종목, 요청 {days}일 집계):", ""]
+    lines.append("코드 | 현재가 | 최고가(날짜) | 최저가(날짜) | 고점대비낙폭 | 기간수익률 | 봉수")
+    lines.append("---|---|---|---|---|---|---")
     for s in stats:
+        bars = s.get("bars_count")
+        bars_s = f"{bars}" if isinstance(bars, int) else "-"
+        if isinstance(bars, int) and bars < days * 0.6:
+            bars_s = f"⚠️{bars}"
         lines.append(
             f"{s['code']} | {s['current_price']:,} | "
             f"{s['high']:,}({s['high_date']}) | "
             f"{s['low']:,}({s['low_date']}) | "
             f"{s['drawdown_pct']:+.1f}% | "
-            f"{s['period_return_pct']:+.1f}%"
+            f"{s['period_return_pct']:+.1f}% | "
+            f"{bars_s}"
         )
     lines.append("")
     lines.append(
         "※ 기간 **집계값**만 반환(시계열 OHLCV 아님). "
         "봉별 시계열이 필요하면 get_chart를 별도 호출."
     )
-    return _append_result_meta("\n".join(lines), _kr_meta(kind="bars"))
+    lines.append(
+        "※ **봉수**는 이 통계가 실제로 몇 거래일로 계산됐는지입니다. "
+        "요청 기간보다 훨씬 적으면(⚠️) 고점·저점과 낙폭이 그 짧은 구간 기준이라, "
+        "'52주 고점' 같은 표현을 쓰면 안 됩니다."
+    )
+    warns = None
+    if short:
+        names = ", ".join(f"{s['code']}({s['bars_count']}봉)" for s in short[:8])
+        warns = [
+            f"요청 {days}일보다 데이터가 크게 짧은 종목 {len(short)}건: {names}"
+            " — 신규 상장·거래정지 가능성. 낙폭·기간수익률이 짧은 구간 기준입니다."
+        ]
+    return _append_result_meta(
+        "\n".join(lines),
+        _kr_meta(kind="bars",
+                 data_completeness=rmeta.PARTIAL if short else rmeta.COMPLETE,
+                 warnings=warns),
+    )
 
 
 @mcp.tool()
@@ -2368,6 +2395,12 @@ async def get_etf_info(code: str) -> str:
     )
     lines.append(f"- 베타: {_num('beta', '.2f')}")
     lines.append(f"- 외국인 비율: {_num('foreign_rate', '.2f', '%')}")
+    # ETF 는 "원할 때 팔 수 있는가"가 개별주보다 중요하다. 20일 평균 거래량과
+    # 유동성공급자(LP)는 받아오면서도 내보내지 않고 있었다.
+    lines.append(f"- 20일 평균 거래량: {_num('volume_20d_avg', ',.0f', '주')}")
+    lp = (data.get("lp_list") or "").strip()
+    if lp:
+        lines.append(f"- 유동성공급자(LP): {lp}")
 
     lines.append("")
     lines.append("## 수익률")
@@ -3480,8 +3513,13 @@ async def get_reports(code: str, count: int = 5) -> str:
         tp_str = f" | 목표가 {tp:,}원" if tp else ""
         op_str = f" | {op}" if op else ""
 
+        # 조회수는 파싱해두고 버리던 값이다. 같은 날 나온 리포트라도 몇 배씩
+        # 차이가 나며, "어느 설명이 실제로 읽혔는가"를 재는 몇 안 되는 숫자다.
+        views = report.get("views")
+        views_str = f" | 조회 {views:,}" if isinstance(views, int) and views > 0 else ""
+
         lines.append(f"### {report['title']}")
-        lines.append(f"{report['broker']} | {report['date']}{tp_str}{op_str}")
+        lines.append(f"{report['broker']} | {report['date']}{tp_str}{op_str}{views_str}")
 
         summary = detail.get("summary", "")
         if summary:
