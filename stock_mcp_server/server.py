@@ -77,6 +77,7 @@ from stock_mcp_server.market_clock import (  # noqa: E402
     format_market_clock,
     get_market_clock as build_market_clock,
     krx_calendar,
+    us_calendar,
     KST,
 )
 from stock_mcp_server import _result_meta as rmeta
@@ -735,6 +736,9 @@ def _us_meta(
     ticker: str | None = None,
     data_as_of=None,
     data_completeness: str = rmeta.COMPLETE,
+    coverage: dict | None = None,
+    bar_state: dict | None = None,
+    extra: dict | None = None,
     warnings: list[str] | None = None,
 ) -> dict:
     """US 도구용 메타. yfinance는 15분 지연 공지가 있어 is_delayed를 세운다."""
@@ -753,7 +757,11 @@ def _us_meta(
             f"미국장 마감 상태 — 표시된 값은 최근 거래일({us_state.get('last_trading_day')}) 기준입니다.",
         )
 
-    return rmeta.build_meta(
+    data_completeness, coverage, warns = _bar_state_effects(
+        bar_state, data_completeness, coverage, warns
+    )
+
+    meta = rmeta.build_meta(
         lens="stocklens",
         data_basis=basis,
         data_as_of=data_as_of or (None if kind == "filing" else us_state.get("last_trading_day")),
@@ -761,9 +769,15 @@ def _us_meta(
         session=us_state.get("status"),
         is_delayed=bool(us_state.get("is_open")),  # yfinance 실시간은 지연 시세
         data_completeness=data_completeness,
+        coverage=coverage,
         entity_info=rmeta.entity(stock_code=ticker),
         warnings=warns,
     )
+    if bar_state:
+        meta["bar_state"] = bar_state
+    for key, value in (extra or {}).items():
+        meta[key] = value
+    return meta
 
 
 def _deliver_notices(result, notices: list[str]) -> str:
@@ -850,6 +864,48 @@ def _emit_coverage_counters(lens: str, meta: dict) -> None:
         pass
 
 
+def _bar_state_effects(
+    bar_state: dict | None,
+    data_completeness: str,
+    coverage: dict | None,
+    warns: list[str],
+) -> tuple[str, dict | None, list[str]]:
+    """봉 상태를 완전성·coverage·경고에 반영한다. KR·US 메타가 같이 쓴다.
+
+    봉 구간이 안 끝났다는 사실은 세션 상태와 별개다. 수요일 저녁이면 장은
+    닫혔지만(basis=last_close) 그 주 주봉은 금요일까지 남아 있다.
+    """
+    if not bar_state:
+        return data_completeness, coverage, warns
+    tf_label = {"day": "일봉", "week": "주봉", "month": "월봉"}.get(
+        bar_state.get("timeframe"), bar_state.get("timeframe") or "봉"
+    )
+    if bar_state.get("calculation_includes_incomplete") is True:
+        done = bar_state.get("last_completed_bar_date")
+        warns.append(
+            f"마지막 {tf_label}({bar_state.get('last_bar_date')})이 아직 진행 중입니다"
+            + (f". 확정된 마지막 {tf_label}은 {done}입니다." if done else ".")
+            + " 이 봉이 포함된 지표·낙폭·신고가 판정은 구간이 끝나면 달라질 수 있습니다."
+        )
+        data_completeness = rmeta.PARTIAL
+        coverage = dict(coverage or {})
+        coverage.setdefault("truncated", False)
+        coverage["coverage_complete"] = False
+        coverage["reason"] = coverage.get("reason") or "incomplete_tail"
+    elif bar_state.get("last_bar_complete") is None:
+        warns.append(
+            f"마지막 {tf_label}의 마감 여부를 확인하지 못했습니다. "
+            "이 봉이 확정치인지 진행 중인지 알 수 없습니다."
+        )
+        # 모르는 것을 확정치로 내보내지 않는다. 판별 실패는 partial 이다.
+        data_completeness = rmeta.PARTIAL
+        coverage = dict(coverage or {})
+        coverage.setdefault("truncated", False)
+        coverage["coverage_complete"] = False
+        coverage["reason"] = coverage.get("reason") or "unknown"
+    return data_completeness, coverage, warns
+
+
 def _kr_meta(
     *,
     kind: str,
@@ -886,35 +942,9 @@ def _kr_meta(
     if kind != "filing":
         warns = _kr_market_note(krx) + warns
 
-    # 봉 구간이 안 끝났다는 사실은 세션 상태와 별개다. 수요일 저녁이면 장은
-    # 닫혔지만(basis=last_close) 그 주 주봉은 금요일까지 남아 있다.
-    if bar_state:
-        tf_label = {"day": "일봉", "week": "주봉", "month": "월봉"}.get(
-            bar_state.get("timeframe"), bar_state.get("timeframe") or "봉"
-        )
-        if bar_state.get("calculation_includes_incomplete") is True:
-            done = bar_state.get("last_completed_bar_date")
-            warns.append(
-                f"마지막 {tf_label}({bar_state.get('last_bar_date')})이 아직 진행 중입니다"
-                + (f". 확정된 마지막 {tf_label}은 {done}입니다." if done else ".")
-                + " 이 봉이 포함된 지표·낙폭·신고가 판정은 구간이 끝나면 달라질 수 있습니다."
-            )
-            data_completeness = rmeta.PARTIAL
-            coverage = dict(coverage or {})
-            coverage.setdefault("truncated", False)
-            coverage["coverage_complete"] = False
-            coverage["reason"] = coverage.get("reason") or "incomplete_tail"
-        elif bar_state.get("last_bar_complete") is None:
-            warns.append(
-                f"마지막 {tf_label}의 마감 여부를 확인하지 못했습니다. "
-                "이 봉이 확정치인지 진행 중인지 알 수 없습니다."
-            )
-            # 모르는 것을 확정치로 내보내지 않는다. 판별 실패는 partial 이다.
-            data_completeness = rmeta.PARTIAL
-            coverage = dict(coverage or {})
-            coverage.setdefault("truncated", False)
-            coverage["coverage_complete"] = False
-            coverage["reason"] = coverage.get("reason") or "unknown"
+    data_completeness, coverage, warns = _bar_state_effects(
+        bar_state, data_completeness, coverage, warns
+    )
 
     meta = rmeta.build_meta(
         lens="stocklens",
@@ -4270,7 +4300,26 @@ async def get_us_chart(
             f"💡 더 필요하면 `limit={min(total, 5000)}`로 재호출하세요. "
             f"백테스트·CSV 저장 용도면 **export_us_to_excel** 로 파일 저장 (토큰 0)."
         )
-    return _append_result_meta("\n".join(lines), _us_meta(kind="bars"))
+    # 일·주·월봉은 마지막 봉의 마감 여부를 미국 거래소 달력으로 판정한다(SL-02).
+    # yfinance 일봉·주봉·월봉은 정규장 체결만 담으므로 prepost 와 무관하게
+    # 정규 마감이 그 봉의 끝이다. intraday 는 항상 진행 중 봉이 섞여 대상이 아니다.
+    tf_map = {"1d": "day", "1wk": "week", "1mo": "month"}
+    bar_state = None
+    if interval in tf_map:
+        bar_state = _bar_state(
+            timeframe=tf_map[interval],
+            rows=rows,
+            market_calendar=us_calendar(),
+        )
+    return _append_result_meta(
+        "\n".join(lines),
+        _us_meta(
+            kind="bars",
+            ticker=ticker,
+            data_as_of=(rows[-1].get("date") or rows[-1].get("datetime")),
+            bar_state=bar_state,
+        ),
+    )
 
 
 @mcp.tool()

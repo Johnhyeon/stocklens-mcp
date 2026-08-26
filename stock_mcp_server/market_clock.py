@@ -162,12 +162,20 @@ class MarketCalendar:
     tz: object
     hours: SessionHours
     holiday_name_func: object
+    # 날짜별로 장 시간이 다른 시장용(미국 조기 마감 등). None 이면 hours 고정.
+    hours_func: object = None
+    # 프리·포스트까지 봐야 그 날이 끝나는 데이터용. 일반 봉은 정규 마감이 끝이다.
+    use_extended_close: bool = False
 
     def is_trading_day(self, day: date) -> bool:
         return day.weekday() < 5 and self.holiday_name_func(day) is None
 
     def close_datetime(self, day: date) -> datetime:
-        return datetime.combine(day, self.hours.regular_close, tzinfo=self.tz)
+        hours = self.hours_func(day) if self.hours_func else self.hours
+        close = hours.regular_close
+        if self.use_extended_close and hours.after_close:
+            close = hours.after_close
+        return datetime.combine(day, close, tzinfo=self.tz)
 
     def period_bounds(self, day: date, timeframe: str) -> tuple[date, date]:
         if timeframe == "week":
@@ -218,6 +226,22 @@ class MarketCalendar:
 def krx_calendar() -> MarketCalendar:
     """KRX 거래일 캘린더. 봉 마감 판정에 쓴다."""
     return MarketCalendar(tz=KST, hours=KRX_HOURS, holiday_name_func=_krx_holiday_name)
+
+
+def us_calendar(include_extended: bool = False) -> MarketCalendar:
+    """미국(NYSE/NASDAQ) 거래일 캘린더.
+
+    조기 마감일(추수감사절 다음날 13:00 등)은 hours_func 로 반영한다.
+    include_extended 는 프리·포스트 체결까지 담는 데이터용이다 - yfinance 의
+    일봉·주봉·월봉은 정규장 체결만 담으므로 기본 False 가 맞다.
+    """
+    return MarketCalendar(
+        tz=ET,
+        hours=US_HOURS,
+        holiday_name_func=_us_holiday_name,
+        hours_func=_us_hours,
+        use_extended_close=include_extended,
+    )
 
 
 def get_market_clock(now: datetime | None = None) -> dict:
