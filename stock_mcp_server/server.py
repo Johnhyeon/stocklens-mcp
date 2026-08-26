@@ -346,7 +346,10 @@ payload 안 `_meta` 키로) 붙인다. **날짜를 말하기 전에 반드시 �
 - `get_consensus`: 컨센서스 — 증권사 투자의견·목표주가 + **어닝 서프라이즈**
   (영업이익·당기순이익의 컨센서스 vs 잠정치). **매출액은 이 도구에 없다** — 매출은
   `get_financial`(네이버 실적표) 또는 DartLens `get_major_accounts`(공시 원본)로.
-- `get_reports`: 증권사 리포트 — 목록 + 본문 요약 + PDF 링크
+- `get_reports`: 증권사 리포트 — 목록 + 본문 요약 + PDF 링크 (조회수 포함)
+- `get_sector_valuation`: 업종·테마의 PER·PBR·ROE **집계**와 종목별 할증/할인 위치.
+  개별 지표만으로는 알 수 없는 **비교 기준**을 만든다. 중앙값이 기준이며
+  적자(PER 음수)는 집계에서 빼고 건수를 따로 알린다.
 - `get_disclosure`: 공시 목록 — DART 전자공시 제목/날짜
 - DartLens가 함께 설치되어 있으면: StockLens 주가·수급 이상 구간 → DartLens 해당 기간 공시 확인,
   DartLens 실적/공시 결과 → StockLens `get_event_reaction(code, event_date=공시일)` 순서로 이어가기
@@ -1588,6 +1591,130 @@ async def get_sector_stocks(sector_name: str, count: int = 30) -> str:
             f"{s['code']} | {s['name']} | {s['price']:,} | {s['change_rate']} | {s['volume']:,}"
         )
     return _append_result_meta("\n".join(lines), _kr_meta(kind="snapshot"))
+
+
+@mcp.tool()
+@safe_tool
+@track_metrics("get_sector_valuation")
+async def get_sector_valuation(
+    sector_name: str,
+    top_n: int = 40,
+    kind: str = "sector",
+) -> str:
+    """업종밸류에이션 — 업종·테마의 PER·PBR·ROE **집계**와 종목별 할증/할인 위치.
+
+    "반도체 업종 평균 PER", "이 업종에서 싼 편인가", "동종 대비 할증인가" 같은
+    질문에 사용합니다. 개별 종목 지표(get_financial)로는 알 수 없는 **비교 기준**을 만듭니다.
+
+    통계는 **중앙값이 기준**입니다. 평균은 적자 기업과 극단값(PER 500배 등)에
+    쉽게 흔들려 업종 대표값으로 쓰기 어렵습니다.
+
+    ⚠️ 적자 기업의 PER은 음수로 나오며 **집계에서 제외**합니다(제외 건수를 함께 표기).
+    ⚠️ 종목 목록은 등락률 순으로 받아오므로, top_n 으로 자르면 그날 많이 오른
+    종목 쪽으로 치우칩니다. 업종 전체를 보려면 `list_sectors`로 종목 수를 확인하고
+    top_n 을 그 이상으로 주세요.
+
+    Args:
+        sector_name: 업종명 또는 테마명 (예: "반도체와반도체장비", "건설")
+        top_n: 집계에 쓸 최대 종목 수 (기본 40, 최대 80). 클수록 느립니다.
+        kind: "sector"(업종, 기본) / "theme"(테마)
+    """
+    import statistics as _st
+
+    top_n = max(5, min(top_n, 80))
+    if kind == "theme":
+        rows = await naver_get_theme_stocks(sector_name, count=top_n, include_reason=False)
+    else:
+        rows = await naver_get_sector_stocks(sector_name, count=top_n)
+    # 두 도구 모두 {"stocks": [...]} 형태의 dict 를 돌려준다(리스트가 아니다).
+    if isinstance(rows, dict):
+        rows = rows.get("stocks") or rows.get("items") or []
+    if not rows:
+        return f"'{sector_name}'에 해당하는 종목을 찾지 못했습니다. list_sectors / list_themes 로 이름을 확인하세요."
+
+    codes = [r.get("code") for r in rows if isinstance(r, dict) and r.get("code")][:top_n]
+    if not codes:
+        return f"'{sector_name}'에서 종목코드를 얻지 못했습니다."
+
+    snap = await naver_scan_snapshot(codes, days=60, include_financial=True)
+    if not snap:
+        return f"'{sector_name}' 재무 데이터를 가져오지 못했습니다."
+
+    def series(key, positive_only=False):
+        out = []
+        for s in snap:
+            v = s.get(key)
+            if isinstance(v, (int, float)):
+                if positive_only and v <= 0:
+                    continue
+                out.append((s.get("code"), s.get("name"), float(v)))
+        return out
+
+    per = series("per", positive_only=True)
+    pbr = series("pbr", positive_only=True)
+    roe = series("roe")
+    neg_per = [s for s in snap if isinstance(s.get("per"), (int, float)) and s["per"] <= 0]
+    periods = sorted({s.get("fin_period") for s in snap if s.get("fin_period")})
+
+    def stat_line(label, arr, unit=""):
+        if not arr:
+            return f"{label} | - | - | - | 0"
+        vals = sorted(v for _, _, v in arr)
+        med = _st.median(vals)
+        avg = sum(vals) / len(vals)
+        return (f"{label} | {med:,.2f}{unit} | {avg:,.2f}{unit} | "
+                f"{vals[0]:,.2f} ~ {vals[-1]:,.2f} | {len(vals)}")
+
+    lines = [f"## {sector_name} 밸류에이션 집계", ""]
+    lines.append(f"- 대상 종목: {len(snap)}개 (요청 {len(codes)}개)")
+    if periods:
+        lines.append(f"- 재무 기준 기간: {', '.join(periods)}")
+    if neg_per:
+        names = ", ".join(f"{s.get('name')}" for s in neg_per[:6])
+        lines.append(f"- **PER 집계 제외(적자) {len(neg_per)}개**: {names}")
+    lines.append("")
+    lines.append("지표 | 중앙값 | 평균 | 최소~최대 | 표본")
+    lines.append("---|---:|---:|---|---:")
+    lines.append(stat_line("PER(배)", per))
+    lines.append(stat_line("PBR(배)", pbr))
+    lines.append(stat_line("ROE(%)", roe))
+
+    per_map = {c: v for c, _, v in per}
+    med_per = _st.median([v for _, _, v in per]) if per else None
+    if med_per:
+        lines.append("")
+        lines.append(f"### 중앙값(PER {med_per:,.2f}배) 대비 위치")
+        lines.append("종목 | PER | 중앙값 대비 | PBR | ROE(%)")
+        lines.append("---|---:|---:|---:|---:")
+        pbr_map = {c: v for c, _, v in pbr}
+        roe_map = {c: v for c, _, v in roe}
+        ranked = sorted(((s.get("code"), s.get("name")) for s in snap
+                         if s.get("code") in per_map),
+                        key=lambda x: per_map[x[0]])
+        for code_, name_ in ranked:
+            p = per_map[code_]
+            gap = (p - med_per) / med_per * 100
+            tag = "할인" if gap < -5 else ("할증" if gap > 5 else "비슷")
+            pb = pbr_map.get(code_)
+            ro = roe_map.get(code_)
+            lines.append(
+                f"{name_}({code_}) | {p:,.2f} | {gap:+.0f}% {tag} | "
+                f"{pb:,.2f}" if pb is not None else f"{name_}({code_}) | {p:,.2f} | {gap:+.0f}% {tag} | -"
+            )
+            lines[-1] += f" | {ro:,.2f}" if ro is not None else " | -"
+
+    lines.append("")
+    lines.append("※ 낮은 PER이 곧 저평가는 아닙니다. 이익이 정점이거나 성장이 멈출 것이라는")
+    lines.append("  기대가 반영된 결과일 수 있습니다. **왜 그 숫자인지**를 함께 확인하세요.")
+    lines.append("※ 적자 기업(PER 음수)은 집계에서 빠져 있습니다 — 위 제외 목록을 보세요.")
+    lines.append("※ 종목 목록이 등락률 순이라, top_n 으로 잘랐다면 그날 오른 쪽으로 치우칩니다.")
+
+    return _append_result_meta(
+        "\n".join(lines),
+        _kr_meta(kind="filing",
+                 data_completeness=rmeta.PARTIAL if neg_per else rmeta.COMPLETE),
+    )
+
 
 
 @mcp.tool()
