@@ -56,6 +56,7 @@ from stock_mcp_server._excel import (
     load_excel,
     apply_filters,
     unknown_filter_columns,
+    COLUMN_LABELS_KO,
 )
 from stock_mcp_server._metrics import (
     track_metrics,
@@ -2550,6 +2551,10 @@ async def query_excel(
         df_display = df[display_cols]
     else:
         df_display = df
+    # 화면 표기도 파일과 같은 한글 이름으로 맞춘다.
+    df_display = df_display.rename(
+        columns={c: COLUMN_LABELS_KO.get(c, c) for c in df_display.columns}
+    )
 
     lines = [f"쿼리 결과 ({len(df)}개 종목, 파일: {Path(file_path).name}):", ""]
     if unapplied:
@@ -2568,9 +2573,13 @@ async def query_excel(
         for col in df_display.columns:
             v = row[col]
             if isinstance(v, (int, float)) and not isinstance(v, bool):
-                if col in ("current_price", "volume", "avg_volume", "high", "low"):
+                # 열 이름은 이미 한글로 바뀐 뒤라 영문 키로만 판정하면 서식이 빠진다.
+                if col in ("current_price", "volume", "avg_volume", "high", "low") or col in (
+                    "현재가", "거래량", "평균거래량", "기간최고가", "기간최저가",
+                    "시가", "종가", "EPS(원)", "BPS(원)", "집계봉수",
+                ):
                     values.append(f"{int(v):,}")
-                elif col.endswith("_pct"):
+                elif col.endswith("_pct") or col.endswith("(%)"):
                     values.append(f"{v:+.2f}%")
                 else:
                     values.append(f"{v:.2f}" if isinstance(v, float) else str(v))

@@ -32,6 +32,90 @@ def generate_filename(prefix: str, ext: str = "xlsx") -> str:
     return f"{prefix}_{ts}.{ext}"
 
 
+# 열 이름 → 한글 표시명. 파일을 여는 사람은 drawdown_pct 가 뭔지 모른다.
+# 내부 필터(query_excel)는 영문 키를 그대로 받으므로 별칭으로 이어 준다.
+COLUMN_LABELS_KO: dict[str, str] = {
+    "code": "종목코드", "name": "종목명",
+    "current_price": "현재가", "price": "현재가", "volume": "거래량",
+    "high": "기간최고가", "high_date": "최고가일",
+    "low": "기간최저가", "low_date": "최저가일",
+    "drawdown_pct": "고점대비낙폭(%)", "recovery_pct": "저점대비회복(%)",
+    "period_return_pct": "기간수익률(%)", "avg_volume": "평균거래량",
+    "bars_count": "집계봉수",
+    "per": "PER(배)", "pbr": "PBR(배)", "eps": "EPS(원)", "bps": "BPS(원)",
+    "roe": "ROE(%)", "per_basis": "PER기준", "fin_period": "재무기준기간",
+    "sector": "업종", "market_cap": "시가총액",
+    "date": "날짜", "open": "시가", "close": "종가",
+    "inst_net": "기관순매매", "foreign_net": "외국인순매매",
+}
+
+# 숫자 서식 — 정수형 금액/수량과 소수형 비율을 나눈다.
+_INT_LIKE = ("현재가", "거래량", "기간최고가", "기간최저가", "평균거래량",
+             "시가총액", "EPS(원)", "BPS(원)", "시가", "종가",
+             "기관순매매", "외국인순매매", "집계봉수")
+_DEC_LIKE = ("PER(배)", "PBR(배)", "배당수익률")
+# 등락·수익률 계열은 부호가 곧 의미다. 국내 관례대로 오름 빨강 / 내림 파랑으로
+# 칠한다(숫자 서식에 색을 넣으면 조건부 서식 없이 그대로 적용된다).
+_SIGNED_PCT = ("고점대비낙폭(%)", "저점대비회복(%)", "기간수익률(%)", "ROE(%)",
+               "기관순매매", "외국인순매매")
+_SIGNED_FMT = '[Red]+#,##0.00;[Blue]-#,##0.00;0.00'
+_SIGNED_INT_FMT = '[Red]+#,##0;[Blue]-#,##0;0'
+
+
+# 한글 표시명 → 내부 키. 파일은 한글로 저장하지만 필터·정렬은 영문 키로 받는다
+# (기존 사용자가 쓰던 per_max 같은 조건이 그대로 동작해야 한다).
+LABEL_TO_KEY: dict[str, str] = {}
+for _k, _v in COLUMN_LABELS_KO.items():
+    LABEL_TO_KEY.setdefault(_v, _k)
+
+
+def _polish_sheet(ws, df) -> None:
+    """열자마자 쓸 수 있는 상태로 만든다 — 필터·헤더고정·열너비·숫자서식.
+
+    지금까지는 df.to_excel() 만 불러서, 파일을 열면 열 이름이 잘리고 숫자에
+    자릿점이 없으며 정렬하려면 사용자가 직접 필터를 걸어야 했다.
+    """
+    from openpyxl.styles import Alignment, Font, PatternFill
+    from openpyxl.utils import get_column_letter
+
+    if ws.max_row < 1:
+        return
+    header_fill = PatternFill("solid", fgColor="DDEBF7")
+    header_font = Font(bold=True)
+    for cell in ws[1]:
+        cell.fill = header_fill
+        cell.font = header_font
+        cell.alignment = Alignment(horizontal="center", vertical="center")
+
+    # 첫 행 고정 + 자동 필터
+    ws.freeze_panes = "A2"
+    ws.auto_filter.ref = ws.dimensions
+
+    for idx, col_name in enumerate(df.columns, start=1):
+        letter = get_column_letter(idx)
+        # 열 너비: 헤더와 값 중 긴 쪽에 맞추되 한글 폭을 감안해 넉넉히
+        try:
+            longest = max((len(str(v)) for v in df[col_name].head(200)), default=0)
+        except Exception:
+            longest = 0
+        width = min(max(len(str(col_name)) * 1.6, longest * 1.3, 8), 30)
+        ws.column_dimensions[letter].width = width
+
+        fmt = None
+        if col_name in ("기관순매매", "외국인순매매"):
+            fmt = _SIGNED_INT_FMT
+        elif col_name in _SIGNED_PCT:
+            fmt = _SIGNED_FMT
+        elif col_name in _INT_LIKE:
+            fmt = "#,##0"
+        elif col_name in _DEC_LIKE:
+            fmt = "#,##0.00"
+        if fmt:
+            for row in ws.iter_rows(min_row=2, min_col=idx, max_col=idx):
+                for cell in row:
+                    cell.number_format = fmt
+
+
 def save_dataframe_to_excel(
     df: pd.DataFrame,
     file_path: Path | str,
@@ -62,8 +146,13 @@ def save_dataframe_to_excel(
     if "code" in df.columns:
         df["code"] = df["code"].astype(str).str.zfill(6)
 
+    # 영문 열 이름을 한글로 바꿔 저장한다(파일을 여는 사람 기준).
+    # query_excel 은 영문 키를 계속 받으므로 필터 호환은 별칭으로 처리한다.
+    df = df.rename(columns={c: COLUMN_LABELS_KO.get(c, c) for c in df.columns})
+
     with pd.ExcelWriter(file_path, engine="openpyxl") as writer:
         df.to_excel(writer, sheet_name=sheet_name, index=False)
+        _polish_sheet(writer.sheets[sheet_name], df)
 
         # 메타데이터 시트
         meta_rows = [
@@ -90,7 +179,10 @@ def load_excel(file_path: Path | str, sheet_name: str | int = 0) -> pd.DataFrame
     file_path = Path(file_path)
     if not file_path.exists():
         raise FileNotFoundError(f"파일을 찾을 수 없습니다: {file_path}")
-    df = pd.read_excel(file_path, sheet_name=sheet_name, dtype={"code": str})
+    # 파일은 한글 헤더로 저장되지만 내부 처리는 영문 키로 통일한다.
+    df = pd.read_excel(file_path, sheet_name=sheet_name,
+                       dtype={"code": str, "종목코드": str})
+    df = df.rename(columns={c: LABEL_TO_KEY.get(c, c) for c in df.columns})
     if "code" in df.columns:
         df["code"] = df["code"].astype(str).str.zfill(6)
     return df
