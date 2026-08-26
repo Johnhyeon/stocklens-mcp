@@ -60,6 +60,7 @@ from stock_mcp_server._excel import (
     unknown_filter_columns,
     COLUMN_LABELS_KO,
 )
+from stock_mcp_server import _metrics as _metrics_mod  # noqa: E402
 from stock_mcp_server._metrics import (
     track_metrics,
     load_metrics,
@@ -762,6 +763,37 @@ def _kr_market_note(krx: dict | None = None) -> list[str]:
     return [f"KRX 장마감 상태 — 표시된 값은 최근 거래일({krx['last_trading_day']}) 기준입니다."]
 
 
+def _emit_coverage_counters(lens: str, meta: dict) -> None:
+    """메타에 이미 담긴 한계 사실을 카운터로 옮긴다.
+
+    조건을 다시 계산하지 않는다. 응답에 실린 것과 세는 것이 어긋나면 지표를
+    믿을 수 없다. 라벨은 고정 집합이라 종목코드·검색어는 들어가지 않는다.
+    """
+    tool = _metrics_mod.current_tool()
+    if not tool:
+        return
+    try:
+        cov = meta.get("coverage") or {}
+        if cov.get("truncated") is True:
+            _metrics_mod.count_limitation(
+                "lens_coverage_truncated_total",
+                lens=lens, tool=tool, reason=str(cov.get("reason") or "unknown"),
+            )
+        bar = meta.get("bar_state") or {}
+        if bar.get("calculation_includes_incomplete") is True:
+            _metrics_mod.count_limitation(
+                "lens_incomplete_bar_total",
+                tool=tool, timeframe=str(bar.get("timeframe") or "unknown"),
+            )
+        if (meta.get("period_coverage") or {}).get("consistency") == "mixed":
+            _metrics_mod.count_limitation("lens_mixed_period_total", tool=tool)
+        if (meta.get("price_adjustment") or {}).get("status") == "unknown":
+            _metrics_mod.count_limitation("lens_unknown_adjustment_total", tool=tool)
+    except Exception:
+        # 지표 때문에 도구 응답이 죽으면 안 된다.
+        pass
+
+
 def _kr_meta(
     *,
     kind: str,
@@ -842,6 +874,7 @@ def _kr_meta(
     # 직접 정한 뒤 사실만 실어 보낸다.
     for key, value in (extra or {}).items():
         meta[key] = value
+    _emit_coverage_counters("stocklens", meta)
     return meta
 
 
