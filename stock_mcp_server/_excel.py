@@ -252,90 +252,168 @@ def _add_charts(wb, ws_data, df, sheet_name: str) -> None:
         anchor_row += 23
 
 
-def add_detail_sheet(wb, sheet_title: str, summary: list[tuple],
-                     bars: list[dict], flows: list[dict]) -> None:
-    """종목 한 개의 '흐름' 시트 — 요약 + 종가 추이 + 수급 추이 + 원자료.
+def add_detail_sheet(wb, sheet_title: str, summary: list[tuple], data: dict) -> None:
+    """종목 한 개의 '한눈에' 시트 — 가격·밸류에이션·재무추이·수급·공시를 한 화면에.
 
-    목록만 있는 파일은 "누가 후보인가"까지만 답한다. 그 종목이 어떻게 움직여
-    왔는지, 누가 사고팔았는지를 같은 파일에서 보지 못하면 결국 다시 조회해야
-    한다. 탭만 넘기며 훑고 다음에 뭘 볼지 정할 수 있게 만든다.
+    주가 캔들차트는 넣지 않는다. 그건 HTS·증권사 화면이 훨씬 잘 보여주고, 엑셀로
+    옮겨봐야 선 하나짜리 그래프가 된다. 엑셀이 잘하는 건 **흩어진 숫자를 한자리에
+    모아 비교하는 것**이라, 여기서는 재무 추이·목표주가 방향·수급처럼 여러 화면을
+    돌아다녀야 보이던 것들을 모은다.
+
+    data 키: price(dict) / valuation(dict) / quarters(list) / flow(dict)
+             / target(list) / news(list)
     """
     from openpyxl.chart import BarChart, LineChart, Reference
-    from openpyxl.styles import Font
+    from openpyxl.styles import Alignment, Font, PatternFill
     from openpyxl.utils import get_column_letter
 
     ws = wb.create_sheet(sheet_title[:31])
+    ws.sheet_view.showGridLines = False
+    HEAD = PatternFill("solid", fgColor="1F4E79")
+    SUB = PatternFill("solid", fgColor="DDEBF7")
+    WHITE = Font(bold=True, color="FFFFFF", size=11)
+
+    for col, w in (("A", 17), ("B", 15), ("C", 15), ("D", 13), ("E", 13), ("F", 13)):
+        ws.column_dimensions[col].width = w
+    for col in "HIJKLM":
+        ws.column_dimensions[col].width = 13
+
     ws["A1"] = sheet_title
-    ws["A1"].font = Font(bold=True, size=13)
+    ws["A1"].font = Font(bold=True, size=15)
+    note = next((str(v) for k, v in summary
+                 if str(k) in ("읽는법", "판정", "코멘트") and v), "")
+    if note:
+        ws["A2"] = note
+        ws["A2"].font = Font(size=10, color="555555")
 
-    r = 3
-    for label, value in summary:
-        ws.cell(row=r, column=1, value=str(label)).font = Font(bold=True)
-        ws.cell(row=r, column=2, value=value)
+    def section(row, title):
+        c = ws.cell(row=row, column=1, value=f"  {title}")
+        c.fill = HEAD
+        c.font = WHITE
+        for i in range(2, 7):
+            ws.cell(row=row, column=i).fill = HEAD
+        return row + 1
+
+    def kv(row, pairs):
+        for i, (k, v) in enumerate(pairs):
+            ws.cell(row=row, column=1 + i * 2, value=str(k)).font = Font(bold=True, size=10)
+            cell = ws.cell(row=row, column=2 + i * 2, value=v)
+            if isinstance(v, (int, float)) and not isinstance(v, bool):
+                cell.number_format = "#,##0.00" if float(v) != int(v) else "#,##0"
+        return row + 1
+
+    r = 4
+    price = data.get("price") or {}
+    if price:
+        r = section(r, "가격")
+        r = kv(r, [("현재가", price.get("현재가")), ("등락률(%)", price.get("등락률"))])
+        r = kv(r, [("52주 고점 대비(%)", price.get("고점대비")),
+                   ("저점 대비(%)", price.get("저점대비"))])
+        r = kv(r, [("이평배열", price.get("이평배열")), ("거래량 배수", price.get("거래량배수"))])
         r += 1
-    ws.column_dimensions["A"].width = 18
-    ws.column_dimensions["B"].width = 22
 
-    # 원자료는 오른쪽에 둔다 — 차트가 왼쪽 위를 차지한다.
-    head_row = 3
-    cols = ["날짜", "종가", "거래량", "기관순매매", "외국인순매매"]
-    for i, c in enumerate(cols):
-        cell = ws.cell(row=head_row, column=5 + i, value=c)
-        cell.font = Font(bold=True)
-        ws.column_dimensions[get_column_letter(5 + i)].width = 14
+    val = data.get("valuation") or {}
+    if val:
+        r = section(r, f"밸류에이션  ({val.get('기준', '-')})")
+        r = kv(r, [("PER(배)", val.get("PER")), ("업종 중앙값", val.get("업종PER"))])
+        r = kv(r, [("PBR(배)", val.get("PBR")), ("ROE(%)", val.get("ROE"))])
+        if val.get("위치"):
+            ws.cell(row=r, column=1, value="업종 대비").font = Font(bold=True, size=10)
+            ws.cell(row=r, column=2, value=val["위치"])
+            ws.merge_cells(start_row=r, start_column=2, end_row=r, end_column=4)
+            r += 1
+        r += 1
 
-    flow_by_date = {str(f.get("date", "")).replace(".", "-"): f for f in (flows or [])}
-    n = 0
-    for b in bars or []:
-        day = str(b.get("date", ""))
-        if len(day) == 8 and day.isdigit():
-            day = f"{day[:4]}-{day[4:6]}-{day[6:]}"
-        fl = flow_by_date.get(day, {})
-        row = head_row + 1 + n
-        ws.cell(row=row, column=5, value=day)
-        ws.cell(row=row, column=6, value=b.get("close"))
-        ws.cell(row=row, column=7, value=b.get("volume"))
-        # 수급은 없는 날이 있다 — 0 으로 채우면 '순매매 0'과 구분되지 않는다.
-        inst, forg = fl.get("institutional"), fl.get("foreign")
-        if inst is not None:
-            ws.cell(row=row, column=8, value=inst)
-        if forg is not None:
-            ws.cell(row=row, column=9, value=forg)
-        n += 1
-    if n < 2:
-        return
+    flow = data.get("flow") or {}
+    if flow:
+        r = section(r, "수급 (최근 20거래일 누적)")
+        r = kv(r, [("기관(주)", flow.get("기관")), ("외국인(주)", flow.get("외국인"))])
+        for col in (2, 4):
+            c = ws.cell(row=r - 1, column=col)
+            if isinstance(c.value, (int, float)):
+                c.number_format = _SIGNED_INT_FMT
+        r += 1
 
-    last = head_row + n
-    for col, fmt in ((6, "#,##0"), (7, "#,##0"),
-                     (8, _SIGNED_INT_FMT), (9, _SIGNED_INT_FMT)):
-        for row in ws.iter_rows(min_row=head_row + 1, max_row=last,
-                                min_col=col, max_col=col):
-            for cell in row:
-                cell.number_format = fmt
+    news = data.get("news") or []
+    if news:
+        r = section(r, "최근 공시·리포트")
+        for item in news[:6]:
+            # 공시는 2026.08.25, 리포트는 26.07.29 로 와서 나란히 두면 어긋난다.
+            day = str(item.get("date", "")).replace(".", "-")
+            if len(day) == 8 and day[2] == "-":      # 26-07-29 → 2026-07-29
+                day = "20" + day
+            ws.cell(row=r, column=1, value=day[:10]).font = Font(size=10)
+            title = str(item.get("title", ""))
+            # "한화오션(주) ..." 처럼 회사명이 앞에 붙으면 시트 제목과 겹친다.
+            # lstrip("(주) ") 은 문자 집합을 지우므로 뒤따르는 '주'까지 먹는다
+            # (주식선물 → 식선물). 접두사만 정확히 떼어낸다.
+            if title.startswith(sheet_title):
+                title = title[len(sheet_title):]
+                for pre in ("(주)", "㈜", ")"):
+                    if title.startswith(pre):
+                        title = title[len(pre):]
+                        break
+                title = title.lstrip()
+            c = ws.cell(row=r, column=2, value=title[:58])
+            c.font = Font(size=10)
+            c.alignment = Alignment(horizontal="left")
+            ws.merge_cells(start_row=r, start_column=2, end_row=r, end_column=6)
+            r += 1
 
-    cats = Reference(ws, min_col=5, min_row=head_row + 1, max_row=last)
+    # ── 오른쪽: 차트용 데이터와 그래프 ────────────────────
+    qs = data.get("quarters") or []
+    chart_row = 3
+    if len(qs) >= 2:
+        ws.cell(row=chart_row, column=8, value="분기").fill = SUB
+        ws.cell(row=chart_row, column=9, value="매출액(억)").fill = SUB
+        ws.cell(row=chart_row, column=10, value="영업이익(억)").fill = SUB
+        for i in range(8, 11):
+            ws.cell(row=chart_row, column=i).font = Font(bold=True)
+        for i, q in enumerate(qs):
+            rr = chart_row + 1 + i
+            ws.cell(row=rr, column=8, value=q.get("기간"))
+            ws.cell(row=rr, column=9, value=q.get("매출액")).number_format = "#,##0"
+            ws.cell(row=rr, column=10, value=q.get("영업이익")).number_format = _SIGNED_INT_FMT
+        last = chart_row + len(qs)
+        ch = BarChart()
+        ch.type = "col"
+        ch.title = "분기 매출·영업이익 (억원)"
+        ch.height, ch.width = 7.5, 15
+        ch.add_data(Reference(ws, min_col=9, max_col=10, min_row=chart_row, max_row=last),
+                    titles_from_data=True)
+        ch.set_categories(Reference(ws, min_col=8, min_row=chart_row + 1, max_row=last))
+        ch.y_axis.majorGridlines = None
+        for s_, color in zip(ch.series, ("4472C4", "ED7D31")):
+            s_.graphicalProperties.solidFill = color
+            s_.graphicalProperties.line.noFill = True
+        ws.add_chart(ch, "H10")
+        chart_row = last + 2
 
-    price = LineChart()
-    price.title = "종가 추이"
-    price.height, price.width = 8, 20
-    price.add_data(Reference(ws, min_col=6, min_row=head_row, max_row=last),
-                   titles_from_data=True)
-    price.set_categories(cats)
-    price.y_axis.title = None
-    ws.add_chart(price, "A12")
-
-    if any(ws.cell(row=x, column=8).value is not None
-           for x in range(head_row + 1, last + 1)):
-        flow_chart = BarChart()
-        flow_chart.type = "col"
-        flow_chart.grouping = "clustered"
-        flow_chart.title = "기관·외국인 순매매 (주)"
-        flow_chart.height, flow_chart.width = 8, 20
-        flow_chart.add_data(Reference(ws, min_col=8, max_col=9,
-                                      min_row=head_row, max_row=last),
-                            titles_from_data=True)
-        flow_chart.set_categories(cats)
-        ws.add_chart(flow_chart, "A29")
+    tg = data.get("target") or []
+    if len(tg) >= 2:
+        base = 27
+        ws.cell(row=base, column=8, value="기준월").fill = SUB
+        ws.cell(row=base, column=9, value="목표주가").fill = SUB
+        for i in (8, 9):
+            ws.cell(row=base, column=i).font = Font(bold=True)
+        for i, tp in enumerate(tg):
+            rr = base + 1 + i
+            ws.cell(row=rr, column=8, value=tp.get("월"))
+            ws.cell(row=rr, column=9, value=tp.get("목표주가")).number_format = "#,##0"
+        last2 = base + len(tg)
+        lc = LineChart()
+        lc.title = "증권사 목표주가 추이 (원)"
+        lc.height, lc.width = 7.5, 15
+        lc.add_data(Reference(ws, min_col=9, min_row=base, max_row=last2),
+                    titles_from_data=True)
+        lc.set_categories(Reference(ws, min_col=8, min_row=base + 1, max_row=last2))
+        lc.legend = None
+        lc.y_axis.majorGridlines = None
+        s0 = lc.series[0]
+        s0.smooth = False
+        s0.graphicalProperties.line.solidFill = "C00000"
+        s0.graphicalProperties.line.width = 22000
+        ws.add_chart(lc, "H34")
 
 
 def save_dataframe_to_excel(

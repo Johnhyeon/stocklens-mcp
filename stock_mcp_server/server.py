@@ -48,6 +48,8 @@ from stock_mcp_server.naver import (
     get_report_detail as naver_get_report_detail,
     REPORT_READ_URL as naver_report_read_url,
     get_disclosure_list as naver_get_disclosure_list,
+    _ttm_eps as _ttm_eps_for,
+    _latest_confirmed_annual as _latest_fin,
 )
 from stock_mcp_server._excel import (
     get_snapshot_dir,
@@ -2729,30 +2731,117 @@ async def save_analysis_to_excel(
                 name_of[c] = str(row.get("종목명") or row.get("name") or c)
 
         async def one_detail(c: str):
+            """한 종목에 필요한 조각을 모은다. 일부가 실패해도 나머지는 살린다."""
+            out: dict = {}
             try:
-                bars = await get_ohlcv(c, "day", detail_days)
+                bars = await get_ohlcv(c, "day", max(detail_days, 130))
+                ind = compute_indicators(bars, ["ma_phase", "position", "volume"])
+                pos = ind.get("position") or {}
+                vol = ind.get("volume") or {}
+                out["price"] = {
+                    "현재가": pos.get("price"),
+                    "등락률": None,
+                    "고점대비": pos.get("pct_from_high_52w"),
+                    "저점대비": pos.get("pct_from_low_52w"),
+                    "이평배열": (ind.get("ma_phase") or {}).get("phase_label"),
+                    "거래량배수": vol.get("ratio_vs_avg_20b"),
+                }
             except Exception:
-                return c, None, None
+                pass
             try:
-                flows = await get_investor_flow(c, min(detail_days, 60))
+                fin = await get_financials(c)
+                ttm, label = _ttm_eps_for(fin)
+                px = (out.get("price") or {}).get("현재가")
+                per = round(px / ttm, 2) if (ttm and px) else None
+                pbr, _ = _latest_fin(fin, "PBR(배)")
+                roe, basis = _latest_fin(fin, "ROE(지배주주)")
+                out["valuation"] = {"PER": per, "PBR": pbr, "ROE": roe,
+                                    "기준": f"PER=TTM~{label}" if label else (basis or "-")}
+                meta = fin.get("_periods") or {}
+                ann, qtr = meta.get("annual") or [], meta.get("quarterly") or []
+                rev, op = fin.get("매출액") or [], fin.get("영업이익") or []
+                qs = []
+                for i, lb in enumerate(qtr):
+                    idx = len(ann) + i
+                    if "(E)" in str(lb) or idx >= len(rev) or idx >= len(op):
+                        continue
+                    try:
+                        qs.append({"기간": str(lb),
+                                   "매출액": float(str(rev[idx]).replace(",", "")),
+                                   "영업이익": float(str(op[idx]).replace(",", ""))})
+                    except ValueError:
+                        continue
+                out["quarters"] = qs[-6:]
             except Exception:
-                flows = []
-            return c, bars, flows
+                pass
+            try:
+                sec = await naver_get_stock_sector(c)
+                if sec.get("sector_per_naver"):
+                    out.setdefault("valuation", {})["업종PER"] = sec["sector_per_naver"]
+                    p_ = (out.get("valuation") or {}).get("PER")
+                    if p_ and sec["sector_per_naver"]:
+                        gap = (p_ - sec["sector_per_naver"]) / sec["sector_per_naver"] * 100
+                        out["valuation"]["위치"] = (
+                            f"{sec.get('sector_name','업종')} 대비 {gap:+.0f}% "
+                            f"{'할증' if gap > 5 else ('할인' if gap < -5 else '비슷')}")
+            except Exception:
+                pass
+            try:
+                fl = await get_investor_flow(c, 20)
+                inst = [d.get("institutional") for d in fl if d.get("institutional") is not None]
+                forg = [d.get("foreign") for d in fl if d.get("foreign") is not None]
+                out["flow"] = {"기관": int(sum(inst)) if inst else None,
+                               "외국인": int(sum(forg)) if forg else None}
+            except Exception:
+                pass
+            try:
+                con = await naver_get_consensus(c)
+                pts = []
+                for h in (con.get("target_price_history") or []):
+                    y, d = h.get("price"), h.get("date")
+                    if y is None or d is None:
+                        continue
+                    try:
+                        lb = _dt.datetime.fromtimestamp(float(d) / 1000,
+                                                        _dt.timezone.utc).strftime("%Y-%m")
+                    except Exception:
+                        continue
+                    pts.append({"월": lb, "목표주가": float(y)})
+                out["target"] = pts
+            except Exception:
+                pass
+            news = []
+            try:
+                for it in (await naver_get_disclosure_list(c))[:4]:
+                    news.append({"date": it.get("date"), "title": it.get("title")})
+            except Exception:
+                pass
+            try:
+                reps = await naver_get_reports(c)
+                for it in (reps or [])[:3]:
+                    news.append({"date": it.get("date"),
+                                 "title": f"[리포트] {it.get('broker','')} {it.get('title','')}"})
+            except Exception:
+                pass
+            out["news"] = news
+            return c, out
 
         results = await asyncio.gather(*[one_detail(c) for c in picks])
         wb = load_workbook(saved)
-        for c, bars, flows in results:
-            if not bars:
+        for c, payload in results:
+            if not payload:
                 continue
             label = name_of.get(c, c)
             summary = []
             for row in clean:
                 rc = str(row.get("코드") or row.get("code") or "").strip()
                 if rc == c:
-                    summary = [(k, v) for k, v in row.items()][:10]
+                    summary = list(row.items())
+                    if payload.get("price") is not None:
+                        payload["price"]["등락률"] = row.get("등락률")
                     break
             try:
-                add_detail_sheet(wb, f"{label}", summary, bars, flows or [])
+                add_detail_sheet(wb, f"{label}", summary, payload)
                 made_detail.append(label)
             except Exception:
                 continue
