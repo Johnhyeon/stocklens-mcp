@@ -24,6 +24,8 @@ class ProviderStatusContractTests(unittest.TestCase):
             "authentication_failed", "permission_denied", "rate_limited",
             "provider_unavailable", "source_parse_error", "entity_not_found",
             "no_session", "partial",
+            # 1.0 승인 추가: 미지원·미검증 시장 (키 문제와 구분)
+            "unsupported",
         ))
 
     def test_provider_extension_valid(self):
