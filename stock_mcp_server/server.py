@@ -7924,7 +7924,25 @@ from stock_mcp_server.market_data._bars import (  # noqa: E402
     sort_and_dedupe as _sort_and_dedupe_bars,
 )
 
-_INTRADAY_SOURCES = ("auto", "kis", "naver", "yahoo")
+from stock_mcp_server.market_data.provider_registry import (  # noqa: E402
+    registry as _provider_registry,
+)
+from stock_mcp_server.market_data.kiwoom_client import (  # noqa: E402
+    KiwoomApiError as _KiwoomApiError,
+)
+from stock_mcp_server.market_data.toss_client import (  # noqa: E402
+    TossApiError as _TossApiError,
+)
+
+_INTRADAY_SOURCES = ("auto",) + _provider_registry.ids() + (
+    "naver", "yahoo")
+
+# 완료 거래일 캐시 복원 시 쓰는 공급자별 KR 1m endpoint 이름.
+_BROKER_KR_ENDPOINTS = {
+    "kis": "domestic_minute",
+    "kiwoom": "kiwoom_kr_minute",
+    "toss": "toss_candles",
+}
 
 # KIS 분봉 다일 조회 예산. 이 이상의 이력이 필요하면 partial 로 정직하게
 # 보고한다 (무한 페이지·무한 일수 금지).
@@ -7961,10 +7979,10 @@ def _broker_capabilities(state: dict) -> dict:
                     "us_daily": False}
     v2 = state.get("state_v2")
     if v2 is not None:
-        # 라우터는 아직 KIS 전용이다. primary 가 kis 일 때만 산다.
-        if state.get("active_provider") != "kis":
+        primary = state.get("active_provider")
+        if not primary:
             return disconnected
-        return _provider_capabilities_v2(v2, "kis")
+        return _provider_capabilities_v2(v2, primary)
     # 시험용 v1 형태 dict 호환 경로
     if state.get("active_provider") != "kis" or \
             not state.get("active_profile"):
@@ -8004,17 +8022,18 @@ def _trading_day_completed(market: str, day, now) -> bool:
     return win is not None and now >= win.close_at
 
 
-def _kis_day_cache_key(profile: str, market: str, symbol: str,
-                       venue: str, session: str, day) -> dict:
+def _broker_day_cache_key(provider: str, profile: str, market: str,
+                          symbol: str, venue: str, session: str,
+                          day) -> dict:
     return {
-        "provider": "kis", "profile": profile, "market": market,
+        "provider": provider, "profile": profile, "market": market,
         "symbol": symbol, "venue": venue, "session": session,
         "source_interval": "1m", "trading_date": day.strftime("%Y%m%d"),
         "cursor": "", "adjustment": "unadjusted",
     }
 
 
-def _load_cached_kis_day(cache, key: dict):
+def _load_cached_broker_day(cache, key: dict):
     """완전(complete) entry 만 봉으로 복원한다. 손상 시 None."""
     try:
         entry = cache.get(key, connected=True)
@@ -8030,7 +8049,7 @@ def _load_cached_kis_day(cache, key: dict):
     return bars or None
 
 
-def _store_kis_day(cache, key: dict, bars) -> None:
+def _store_broker_day(cache, key: dict, bars) -> None:
     """캐시 저장 실패는 조회 실패가 아니다. 조용히 넘어간다."""
     try:
         cache.put(key, {"bars": [_bar_to_dict(b) for b in bars]},
@@ -8122,48 +8141,53 @@ async def _fetch_intraday_dataset(
     # 연결 능력을 대신하지 않는다 - 이 분기는 라우터가 KIS 를 선택했을
     # 때만 도달한다.
     cache = _intraday_disk_cache()
-    kis_kr_primary = (resolution.selected_provider == "kis"
-                      and market == "KR" and profile is not None)
+    selected = resolution.selected_provider
+    broker_kr = (selected in _provider_registry.ids()
+                 and market == "KR" and profile is not None)
     primary_completed = _trading_day_completed(market, trading_date, now)
 
     dataset = None
     route_meta = None
-    if kis_kr_primary and primary_completed:
-        key = _kis_day_cache_key(
-            profile, market, symbol, "KRX", session, trading_date)
-        cached_bars = _load_cached_kis_day(cache, key)
+    if broker_kr and primary_completed:
+        key = _broker_day_cache_key(
+            selected, profile, market, symbol, "KRX", session,
+            trading_date)
+        cached_bars = _load_cached_broker_day(cache, key)
         if cached_bars:
             dataset = _BDS(
                 bars=cached_bars, market=market, symbol=symbol,
-                provider="kis", profile=profile, venue="KRX",
+                provider=selected, profile=profile, venue="KRX",
                 timezone="Asia/Seoul", session=session,
                 requested_interval=fetch_interval, source_interval="1m",
                 aggregation_method="provider_native",
                 adjustment_basis="unadjusted",
-                source_endpoint="domestic_minute",
+                source_endpoint=_BROKER_KR_ENDPOINTS.get(
+                    selected, "broker_minute"),
                 coverage={"complete": True,
                           "returned_rows": len(cached_bars),
                           "cache_hit": True},
                 warnings=())
             route_meta = {
                 "requested_source": resolution.requested_source,
-                "selected_provider": "kis",
+                "selected_provider": selected,
                 "selection_reason": resolution.selection_reason,
                 "mode": resolution.mode,
                 "fallback_used": False,
                 "fallback_from": None,
+                "primary_provider": resolution.primary_provider,
                 "cache_hit": True,
             }
 
     if dataset is None:
         dataset, route_meta = await _fetch_with_failover(
             resolution, providers, _make_request(trading_date))
-        if kis_kr_primary and primary_completed and \
-                dataset.provider == "kis" and dataset.bars and \
+        if broker_kr and primary_completed and \
+                dataset.provider == selected and dataset.bars and \
                 dataset.coverage.get("complete"):
-            key = _kis_day_cache_key(
-                profile, market, symbol, "KRX", session, trading_date)
-            _store_kis_day(cache, key, dataset.bars)
+            key = _broker_day_cache_key(
+                selected, profile, market, symbol, "KRX", session,
+                trading_date)
+            _store_broker_day(cache, key, dataset.bars)
 
     # KIS 국내 1m 원천은 하루 단위 endpoint 다. 필요한 이력이 부족하면 예산
     # 안에서 이전 거래일을 이어 붙인다. 공급원은 바꾸지 않는다.
@@ -8172,22 +8196,24 @@ async def _fetch_intraday_dataset(
     needed_rows = row_limit * (
         target_minutes // _INTRADAY_INTERVALS[dataset.source_interval]
         if dataset.source_interval in _INTRADAY_INTERVALS else 1)
-    if dataset.provider == "kis" and market == "KR" and \
-            len(dataset.bars) < needed_rows:
+    if dataset.provider in _provider_registry.ids() and market == "KR" \
+            and len(dataset.bars) < needed_rows:
         merged = list(dataset.bars)
         warnings = list(dataset.warnings)
         day = trading_date
         days_used = 1
         provider_obj = providers.get(dataset.provider)
+        source_endpoint = dataset.source_endpoint
         while len(merged) < needed_rows and \
                 days_used < _INTRADAY_MAX_FETCH_DAYS:
             day = _previous_trading_day(market, day)
             if day is None:
                 break
             days_used += 1
-            day_key = _kis_day_cache_key(
-                profile, market, symbol, "KRX", session, day)
-            extra_bars = _load_cached_kis_day(cache, day_key) \
+            day_key = _broker_day_cache_key(
+                dataset.provider, profile, market, symbol, "KRX",
+                session, day)
+            extra_bars = _load_cached_broker_day(cache, day_key) \
                 if profile else None
             if extra_bars is None:
                 try:
@@ -8203,7 +8229,7 @@ async def _fetch_intraday_dataset(
                 if profile and extra_bars and \
                         extra_ds.coverage.get("complete") and \
                         _trading_day_completed(market, day, now):
-                    _store_kis_day(cache, day_key, extra_bars)
+                    _store_broker_day(cache, day_key, extra_bars)
             before = len(merged)
             merged.extend(extra_bars)
             merged_sorted, dd_warns = _sort_and_dedupe_bars(merged)
@@ -8217,7 +8243,7 @@ async def _fetch_intraday_dataset(
         coverage["days_fetched"] = days_used
         dataset = _BDS(
             bars=ordered, market=market, symbol=symbol,
-            provider="kis", profile=profile,
+            provider=dataset.provider, profile=profile,
             venue=default_venue if market == "KR" else (venue or ""),
             timezone="Asia/Seoul" if market == "KR"
             else "America/New_York",
@@ -8225,8 +8251,7 @@ async def _fetch_intraday_dataset(
             source_interval="1m",
             aggregation_method="provider_native",
             adjustment_basis="unadjusted",
-            source_endpoint="domestic_minute" if market == "KR"
-            else "overseas_minute",
+            source_endpoint=source_endpoint,
             coverage=coverage, warnings=tuple(warnings))
 
     # 세션 집계 (동일 간격이어도 세션 필터·완성 판정을 위해 통과시킨다)
@@ -8283,6 +8308,7 @@ def _intraday_meta_extra(dataset, route_meta: dict) -> dict:
         adjustment_basis=dataset.adjustment_basis,
         data_as_of_timestamp=(
             dataset.bars[-1].end_at.isoformat() if dataset.bars else None),
+        primary_provider=route_meta.get("primary_provider"),
     )
     if route_meta.get("cache_hit"):
         extra["cache_hit"] = True
@@ -8388,7 +8414,7 @@ async def get_intraday_chart(
     except _RouterError as exc:
         return _intraday_error_result(
             symbol, market, str(exc), exc.provider_status)
-    except _KisApiError as exc:
+    except (_KisApiError, _KiwoomApiError, _TossApiError) as exc:
         return _intraday_error_result(
             symbol, market,
             f"증권사 데이터 조회 실패: {exc.provider_status}",
@@ -8505,7 +8531,7 @@ async def get_intraday_indicators(
     except _RouterError as exc:
         return _intraday_error_result(
             symbol, market, str(exc), exc.provider_status)
-    except _KisApiError as exc:
+    except (_KisApiError, _KiwoomApiError, _TossApiError) as exc:
         return _intraday_error_result(
             symbol, market,
             f"증권사 데이터 조회 실패: {exc.provider_status}",

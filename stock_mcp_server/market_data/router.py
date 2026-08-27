@@ -222,6 +222,7 @@ async def fetch_with_failover(
         "mode": resolution.mode,
         "fallback_used": False,
         "fallback_from": None,
+        "primary_provider": resolution.primary_provider,
     }
     dataset = await primary.fetch_bars(request)
     return dataset, meta

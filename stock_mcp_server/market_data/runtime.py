@@ -87,18 +87,29 @@ class ProviderRuntime:
         return client
 
     def _build_client(self, provider: str, profile: str):
+        payload = self._credentials.load_active(provider, profile)
+        if payload is None:
+            return None
+        home = self._home
+
+        def _generation() -> int:
+            return load_state_v2(home)["providers"].get(
+                provider, {}).get("generation", -1)
+
         if provider == "kis":
             from stock_mcp_server.market_data.kis_client import KisClient
-
-            payload = self._credentials.load_active("kis", profile)
-            if payload is None:
-                return None
-            home = self._home
-            return KisClient(
-                payload, profile,
-                generation_provider=lambda: load_state_v2(home)[
-                    "providers"].get("kis", {}).get("generation", -1))
-        # kiwoom·toss 는 해당 어댑터 Task 에서 연결된다. 그 전에는 구성 불가.
+            return KisClient(payload, profile,
+                             generation_provider=_generation)
+        if provider == "kiwoom":
+            from stock_mcp_server.market_data.kiwoom_client import (
+                KiwoomClient,
+            )
+            return KiwoomClient(payload, profile,
+                                generation_provider=_generation)
+        if provider == "toss":
+            from stock_mcp_server.market_data.toss_client import TossClient
+            return TossClient(payload, profile,
+                              generation_provider=_generation)
         return None
 
     def providers_for(self, market: str, source: str = "auto",
@@ -149,5 +160,19 @@ class ProviderRuntime:
                 KisOverseasProvider,
             )
             return KisOverseasProvider(client, profile)
-        # kiwoom·toss 어댑터는 이후 Task 에서 여기로 연결된다.
+        if provider == "kiwoom":
+            if market == "KR":
+                from stock_mcp_server.market_data.kiwoom_domestic import (
+                    KiwoomDomesticProvider,
+                )
+                return KiwoomDomesticProvider(client, profile)
+            from stock_mcp_server.market_data.kiwoom_overseas import (
+                KiwoomOverseasProvider,
+            )
+            return KiwoomOverseasProvider(client, profile)
+        if provider == "toss":
+            from stock_mcp_server.market_data.toss_provider import (
+                TossBarProvider,
+            )
+            return TossBarProvider(client, profile)
         return None

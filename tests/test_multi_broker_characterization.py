@@ -214,6 +214,8 @@ class KisRoutingCharacterization(unittest.TestCase):
             "mode": "auto",
             "fallback_used": False,
             "fallback_from": None,
+            # 1.0 Task 18 승인 변경: primary 를 meta 에 함께 싣는다.
+            "primary_provider": "kis",
         })
 
 
@@ -309,6 +311,8 @@ class MetaContractCharacterization(unittest.TestCase):
             "fallback_from", "venue", "timezone", "requested_interval",
             "source_interval", "aggregation_method", "adjustment_basis",
             "data_as_of_timestamp",
+            # 1.0 Task 18 승인 변경 (additive)
+            "primary_provider",
         ))
         self.assertEqual(PROVIDER_STATUSES, (
             "ok", "not_configured", "credential_invalid",

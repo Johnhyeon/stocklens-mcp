@@ -97,6 +97,9 @@ PROVIDER_EXTENSION_FIELDS = (
     "fallback_from", "venue", "timezone", "requested_interval",
     "source_interval", "aggregation_method", "adjustment_basis",
     "data_as_of_timestamp",
+    # 1.0 멀티 증권사 (additive): 실제 provider 와 별개로 주 사용
+    # 증권사를 함께 싣는다.
+    "primary_provider",
 )
 
 
@@ -116,6 +119,7 @@ def provider_extension(
     aggregation_method: str | None = None,
     adjustment_basis: str | None = None,
     data_as_of_timestamp: str | None = None,
+    primary_provider: str | None = None,
 ) -> dict:
     """meta 에 병합할 provider 선택 필드를 검증해 돌려준다.
 
@@ -156,6 +160,8 @@ def provider_extension(
         ext["provider_profile"] = provider_profile
     if data_as_of_timestamp is not None:
         ext["data_as_of_timestamp"] = data_as_of_timestamp
+    if primary_provider is not None:
+        ext["primary_provider"] = primary_provider
     return ext
 
 _VALID_COMPLETENESS = {COMPLETE, PARTIAL, NONE}
