@@ -177,6 +177,21 @@ class BrokerProfileStoreTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.store.set_data_source_mode("random")
 
+    def test_status_exposes_capability_results(self):
+        # Manager UI 가 국내·미국 분봉 능력을 표시하는 데 쓴다. 비밀 없음.
+        self.store.save_profile("real", _creds())
+        from stock_mcp_server.market_data.connection_state import (
+            load_state,
+            save_state,
+        )
+        state = load_state(self.home)
+        state["capability_results"] = {
+            "real": {"kr_intraday": "available", "us_intraday": "limited"}}
+        save_state(state, self.home)
+        st = self.store.status()
+        self.assertEqual(
+            st["capability_results"]["real"]["kr_intraday"], "available")
+
     def test_state_survives_reload(self):
         self.store.save_profile("real", _creds())
         self.store.set_data_source_mode("auto")

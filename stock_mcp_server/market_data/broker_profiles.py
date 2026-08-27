@@ -101,6 +101,8 @@ class BrokerProfileStore:
             "profiles": {
                 p: {"configured": self.has_profile(p)} for p in PROFILES
             },
+            # 연결 시험이 남긴 시장별 능력 판정. Manager UI 표시용. 비밀 없음.
+            "capability_results": state.get("capability_results") or {},
         }
 
     # --- 변경 ---
