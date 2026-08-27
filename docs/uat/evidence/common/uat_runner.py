@@ -165,6 +165,81 @@ async def _fetch(symbol, market, interval, source, venue, trading_date,
         source=source)
 
 
+_DIRECT_CLIENTS: dict = {}
+
+
+def _direct_adapter(provider: str, market: str, home=None):
+    """서버 캐시를 거치지 않는 직접 어댑터. 클라이언트는 프로세스당
+    1회 생성한다 (KIS 토큰 발급 1분 1회 제한)."""
+    from stock_mcp_server.market_data.credential_store import (
+        CredentialStore,
+    )
+
+    key = (provider, str(home))
+    client = _DIRECT_CLIENTS.get(key)
+    if client is None:
+        payload = CredentialStore(home=home).load_active(provider, "real")
+        if payload is None:
+            return None
+        if provider == "kis":
+            from stock_mcp_server.market_data.kis_client import KisClient
+            client = KisClient(payload, "real")
+        elif provider == "kiwoom":
+            from stock_mcp_server.market_data.kiwoom_client import (
+                KiwoomClient,
+            )
+            client = KiwoomClient(payload, "real")
+        else:
+            from stock_mcp_server.market_data.toss_client import TossClient
+            client = TossClient(payload, "real")
+        _DIRECT_CLIENTS[key] = client
+
+    if provider == "kis":
+        if market == "KR":
+            from stock_mcp_server.market_data.kis_domestic import (
+                KisDomesticProvider,
+            )
+            return KisDomesticProvider(client, "real")
+        from stock_mcp_server.market_data.kis_overseas import (
+            KisOverseasProvider,
+        )
+        return KisOverseasProvider(client, "real")
+    if provider == "kiwoom":
+        if market == "KR":
+            from stock_mcp_server.market_data.kiwoom_domestic import (
+                KiwoomDomesticProvider,
+            )
+            return KiwoomDomesticProvider(client, "real")
+        from stock_mcp_server.market_data.kiwoom_overseas import (
+            KiwoomOverseasProvider,
+        )
+        return KiwoomOverseasProvider(client, "real")
+    from stock_mcp_server.market_data.toss_provider import TossBarProvider
+    return TossBarProvider(client, "real")
+
+
+def _direct_fetch_1m(provider, market, symbol, venue, trading_date,
+                     home=None):
+    """직접 어댑터 1m 조회. (dataset, error_status) 를 돌려준다."""
+    from stock_mcp_server.market_data.models import BarRequest
+
+    adapter = _direct_adapter(provider, market, home=home)
+    if adapter is None:
+        return None, "no_credentials"
+    request = BarRequest(
+        symbol=symbol, market=market, interval="1m", start=None, end=None,
+        trading_date=trading_date, row_limit=500,
+        venue=("KRX" if market == "KR" else (venue or "NAS")),
+        session="regular", adjustment="unadjusted", completed_only=True,
+        source=provider)
+    try:
+        ds = asyncio.run(adapter.fetch_bars(request))
+        return ds, None
+    except Exception as exc:  # noqa: BLE001
+        return None, str(getattr(exc, "provider_status",
+                                 type(exc).__name__))
+
+
 class _CountingProviders:
     """공급자 fetch 호출 수를 세는 프록시 (캐시 2회차 0건 증명용)."""
 
@@ -284,54 +359,65 @@ def _error_classification_leg(provider, market, venue):
 
 
 def _primary_switch_leg(provider):
-    """주 사용 전환 왕복. 상태만 오가고 자격 증명은 건드리지 않는다."""
+    """주 사용 전환 왕복: 다른 연결 공급자로 갔다가 되돌아온다.
+
+    provider -> provider 같은 무의미한 전환은 증거가 아니다 (리뷰).
+    다른 연결 공급자가 없으면 skipped 로 기록한다.
+    """
     from stock_mcp_server.broker_cli import BrokerService
     from stock_mcp_server.market_data.connection_state import load_state_v2
 
     service = BrokerService()
-    before = load_state_v2()["primary_provider"]
+    state = load_state_v2()
+    before = state["primary_provider"]
+    others = [pid for pid, rec in state["providers"].items()
+              if pid != provider and rec["lifecycle"] == "connected"
+              and rec["profiles"]]
+    if not others:
+        return {"before": before, "skipped": "다른 연결 공급자 없음"}
+    other = others[0]
     steps = []
     try:
+        service.set_primary(other)
+        steps.append(load_state_v2()["primary_provider"])
         service.set_primary(provider)
         steps.append(load_state_v2()["primary_provider"])
-        if before and before != provider:
-            service.set_primary(before)
-            steps.append(load_state_v2()["primary_provider"])
-        return {"before": before, "steps": steps, "ok": True}
+        ok = steps == [other, provider]
+        return {"before": before, "via": other, "steps": steps, "ok": ok}
     except Exception as exc:  # noqa: BLE001
-        return {"before": before, "steps": steps,
-                "error": type(exc).__name__}
+        return {"before": before, "via": other, "steps": steps,
+                "ok": False, "error": type(exc).__name__}
 
 
-def _kis_cross_check(market, symbol, base_1m):
-    """실사용 홈의 KIS 캐시(같은 날·종목)와 교차 대조한다."""
+def _kis_cross_check(market, symbol, venue, base_1m):
+    """실사용 홈 자격 증명의 KIS 를 기준으로 같은 날·종목 1m 을 직접
+    받아와 대조한다 (전 종목). KIS 는 공식가 대조로 검증된 기준선이다."""
     if not base_1m or not base_1m.bars:
         return None
     # 다일 이력 보충으로 첫 봉이 전일일 수 있다. 요청 거래일 = 마지막 봉.
     target_day = base_1m.bars[-1].start_at.date()
-    day = target_day.strftime("%Y%m%d")
-    root = Path.home() / ".stocklens" / "cache" / "market_data" / "kis" \
-        / "real"
-    pattern = f"{market}__{symbol}__*__1m__{day}__*p2.json"
-    files = list(root.glob(pattern)) if root.exists() else []
-    if not files:
-        return {"available": False}
-    kis_rows = json.loads(files[0].read_text(encoding="utf-8"))[
-        "payload"]["bars"]
-    kis = {b["start_at"]: b for b in kis_rows}
+    kis_ds, err = _direct_fetch_1m(
+        "kis", market, symbol, venue, target_day,
+        home=Path.home() / ".stocklens")
+    if kis_ds is None:
+        return {"available": False, "error": err}
+    kis = {b.start_at.isoformat(): b for b in kis_ds.bars
+           if b.start_at.date() == target_day}
     mine = {b.start_at.isoformat(): b for b in base_1m.bars
             if b.start_at.date() == target_day}
+    if not kis:
+        return {"available": False, "error": "kis_empty"}
     common = sorted(set(kis) & set(mine))
     diffs = 0
     ratios = []
     for t in common:
         a, b = kis[t], mine[t]
         for f in ("open", "high", "low", "close"):
-            if str(a[f]) != str(getattr(b, f)):
+            if getattr(a, f) != getattr(b, f):
                 diffs += 1
                 break
-        if a["volume"]:
-            ratios.append(b.volume / a["volume"])
+        if a.volume:
+            ratios.append(b.volume / a.volume)
     ratios.sort()
     return {
         "available": True,
@@ -413,19 +499,52 @@ def _run_inner(provider: str, market: str, out_dir: Path) -> int:
             }
             if mismatches:
                 failures += 1
+        # 페이지네이션 증거: 서버 캐시를 우회한 직접 어댑터 조회의
+        # coverage (pages·complete). 캐시 적중 시 pages 가 비는 문제를
+        # 이 leg 가 대신 증명한다.
+        if base_1m and base_1m.bars:
+            direct_ds, direct_err = _direct_fetch_1m(
+                provider, market, symbol, venue,
+                base_1m.bars[-1].start_at.date())
+            if direct_ds is not None:
+                record["pagination"] = {
+                    "pages": direct_ds.coverage.get("pages"),
+                    "rows": len(direct_ds.bars),
+                    "complete": direct_ds.coverage.get("complete"),
+                }
+                if not direct_ds.coverage.get("pages"):
+                    failures += 1
+            else:
+                record["pagination"] = {"error": direct_err}
+                failures += 1
+
         # 완료 거래일이면 캐시 2회차 leg (KR 만 일 단위 캐시 대상)
         if market == "KR" and base_1m and base_1m.bars:
             try:
                 record["cache_second_read"] = _cache_second_read_leg(
                     provider, market, symbol, venue,
-                    base_1m.bars[0].start_at.date())
-                if record["cache_second_read"].get("provider_calls"):
+                    base_1m.bars[-1].start_at.date())
+                csr = record["cache_second_read"]
+                if not csr.get("cache_hit") or csr.get("provider_calls"):
                     failures += 1
             except Exception as exc:  # noqa: BLE001
                 record["cache_second_read"] = {
                     "error": type(exc).__name__}
-        record["kis_cross_check"] = _kis_cross_check(
-            market, symbol, base_1m)
+                failures += 1
+        if provider != "kis":
+            cross = _kis_cross_check(market, symbol, venue, base_1m)
+            record["kis_cross_check"] = cross
+            if cross and cross.get("available"):
+                # KR 은 KRX 단일 기준이라 OHLC·거래량이 KIS 와 일치해야
+                # 한다. US 는 거래소·테이프 기준 차이가 있어 관찰 기록.
+                if market == "KR":
+                    ratio = cross.get("volume_ratio_median")
+                    if cross.get("ohlc_diff_minutes", 0) > 0:
+                        failures += 1
+                    if ratio is None or abs(ratio - 1.0) > 0.01:
+                        failures += 1
+            elif cross is not None and market == "KR":
+                failures += 1  # KR 기준선 대조 불가는 증거 부족이다
         results.append(record)
         print(f"[{provider}/{market}] {symbol} done", flush=True)
 
@@ -441,6 +560,7 @@ def _run_inner(provider: str, market: str, out_dir: Path) -> int:
         "error_classification": None,
         "primary_switch": None,
     }
+    # 보조 leg 실패도 실패다 (리뷰 잔여 1: 종료코드에 반영).
     try:
         first = symbols[0]
         f_symbol = first[0]
@@ -449,15 +569,27 @@ def _run_inner(provider: str, market: str, out_dir: Path) -> int:
             provider, market, f_symbol, f_venue, None)
     except Exception as exc:  # noqa: BLE001
         summary["auto_route"] = {"error": type(exc).__name__}
+    if not (summary["auto_route"] or {}).get("provider_matches"):
+        failures += 1
     try:
         summary["error_classification"] = _error_classification_leg(
             provider, market, None if market == "KR" else "NAS")
     except Exception as exc:  # noqa: BLE001
         summary["error_classification"] = {"error": type(exc).__name__}
+    err_cls = summary["error_classification"] or {}
+    if err_cls.get("bad_symbol") != "entity_not_found":
+        failures += 1
+    if err_cls.get("bad_key_auth") not in ("credential_invalid",
+                                           "ip_not_allowed"):
+        failures += 1
     try:
         summary["primary_switch"] = _primary_switch_leg(provider)
     except Exception as exc:  # noqa: BLE001
         summary["primary_switch"] = {"error": type(exc).__name__}
+    switch = summary["primary_switch"] or {}
+    if not switch.get("ok") and not switch.get("skipped"):
+        failures += 1
+    summary["failures"] = failures
 
     out_file = out_dir / (
         f"uat_{provider}_{market.lower()}_"

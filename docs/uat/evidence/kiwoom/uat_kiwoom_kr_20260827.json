@@ -2,7 +2,7 @@
  "summary": {
   "provider": "kiwoom",
   "market": "KR",
-  "ran_at": "2026-08-27T21:49:47.476180+09:00",
+  "ran_at": "2026-08-27T22:06:00.858520+09:00",
   "release_gate_opened_for_verification": true,
   "auto_route": {
    "gate_preview": true,
@@ -13,16 +13,19 @@
    "provider_matches": true
   },
   "error_classification": {
-   "bad_symbol": "source_parse_error",
+   "bad_symbol": "entity_not_found",
    "bad_key_auth": "credential_invalid"
   },
   "primary_switch": {
    "before": "kiwoom",
+   "via": "toss",
    "steps": [
+    "toss",
     "kiwoom"
    ],
    "ok": true
-  }
+  },
+  "failures": 0
  },
  "symbols": [
   {
@@ -102,6 +105,11 @@
      "first": "2026-08-13T09:00:00+09:00",
      "last": "2026-08-27T13:00:00+09:00"
     }
+   },
+   "pagination": {
+    "pages": 1,
+    "rows": 381,
+    "complete": true
    },
    "cache_second_read": {
     "cache_hit": true,
@@ -197,13 +205,25 @@
      "last": "2026-08-27T13:00:00+09:00"
     }
    },
+   "pagination": {
+    "pages": 1,
+    "rows": 381,
+    "complete": true
+   },
    "cache_second_read": {
     "cache_hit": true,
     "provider_calls": 0,
     "rows": 50
    },
    "kis_cross_check": {
-    "available": false
+    "available": true,
+    "kis_rows": 381,
+    "provider_rows": 381,
+    "common": 380,
+    "only_kis": 1,
+    "only_provider": 1,
+    "ohlc_diff_minutes": 0,
+    "volume_ratio_median": 1.0
    }
   },
   {
@@ -284,13 +304,25 @@
      "last": "2026-08-27T13:00:00+09:00"
     }
    },
+   "pagination": {
+    "pages": 1,
+    "rows": 381,
+    "complete": true
+   },
    "cache_second_read": {
     "cache_hit": true,
     "provider_calls": 0,
     "rows": 50
    },
    "kis_cross_check": {
-    "available": false
+    "available": true,
+    "kis_rows": 381,
+    "provider_rows": 381,
+    "common": 380,
+    "only_kis": 1,
+    "only_provider": 1,
+    "ohlc_diff_minutes": 0,
+    "volume_ratio_median": 1.0
    }
   },
   {
@@ -371,13 +403,25 @@
      "last": "2026-08-27T13:00:00+09:00"
     }
    },
+   "pagination": {
+    "pages": 1,
+    "rows": 381,
+    "complete": true
+   },
    "cache_second_read": {
     "cache_hit": true,
     "provider_calls": 0,
     "rows": 50
    },
    "kis_cross_check": {
-    "available": false
+    "available": true,
+    "kis_rows": 381,
+    "provider_rows": 381,
+    "common": 380,
+    "only_kis": 1,
+    "only_provider": 1,
+    "ohlc_diff_minutes": 0,
+    "volume_ratio_median": 1.0
    }
   },
   {
@@ -458,13 +502,25 @@
      "last": "2026-08-27T13:00:00+09:00"
     }
    },
+   "pagination": {
+    "pages": 1,
+    "rows": 381,
+    "complete": true
+   },
    "cache_second_read": {
     "cache_hit": true,
     "provider_calls": 0,
     "rows": 50
    },
    "kis_cross_check": {
-    "available": false
+    "available": true,
+    "kis_rows": 381,
+    "provider_rows": 381,
+    "common": 380,
+    "only_kis": 1,
+    "only_provider": 1,
+    "ohlc_diff_minutes": 0,
+    "volume_ratio_median": 1.0
    }
   },
   {
@@ -545,13 +601,25 @@
      "last": "2026-08-27T13:00:00+09:00"
     }
    },
+   "pagination": {
+    "pages": 1,
+    "rows": 381,
+    "complete": true
+   },
    "cache_second_read": {
     "cache_hit": true,
     "provider_calls": 0,
     "rows": 50
    },
    "kis_cross_check": {
-    "available": false
+    "available": true,
+    "kis_rows": 381,
+    "provider_rows": 381,
+    "common": 380,
+    "only_kis": 1,
+    "only_provider": 1,
+    "ohlc_diff_minutes": 0,
+    "volume_ratio_median": 1.0
    }
   },
   {
@@ -632,13 +700,25 @@
      "last": "2026-08-27T13:00:00+09:00"
     }
    },
+   "pagination": {
+    "pages": 1,
+    "rows": 122,
+    "complete": true
+   },
    "cache_second_read": {
     "cache_hit": true,
     "provider_calls": 0,
     "rows": 50
    },
    "kis_cross_check": {
-    "available": false
+    "available": true,
+    "kis_rows": 122,
+    "provider_rows": 122,
+    "common": 121,
+    "only_kis": 1,
+    "only_provider": 1,
+    "ohlc_diff_minutes": 0,
+    "volume_ratio_median": 1.0
    }
   },
   {
@@ -719,13 +799,25 @@
      "last": "2026-08-27T13:00:00+09:00"
     }
    },
+   "pagination": {
+    "pages": 1,
+    "rows": 91,
+    "complete": true
+   },
    "cache_second_read": {
     "cache_hit": true,
     "provider_calls": 0,
     "rows": 50
    },
    "kis_cross_check": {
-    "available": false
+    "available": true,
+    "kis_rows": 91,
+    "provider_rows": 91,
+    "common": 90,
+    "only_kis": 1,
+    "only_provider": 1,
+    "ohlc_diff_minutes": 0,
+    "volume_ratio_median": 1.0
    }
   },
   {
@@ -806,13 +898,25 @@
      "last": "2026-08-27T13:00:00+09:00"
     }
    },
+   "pagination": {
+    "pages": 1,
+    "rows": 103,
+    "complete": true
+   },
    "cache_second_read": {
     "cache_hit": true,
     "provider_calls": 0,
     "rows": 50
    },
    "kis_cross_check": {
-    "available": false
+    "available": true,
+    "kis_rows": 103,
+    "provider_rows": 103,
+    "common": 102,
+    "only_kis": 1,
+    "only_provider": 1,
+    "ohlc_diff_minutes": 0,
+    "volume_ratio_median": 1.0
    }
   },
   {
@@ -893,13 +997,25 @@
      "last": "2026-08-27T13:00:00+09:00"
     }
    },
+   "pagination": {
+    "pages": 1,
+    "rows": 381,
+    "complete": true
+   },
    "cache_second_read": {
     "cache_hit": true,
     "provider_calls": 0,
     "rows": 50
    },
    "kis_cross_check": {
-    "available": false
+    "available": true,
+    "kis_rows": 381,
+    "provider_rows": 381,
+    "common": 380,
+    "only_kis": 1,
+    "only_provider": 1,
+    "ohlc_diff_minutes": 0,
+    "volume_ratio_median": 1.0
    }
   },
   {
@@ -980,13 +1096,25 @@
      "last": "2026-08-27T13:00:00+09:00"
     }
    },
+   "pagination": {
+    "pages": 1,
+    "rows": 313,
+    "complete": true
+   },
    "cache_second_read": {
     "cache_hit": true,
     "provider_calls": 0,
     "rows": 50
    },
    "kis_cross_check": {
-    "available": false
+    "available": true,
+    "kis_rows": 313,
+    "provider_rows": 313,
+    "common": 312,
+    "only_kis": 1,
+    "only_provider": 1,
+    "ohlc_diff_minutes": 0,
+    "volume_ratio_median": 1.0
    }
   },
   {
@@ -1067,13 +1195,25 @@
      "last": "2026-08-27T13:00:00+09:00"
     }
    },
+   "pagination": {
+    "pages": 1,
+    "rows": 381,
+    "complete": true
+   },
    "cache_second_read": {
     "cache_hit": true,
     "provider_calls": 0,
     "rows": 50
    },
    "kis_cross_check": {
-    "available": false
+    "available": true,
+    "kis_rows": 381,
+    "provider_rows": 381,
+    "common": 380,
+    "only_kis": 1,
+    "only_provider": 1,
+    "ohlc_diff_minutes": 0,
+    "volume_ratio_median": 1.0
    }
   },
   {
@@ -1154,13 +1294,25 @@
      "last": "2026-08-27T13:00:00+09:00"
     }
    },
+   "pagination": {
+    "pages": 1,
+    "rows": 381,
+    "complete": true
+   },
    "cache_second_read": {
     "cache_hit": true,
     "provider_calls": 0,
     "rows": 50
    },
    "kis_cross_check": {
-    "available": false
+    "available": true,
+    "kis_rows": 381,
+    "provider_rows": 381,
+    "common": 380,
+    "only_kis": 1,
+    "only_provider": 1,
+    "ohlc_diff_minutes": 0,
+    "volume_ratio_median": 1.0
    }
   },
   {
@@ -1241,13 +1393,25 @@
      "last": "2026-08-20T13:00:00+09:00"
     }
    },
+   "pagination": {
+    "pages": 1,
+    "rows": 381,
+    "complete": true
+   },
    "cache_second_read": {
     "cache_hit": true,
     "provider_calls": 0,
     "rows": 50
    },
    "kis_cross_check": {
-    "available": false
+    "available": true,
+    "kis_rows": 381,
+    "provider_rows": 381,
+    "common": 380,
+    "only_kis": 1,
+    "only_provider": 1,
+    "ohlc_diff_minutes": 0,
+    "volume_ratio_median": 1.0
    }
   },
   {
@@ -1328,13 +1492,25 @@
      "last": "2026-07-29T13:00:00+09:00"
     }
    },
+   "pagination": {
+    "pages": 1,
+    "rows": 351,
+    "complete": true
+   },
    "cache_second_read": {
     "cache_hit": true,
     "provider_calls": 0,
     "rows": 50
    },
    "kis_cross_check": {
-    "available": false
+    "available": true,
+    "kis_rows": 351,
+    "provider_rows": 351,
+    "common": 350,
+    "only_kis": 1,
+    "only_provider": 1,
+    "ohlc_diff_minutes": 0,
+    "volume_ratio_median": 1.0
    }
   }
  ]
