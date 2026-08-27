@@ -59,6 +59,7 @@ stocklens = "stock_mcp_server.server:main"
 stocklens-setup = "stock_mcp_server.setup_claude:main"
 stocklens-doctor = "stock_mcp_server.doctor:main"
 stocklens-activate = "stock_mcp_server.licensing:activate_cli"
+stocklens-broker = "stock_mcp_server.broker_cli:main"
 # 하위 호환 (기존 naver-stock-mcp 사용자)
 stock-mcp-server = "stock_mcp_server.server:main"
 stock-mcp-setup = "stock_mcp_server.setup_claude:main"
