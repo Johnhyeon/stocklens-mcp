@@ -1,0 +1,18 @@
+{
+  "return_code": 0,
+  "return_msg": "정상적으로 처리되었습니다",
+  "result_list": [
+    {"cntr_tm": "20260827160000", "bus_dt": "20260827",
+     "cur_prc": "225.4400", "open_pric": "225.4000",
+     "high_pric": "225.5000", "low_pric": "225.3500",
+     "trde_qty": "1250000", "upd_stkpc_tp": "0"},
+    {"cntr_tm": "20260827155900", "bus_dt": "20260827",
+     "cur_prc": "225.4000", "open_pric": "225.3000",
+     "high_pric": "225.4100", "low_pric": "225.2900",
+     "trde_qty": "84210", "upd_stkpc_tp": "0"},
+    {"cntr_tm": "20260827155800", "bus_dt": "20260827",
+     "cur_prc": "225.3000", "open_pric": "225.2500",
+     "high_pric": "225.3200", "low_pric": "225.2000",
+     "trde_qty": "51000", "upd_stkpc_tp": "0"}
+  ]
+}
