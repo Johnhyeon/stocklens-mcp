@@ -72,6 +72,7 @@ def handle_request(
     *,
     store: BrokerProfileStore | None = None,
     verifier=None,
+    cache=None,
 ) -> dict:
     """요청 하나를 처리한다. 계약 위반은 어떤 변경도 없이 실패한다."""
     if not isinstance(request, dict):
@@ -119,7 +120,27 @@ def handle_request(
 
         if action == "disconnect_provider":
             store.disconnect_provider()
-            return _ok(action, store)
+            # KIS 전체 연결 해제 때만 공급자 분봉 캐시 전체를 삭제한다.
+            # 현재 환경(disconnect_profile) 해제는 캐시를 유지한다.
+            if cache is None:
+                from stock_mcp_server.market_data.provider_cache import (
+                    ProviderCache,
+                )
+                # store 가 보는 홈과 같은 홈의 캐시를 지운다. 테스트가 tmp 홈
+                # store 를 주입하면 캐시도 tmp 홈만 본다.
+                cache = ProviderCache(home=store.home)
+            cache_removed = True
+            cache_error: str | None = None
+            try:
+                cache.remove_provider(provider)
+            except Exception as exc:  # noqa: BLE001
+                # 삭제하지 못한 항목을 삭제했다고 말하지 않는다.
+                cache_removed = False
+                cache_error = type(exc).__name__
+            return _ok(action, store, extra={
+                "cache_removed": cache_removed,
+                **({"cache_error": cache_error} if cache_error else {}),
+            })
 
         if action == "set_data_source_mode":
             mode = request.get("mode")

@@ -54,6 +54,11 @@ class BrokerProfileStore:
         self._keyring = keyring_module
         self._home = home
 
+    @property
+    def home(self) -> Path | str | None:
+        """이 store 가 보는 StockLens 홈. 캐시 등 부속 자원이 같은 홈을 쓴다."""
+        return self._home
+
     # --- keyring 좌표 ---
 
     def _service(self) -> str:
