@@ -2908,10 +2908,11 @@ async def get_indicators(
         return (f"종목 {code}: 조회된 봉 전체가 거래정지 placeholder 등 비정상이라 "
                 "지표를 계산할 수 없습니다.")
 
-    result = compute_indicators(ohlcv, include, params=params)
+    result = compute_indicators(ohlcv, include, params=params, timeframe=timeframe)
     ind_errors = _indicator_error_list(result)
     ind_cov = _indicator_coverage(
-        include=include, available_bars=len(ohlcv), params=params
+        include=include, available_bars=len(ohlcv), params=params,
+        timeframe=timeframe,
     )
     payload = {
         "code": code,
@@ -2998,9 +2999,17 @@ _INDICATOR_MIN_BARS = {
 
 
 def _indicator_coverage(
-    *, include: list[str] | None, available_bars: int, params: dict | None = None
+    *, include: list[str] | None, available_bars: int, params: dict | None = None,
+    timeframe: str = "day",
 ) -> dict:
-    """요청한 지표가 이 봉 수로 실제 계산되는지. 부족 항목을 이름으로 돌려준다."""
+    """요청한 지표가 이 봉 수로 실제 계산되는지. 부족 항목을 이름으로 돌려준다.
+
+    달력 기간 라벨이 붙는 요구량은 봉 주기를 따라야 한다: 52주 위치는
+    일봉 252 / 주봉 52 / 월봉 12 봉이다. 계산 창(compute_position)만 고치고
+    여기를 252 로 두면, 104주 주봉을 넣어도 판정문이 partial 로 틀린다.
+    """
+    from stock_mcp_server._indicators import _BARS_PER_YEAR
+
     required: dict[str, int] = {}
     for key in include or []:
         builder = _INDICATOR_MIN_BARS.get(key)
@@ -3010,6 +3019,8 @@ def _indicator_coverage(
             required.update(builder((params or {}).get(key) or {}))
         except Exception:
             continue
+    if "position_52w" in required:
+        required["position_52w"] = _BARS_PER_YEAR.get(timeframe, 252)
     return {
         "available_bars": available_bars,
         "required_bars": dict(sorted(required.items())),
@@ -3245,7 +3256,8 @@ async def get_indicators_bulk(
             # 날짜만 모아 한 시계열인 척 넘기면, 두 종목이 같은 미완성 봉을
             # 가질 때 확정 봉이 자기 자신으로 나온다.
             state = _bar_state(timeframe=timeframe, rows=ohlcv, market_calendar=cal)
-            return code, compute_indicators(ohlcv, include, params=params), state
+            return code, compute_indicators(ohlcv, include, params=params,
+                                            timeframe=timeframe), state
         except Exception as e:
             return code, {"error": f"{type(e).__name__}: {e}"}, None
 
@@ -3267,7 +3279,8 @@ async def get_indicators_bulk(
     # 종목마다 이력 길이가 다르다. 가장 짧은 종목을 기준으로 잡아야 "전 종목
     # ma120 이 나왔다"는 과대 주장을 하지 않는다.
     ind_cov = _indicator_coverage(
-        include=include, available_bars=min(bars_seen) if bars_seen else 0, params=params
+        include=include, available_bars=min(bars_seen) if bars_seen else 0,
+        params=params, timeframe=timeframe,
     )
     # 봉 상태는 종목별로 계산한 뒤 합친다. 한 종목이라도 미완성 봉을 물고
     # 있으면 이 배치의 계산에는 미완성 봉이 섞인 것이다.
@@ -5712,11 +5725,20 @@ async def get_us_short(ticker: str) -> str:
 @mcp.tool()
 @safe_us_tool
 @track_metrics("get_us_filings")
-async def get_us_filings(ticker: str, limit: int = 15, forms: list[str] | None = None) -> str:
+async def get_us_filings(ticker: str, limit: int = 15, forms: list[str] | None = None,
+                         page: str | None = None, offset: int = 0) -> str:
     """US SEC filings — SEC EDGAR 공시 목록 (accession number·원문 URL 포함).
 
     "AAPL 10-K", "RIVN latest filings", "8-K", "SEC filing" 같은 질문에 사용합니다.
     본문·exhibit 를 읽으려면 결과의 accession number 로 `get_us_filing_detail` 을 부르세요.
+
+    기본 조회는 SEC 의 최근 구간(최대 1000건)입니다. 그보다 오래된 공시는
+    구간 파일로 나뉘어 있고, 결과 메타의 coverage.older_pages 에 구간 목록
+    (이름·기간·건수)이 옵니다. `page=` 에 그 이름을 넣어 구간을 옮기고, 한
+    구간이 limit 보다 크면 coverage.next_offset 을 `offset=` 에 넣어 이어서
+    조회하세요. **완전한 검색의 종료 조건은 coverage_complete=true** (현재
+    구간을 끝까지 봤고 older_pages 도 없음)이지, older_pages 가 비었다는
+    것만이 아닙니다.
 
     SEC 는 발행사를 티커가 아니라 CIK 로 식별합니다. GOOGL/GOOG 같은 클래스주는
     같은 발행사로 정규화되어 같은 공시 집합이 나오고, 요청 티커는 메타에 보존됩니다.
@@ -5725,8 +5747,11 @@ async def get_us_filings(ticker: str, limit: int = 15, forms: list[str] | None =
         ticker: US 티커
         limit: 표시할 공시 건수 (기본 15, 최대 100)
         forms: 공시 유형 필터 (예: ["10-Q", "8-K"]). 비우면 전체.
+        page: 구간 파일 이름 (coverage.older_pages[].name). 비우면 최근 구간.
+        offset: 현재 구간 안에서 건너뛸 건수 (coverage.next_offset 값). 기본 0.
     """
     limit = max(1, min(int(limit), 100))
+    offset = max(0, int(offset))
     requested_forms = [str(f).upper() for f in (forms or [])] or None
 
     def _fail(reason_text: str, warn: str) -> str:
@@ -5764,12 +5789,39 @@ async def get_us_filings(ticker: str, limit: int = 15, forms: list[str] | None =
                      "0건이 아니라 조회 실패이므로 재시도하세요.",
                      f"SEC 조회 실패: {e}")
 
-    rows = subs["rows"]
+    all_pages = subs.get("pages") or []
+    page_label = "최근 구간"
+    if page:
+        try:
+            rows = await sec.get_submissions_page(issuer["cik"], page)
+        except ValueError as e:
+            return _fail(f"⚠️ {e}", f"잘못된 page: {page}")
+        except sec.SecFetchError as e:
+            return _fail(f"⚠️ SEC 구간 파일 조회에 실패했습니다 ({e}). "
+                         "0건이 아니라 조회 실패이므로 재시도하세요.",
+                         f"SEC 조회 실패: {e}")
+        # 이 구간보다 더 오래된 페이지들만 남은 순회 대상이다. 구간 파일은
+        # 최신 -> 과거 순서로 번호가 붙는다.
+        older_pages = all_pages[
+            next((i + 1 for i, pg in enumerate(all_pages) if pg["name"] == page),
+                 len(all_pages)):]
+        this_pg = next((pg for pg in all_pages if pg["name"] == page), None)
+        if this_pg:
+            page_label = f"구간 {this_pg['filing_from']}~{this_pg['filing_to']}"
+        else:
+            page_label = f"구간 {page}"
+    else:
+        rows = subs["rows"]
+        older_pages = all_pages
+
     if requested_forms:
         rows = [r for r in rows if str(r.get("form") or "").upper() in requested_forms]
     total_matching = len(rows)
-    shown = rows[:limit]
-    has_older = subs["has_older"]
+    shown = rows[offset:offset + limit]
+    # 구간 내부 커서: limit 에 걸려 못 보여준 나머지를 이어서 요청하는 값.
+    # 이게 없으면 1,240건짜리 구간에서 101번째 이후를 볼 방법이 없다(실측 AAPL).
+    next_offset = offset + len(shown) if offset + len(shown) < total_matching else None
+    has_older = bool(older_pages)
 
     issuer_line = (
         f"발행사: **{issuer['name']}** (CIK {issuer['cik']}) · "
@@ -5781,10 +5833,11 @@ async def get_us_filings(ticker: str, limit: int = 15, forms: list[str] | None =
     )
 
     if not shown:
-        note = ("최근 공시 목록에 해당 유형이 없습니다."
-                if requested_forms else "최근 공시 목록이 비어 있습니다.")
+        note = (f"{page_label}에 해당 유형이 없습니다."
+                if requested_forms else f"{page_label} 공시 목록이 비어 있습니다.")
         if has_older:
-            note += " 더 오래된 공시가 SEC 에 존재하므로 '공시가 없다'고 결론 내리면 안 됩니다."
+            note += (" 더 오래된 구간이 남아 있으므로 '공시가 없다'고 결론 내리면"
+                     " 안 됩니다 - coverage.older_pages 로 이어서 조회하세요.")
         return _append_result_meta(
             f"**{issuer['requested_ticker']}** SEC 공시\n{issuer_line}\n\n{note}",
             _us_meta(
@@ -5794,14 +5847,17 @@ async def get_us_filings(ticker: str, limit: int = 15, forms: list[str] | None =
                           "returned_count": 0,
                           "total_count": None if has_older else total_matching,
                           "truncated": False, "coverage_complete": not has_older,
+                          "page": page, "older_pages": older_pages,
                           "reason": "source_limit" if has_older else None},
                 extra={"issuer": issuer},
-                warnings=(["최근 목록 밖(구간 외) 공시가 존재합니다."] if has_older else None),
+                warnings=(["더 오래된 구간이 남아 있습니다."] if has_older else None),
             ),
         )
 
-    lines = [f"**{issuer['requested_ticker']}** SEC 공시 (표시 {len(shown)}건"
-             + (f" / 최근 목록 {total_matching}건" if total_matching > len(shown) else "")
+    lines = [f"**{issuer['requested_ticker']}** SEC 공시 · {page_label} (표시 "
+             + (f"{offset + 1}~{offset + len(shown)}번째" if offset else f"{len(shown)}건")
+             + (f" / 이 구간 {total_matching}건" if total_matching > len(shown) or offset
+                else "")
              + ")", issuer_line, ""]
     lines.append("접수일 | 유형 | 보고서 기준일 | accession | 원문")
     lines.append("---|---|---|---|---")
@@ -5814,10 +5870,22 @@ async def get_us_filings(ticker: str, limit: int = 15, forms: list[str] | None =
         )
     lines.append("")
     lines.append("_본문·exhibit 검색: `get_us_filing_detail(ticker, accession_no, find=...)`_")
+    if next_offset is not None:
+        lines.append(
+            f"_이 구간에 {total_matching - offset - len(shown)}건이 더 남아 있습니다. "
+            f"`offset={next_offset}` 로 이어서 조회하세요._")
     if has_older:
-        lines.append("_이 목록은 SEC 의 최근 공시 구간입니다. 더 오래된 공시는 여기 없습니다._")
+        nxt = older_pages[0]
+        lines.append(
+            f"_더 오래된 구간 {len(older_pages)}개가 남아 있습니다. 다음: "
+            f"`page=\"{nxt['name']}\"` ({nxt['filing_from']}~{nxt['filing_to']}, "
+            f"{nxt['count']}건)._")
+    if next_offset is not None or has_older:
+        lines.append(
+            "_완전한 검색의 종료 조건은 coverage_complete=true 입니다 - "
+            "truncated=false 이고 older_pages 가 빌 때까지 순회하세요._")
 
-    truncated = len(shown) < total_matching
+    truncated = next_offset is not None
     incomplete = truncated or has_older
     return _append_result_meta(
         "\n".join(lines),
@@ -5831,6 +5899,10 @@ async def get_us_filings(ticker: str, limit: int = 15, forms: list[str] | None =
                 "total_count": None if has_older else total_matching,
                 "truncated": truncated,
                 "coverage_complete": not incomplete,
+                "page": page,
+                "offset": offset,
+                "next_offset": next_offset,
+                "older_pages": older_pages,
                 "reason": ("server_cap" if truncated
                            else "source_limit" if has_older else None),
             },
@@ -7035,6 +7107,487 @@ async def get_us_multi_price(tickers: list[str]) -> str:
             warnings=warns or None,
         ),
     )
+
+
+# 유동성 원장의 구성 요소(SL-16). 항목별 us-gaap 후보 태그 - 앞선 태그부터
+# 시도하고, 전부 미보고면 그 항목은 0이 아니라 확인 불가다.
+_LIQ_CONCEPTS: dict[str, tuple[str, ...]] = {
+    "cash": ("CashAndCashEquivalentsAtCarryingValue",),
+    "cash_incl_restricted": (
+        "CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents",),
+    "marketable_securities": (
+        "ShortTermInvestments", "MarketableSecuritiesCurrent",
+        "AvailableForSaleSecuritiesDebtSecuritiesCurrent"),
+    "restricted_cash_current": (
+        "RestrictedCashCurrent", "RestrictedCashAndCashEquivalentsAtCarryingValue"),
+    "restricted_cash_noncurrent": (
+        "RestrictedCashNoncurrent", "RestrictedCashAndCashEquivalentsNoncurrent"),
+    "revolver_available": ("LineOfCreditFacilityRemainingBorrowingCapacity",),
+    "debt_due_next_12m": (
+        "LongTermDebtMaturitiesRepaymentsOfPrincipalInNextTwelveMonths",
+        "LongTermDebtCurrent"),
+    "lease_due_next_12m": (
+        "LesseeOperatingLeaseLiabilityPaymentsDueNextTwelveMonths",),
+    "purchase_obligation_next_12m": (
+        "PurchaseObligationDueInNextTwelveMonths",
+        "UnrecordedUnconditionalPurchaseObligationDueInNextTwelveMonths"),
+}
+
+# 보고기간 후 자금조달성 공시로 볼 양식. 8-K 는 항목이 채무 발생(2.03)·미등록
+# 증권 판매(3.02)일 때만 - 임원 변경 8-K 까지 조달로 묶으면 안 된다.
+_FINANCING_FORMS = {"424B2", "424B3", "424B4", "424B5", "FWP",
+                    "S-1", "S-1/A", "S-3", "S-3/A", "S-3ASR"}
+_FINANCING_8K_ITEMS = {"1.01", "2.03", "3.02"}
+
+
+# 규제자본 지표의 us-gaap 후보 태그(SL-17). 대형은행은 2013년 이후 이 비율들을
+# XBRL 로 태깅하지 않는 경우가 대부분이다(실측 JPM: 2009·2013 이후 없음) -
+# 그때는 값이 아니라 "어느 보고서로 가야 하는지"를 구조화해 돌려준다.
+_SOUND_RATIO_CONCEPTS: dict[str, tuple[str, ...]] = {
+    "cet1_ratio": ("BankingRegulationCommonEquityTier1CapitalRatioActual",
+                   "CommonEquityTierOneCapitalToRiskWeightedAssets"),
+    "tier1_ratio": ("BankingRegulationTier1RiskBasedCapitalRatioActual",
+                    "TierOneRiskBasedCapitalToRiskWeightedAssets"),
+    "total_capital_ratio": ("BankingRegulationTotalRiskBasedCapitalRatioActual",
+                            "CapitalToRiskWeightedAssets"),
+    "leverage_ratio": ("BankingRegulationTier1LeverageCapitalRatioActual",
+                       "TierOneLeverageCapitalToAverageAssets"),
+    "lcr": (),   # LCR·NSFR 는 XBRL 표준 태그 자체가 없다 - 항상 원문 경로
+    "nsfr": (),
+    "npl": ("FinancingReceivableRecordedInvestmentNonaccrualStatus",
+            "FinancingReceivableNonaccrualStatus"),
+}
+_SOUND_ASSET_CONCEPTS: dict[str, tuple[str, ...]] = {
+    "allowance_for_credit_losses": (
+        "FinancingReceivableAllowanceForCreditLossExcludingAccruedInterest",
+        "FinancingReceivableAllowanceForCreditLosses"),
+    "gross_loans": (
+        "FinancingReceivableExcludingAccruedInterestBeforeAllowanceForCreditLoss",
+        "NotesReceivableGross"),
+    "net_chargeoffs": (
+        "FinancingReceivableExcludingAccruedInterestAllowanceForCreditLossWriteoffAfterRecovery",),
+}
+_US_CAPITAL_REPORTS = [
+    "10-K/10-Q 'Capital Risk Management' 섹션 (CET1·Tier1·총자본·SLR)",
+    "FR Y-9C / FFIEC 101 (연준 규제 보고)",
+    "Pillar 3 disclosure (분기, 회사 IR 사이트)",
+]
+_US_LIQ_REPORTS = [
+    "10-K/10-Q 'Liquidity Risk Management' 섹션 (LCR·NSFR)",
+    "Pillar 3 disclosure / LCR disclosure report",
+]
+_KR_REPORTS = [
+    "DART 사업보고서·분기보고서 'III. 재무에 관한 사항' 자본적정성 주석 (BIS·CET1)",
+    "은행연합회 은행 경영공시 (자본적정성·자산건전성·유동성)",
+    "금감원 금융통계정보시스템 (NPL·연체율·충당금적립률)",
+]
+
+
+@mcp.tool()
+@safe_us_tool
+@track_metrics("get_financial_soundness")
+async def get_financial_soundness(symbol: str) -> str:
+    """Financial soundness — 금융회사 자금 건전성 경로 (규제자본·자산건전성, JSON).
+
+    은행·보험·증권 같은 금융회사에는 제조업형 CFO 런웨이가 성립하지 않습니다.
+    이 도구가 그 대체 경로입니다: "KB금융 자본비율", "JPM CET1", "충당금 얼마나
+    쌓았나" 같은 질문에 사용합니다.
+
+    - 확보되는 값(미국 XBRL 자산건전성 등)은 출처·기준일과 함께 돌려줍니다.
+    - CET1·LCR·NSFR 처럼 공식 원문에만 있는 지표는 값을 지어내지 않고,
+      **어느 보고서에서 확인해야 하는지**(required_reports)를 구조화합니다.
+    - 규제 체계(미국 Fed / 한국 금감원)가 다른 지표를 하나의 점수로 합치거나
+      시장 간 직접 수치 비교하지 않습니다 - 산식·경과규정이 다릅니다.
+
+    Args:
+        symbol: 한국 종목코드 6자리(예: "105560") 또는 US 티커(예: "JPM")
+    """
+    import re as _re
+
+    sym = (symbol or "").strip()
+    is_kr = bool(_re.match(r"^[0-9]{6}$", sym))
+
+    comparison_note = ("서로 다른 규제 체계(미국 Fed 최종규정 vs 한국 금감원 "
+                       "은행업감독규정)의 비율은 산식·경과규정이 달라 직접 비교 "
+                       "금지 - 각 시장 안에서 시계열·동종 비교만 하세요.")
+
+    if is_kr:
+        metrics = {
+            key: {"status": "not_available_via_stocklens",
+                  "reason": "국내 규제자본·건전성 지표는 시세 API 가 아니라 "
+                            "공시 원문·감독 통계에 있습니다.",
+                  "required_reports": _KR_REPORTS}
+            for key in ("cet1_ratio", "tier1_ratio", "total_capital_ratio",
+                        "lcr", "nsfr", "npl", "allowance_coverage")
+        }
+        payload = {
+            "symbol": sym,
+            "market": "KR",
+            "framework": {"name": "바젤III (금감원 은행업감독규정)",
+                          "comparison_note": comparison_note},
+            "metrics": metrics,
+            "route": {
+                "dart": "DartLens list_disclosures 로 사업보고서·분기보고서 "
+                        "rcept_no 를 찾아 자본적정성 주석을 원문으로 확인하세요.",
+                "bank_disclosure": "은행연합회 경영공시에 분기 BIS·CET1·NPL·"
+                                   "연체율이 표준 양식으로 공시됩니다.",
+            },
+            "_meta": _kr_meta(
+                kind="filing", code=sym,
+                data_completeness=rmeta.PARTIAL,
+                coverage={"truncated": False, "coverage_complete": False,
+                          "reason": "source_limit"},
+                warnings=["규제자본 지표는 이 도구가 값을 만들지 않습니다 - "
+                          "required_reports 의 공식 원문으로 확인하세요."],
+            ),
+        }
+        return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+
+    issuer = await sec.resolve_issuer(sym)
+    if issuer is None:
+        return f"'{sym}'를 SEC 발행사 목록에서 찾지 못했습니다."
+    cik = issuer["cik"]
+
+    sic = None
+    sic_desc = None
+    try:
+        subs = await sec.get_submissions(cik)
+        sic, sic_desc = subs.get("sic"), subs.get("sic_description")
+    except sec.SecFetchError:
+        pass
+    is_financial = bool(sic and str(sic).isdigit() and 6000 <= int(sic) <= 6799)
+
+    async def _component(name: str, cands: tuple[str, ...]) -> tuple[str, dict]:
+        for tag in cands:
+            try:
+                fact = await sec.get_concept_latest(cik, tag)
+            except sec.SecFetchError as exc:
+                return name, {"status": "fetch_error", "detail": str(exc)}
+            if fact is not None:
+                return name, fact
+        return name, {"status": "not_in_xbrl"}
+
+    all_concepts = {**_SOUND_ASSET_CONCEPTS, **_SOUND_RATIO_CONCEPTS}
+    pairs = await asyncio.gather(*(_component(n, c) for n, c in all_concepts.items()))
+    facts = dict(pairs)
+
+    # 기준일 = 확보된 자산건전성 값 중 가장 최신. 그보다 400일 넘게 뒤처진
+    # XBRL 비율(실측 JPM 2009·2013)은 현재값으로 내보내지 않는다.
+    asset_ends = [f["end"] for n, f in facts.items()
+                  if n in _SOUND_ASSET_CONCEPTS and "value" in f]
+    base_date = max(asset_ends) if asset_ends else None
+
+    def _reports_for(key: str) -> list[str]:
+        return _US_LIQ_REPORTS if key in ("lcr", "nsfr") else _US_CAPITAL_REPORTS
+
+    metrics: dict[str, dict] = {}
+    for key in _SOUND_RATIO_CONCEPTS:
+        f = facts[key]
+        kw = "LCR" if key in ("lcr", "nsfr") else "CET1"
+        how = (f"get_us_filings('{sym}', forms=['10-Q','10-K']) 로 최신 접수번호"
+               f"(accession)를 얻은 뒤 get_us_filing_detail('{sym}', "
+               f"accession_no=..., find='{kw}') 로 원문에서 해당 표를 찾으세요.")
+        if "value" not in f:
+            metrics[key] = {"status": f.get("status", "not_in_xbrl"),
+                            **({"detail": f["detail"]} if f.get("detail") else {}),
+                            "required_reports": _reports_for(key), "how": how}
+            continue
+        behind = None
+        if base_date and f["end"] < base_date:
+            behind = (_dt.date.fromisoformat(base_date)
+                      - _dt.date.fromisoformat(f["end"])).days
+        if behind and behind > 400:
+            metrics[key] = {"status": "stale_in_xbrl",
+                            "last_fact": {**f, "days_behind_base": behind},
+                            "reason": "XBRL 태깅이 과거에 중단된 지표입니다 - "
+                                      "현재값은 원문에만 있습니다.",
+                            "required_reports": _reports_for(key), "how": how}
+        else:
+            metrics[key] = {**f, "framework": "US Basel III (Fed)"}
+
+    for key in _SOUND_ASSET_CONCEPTS:
+        metrics[key] = facts[key]
+
+    allow = facts["allowance_for_credit_losses"]
+    loans = facts["gross_loans"]
+    if "value" in allow and "value" in loans and allow["end"] == loans["end"]             and loans["value"]:
+        metrics["allowance_coverage_of_loans"] = {
+            "value_pct": round(allow["value"] / loans["value"] * 100, 2),
+            "as_of": allow["end"],
+            "basis": "derived_same_date",
+            "note": "충당금/총여신. 같은 기준일 XBRL 값에서만 파생 계산합니다.",
+        }
+    else:
+        metrics["allowance_coverage_of_loans"] = {
+            "status": "unavailable",
+            "reason": "충당금·총여신의 기준일이 다르거나 한쪽이 미확보라 "
+                      "비율을 만들지 않았습니다.",
+        }
+
+    unavailable = sorted(k for k, m in metrics.items()
+                         if m.get("status") in ("not_in_xbrl", "stale_in_xbrl",
+                                                "fetch_error", "unavailable"))
+    warns: list[str] = []
+    if not is_financial:
+        warns.append(
+            f"SIC {sic}({sic_desc}) - 금융회사가 아닐 수 있습니다. 이 지표들은 "
+            "은행·금융지주에만 의미가 있습니다.")
+    if unavailable:
+        warns.append("XBRL 로 확보되지 않은 지표: " + ", ".join(unavailable)
+                     + " - 각 항목의 required_reports 원문으로 확인하세요.")
+
+    payload = {
+        "symbol": issuer["requested_ticker"],
+        "issuer": {"cik": cik, "name": issuer["name"],
+                   "sic": sic, "sic_description": sic_desc},
+        "market": "US",
+        "is_financial_sic": is_financial,
+        "framework": {"name": "US Basel III (Fed 최종규정)",
+                      "comparison_note": comparison_note},
+        "base_date": base_date,
+        "metrics": metrics,
+        "_meta": _us_meta(
+            kind="filing",
+            data_as_of=base_date,
+            data_completeness=rmeta.PARTIAL if unavailable else rmeta.COMPLETE,
+            coverage={"truncated": False,
+                      "coverage_complete": not unavailable,
+                      "unavailable_metrics": unavailable,
+                      "reason": "source_limit" if unavailable else None},
+            warnings=warns or None,
+            extra={"source": "SEC XBRL companyconcept + submissions"},
+        ),
+    }
+    return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+
+
+@mcp.tool()
+@safe_us_tool
+@track_metrics("get_us_liquidity")
+async def get_us_liquidity(ticker: str) -> str:
+    """US liquidity ledger — 미국 기업의 사용 가능 유동성 원장 (SEC XBRL, JSON).
+
+    "RIVN 런웨이가 현금만 기준인지", "제한 현금 빼면 실제로 쓸 수 있는 돈이
+    얼마인지", "1년 내 갚을 돈은 얼마인지" 같은 질문에 사용합니다. 재무 요약의
+    현금 한 줄로는 안 되는 것 - 단기투자·제한 현금·미인출 리볼버·부채 만기·
+    보고기간 후 조달 - 을 SEC XBRL 원문에서 출처·기준일별로 구조화합니다.
+
+    - 총액(total_available)은 **기준일이 같은 항목만** 더합니다. 제한 현금은
+      절대 총액에 넣지 않고, 포함형 총계와 교차검증만 합니다(중복 차감 방지).
+    - 미보고 항목은 0이 아니라 not_reported 로 남습니다. 제한·만기 자료가
+      없으면 runway_inputs.official_runway 는 unavailable 입니다 - 그때는
+      현금만 민감도(cash_only_base)까지만 말할 수 있습니다.
+    - 이 도구는 런웨이 개월 수를 계산하지 않습니다. 분모(burn)는
+      get_us_financial_statement 의 영업현금흐름에서 읽는 쪽이 정합니다.
+
+    Args:
+        ticker: US 티커 (예: "RIVN", "CRSP")
+    """
+    issuer = await sec.resolve_issuer(ticker)
+    if issuer is None:
+        return f"티커 '{ticker}'를 SEC 발행사 목록에서 찾지 못했습니다."
+    cik = issuer["cik"]
+
+    async def _component(name: str) -> tuple[str, dict]:
+        for tag in _LIQ_CONCEPTS[name]:
+            try:
+                fact = await sec.get_concept_latest(cik, tag)
+            except sec.SecFetchError as exc:
+                return name, {"status": "fetch_error", "detail": str(exc)}
+            if fact is not None:
+                return name, fact
+        return name, {"status": "not_reported"}
+
+    pairs = await asyncio.gather(*(_component(n) for n in _LIQ_CONCEPTS))
+    facts = dict(pairs)
+
+    def _ok(name: str) -> dict | None:
+        f = facts[name]
+        return f if "value" in f else None
+
+    cash = _ok("cash")
+    base_date = cash["end"] if cash else None
+
+    # 기준일보다 뒤처진 값은 그 사실을 값 옆에 적는다. 실측(RIVN)에서 2년 전
+    # LongTermDebtCurrent=0 이, (CRSP)에서 2018년 포함형 총계가 최신인 양
+    # 원장에 섞였다 - 값은 보존하되 며칠 뒤처졌는지 없이는 내보내지 않는다.
+    if base_date:
+        _base_d = _dt.date.fromisoformat(base_date)
+        for f in facts.values():
+            if "value" in f and f["end"] < base_date:
+                f["days_behind_base"] = (_base_d - _dt.date.fromisoformat(f["end"])).days
+
+    # 연 1회 주석(직전 10-K) 주기는 허용하고, 그보다 뒤처지면 재료로 안 쓴다.
+    _MAX_BEHIND_DAYS = 400
+
+    def _usable(name: str) -> dict | None:
+        f = _ok(name)
+        if f is None or f.get("days_behind_base", 0) > _MAX_BEHIND_DAYS:
+            return None
+        return f
+
+    # 총액: 기준일이 같은 가용 항목만. 기간이 섞인 합계는 원장이 아니라 오류다.
+    total_components: list[str] = []
+    total_value = 0
+    excluded: list[dict] = []
+    warns: list[str] = []
+    for name in ("cash", "marketable_securities", "revolver_available"):
+        f = _ok(name)
+        if f is None:
+            continue
+        if base_date and f["end"] != base_date:
+            excluded.append({"component": name, "reason": "as_of_mismatch",
+                             "end": f["end"], "value": f["value"]})
+            warns.append(
+                f"{name} 기준일({f['end']})이 현금 기준일({base_date})과 달라 "
+                "총액에서 제외했습니다 - 값은 원장에 따로 있습니다.")
+            continue
+        total_components.append(name)
+        total_value += f["value"]
+
+    if cash:
+        total_available: dict = {
+            "value": total_value, "as_of": base_date,
+            "components": total_components, "excluded": excluded,
+        }
+    else:
+        total_available = {"status": "unavailable",
+                           "reason": "cash_not_reported", "excluded": excluded}
+
+    # 제한 현금 - 총액 밖에서 보고. 포함형 총계가 있으면 교차검증까지.
+    rc_cur, rc_non = _ok("restricted_cash_current"), _ok("restricted_cash_noncurrent")
+    incl = _ok("cash_incl_restricted")
+    derived = None
+    if incl and cash and incl["end"] == cash["end"]:
+        derived = incl["value"] - cash["value"]
+    restricted = {
+        "current": facts["restricted_cash_current"],
+        "noncurrent": facts["restricted_cash_noncurrent"],
+        "included_in_total": False,
+        **({"derived_from_inclusive_total": derived} if derived is not None else {}),
+    }
+    reported_rc = sum(f["value"] for f in (rc_cur, rc_non) if f)
+    if derived is not None and (rc_cur or rc_non) and abs(derived - reported_rc) > 0:
+        restricted["cross_check"] = (
+            f"포함형 총계 기준 파생 제한액({derived:,})과 보고된 제한액"
+            f"({reported_rc:,})이 다릅니다 - 별도 제한 항목이 더 있을 수 있습니다.")
+
+    obligations = {n: facts[n] for n in
+                   ("debt_due_next_12m", "lease_due_next_12m",
+                    "purchase_obligation_next_12m")}
+
+    # 보고기간 후 자금조달성 공시(요구 2). 해석하지 않고 연결만 한다.
+    post_rows: list[dict] = []
+    post_error = None
+    fin_notice = None
+    if base_date:
+        try:
+            subs = await sec.get_submissions(cik)
+            _sic = subs.get("sic")
+            if _sic and str(_sic).isdigit() and 6000 <= int(_sic) <= 6799:
+                fin_notice = (
+                    f"SIC {_sic}({subs.get('sic_description')}) 금융회사입니다 - "
+                    "제조업형 유동성 원장·런웨이가 성립하지 않습니다. "
+                    "get_financial_soundness 로 규제자본 경로를 보세요.")
+            for row in subs.get("rows") or []:
+                fdate = str(row.get("filing_date") or "")
+                if not fdate or fdate <= base_date:
+                    continue
+                form = str(row.get("form") or "")
+                items = {i.strip() for i in str(row.get("items") or "").split(",") if i.strip()}
+                if form in _FINANCING_FORMS or (
+                        form.startswith("8-K") and items & _FINANCING_8K_ITEMS):
+                    post_rows.append({
+                        "form": form, "filing_date": fdate,
+                        "items": row.get("items"),
+                        "description": row.get("primary_doc_description"),
+                        "url": sec.filing_url(cik, row.get("accession") or "",
+                                              row.get("primary_document") or ""),
+                    })
+                if len(post_rows) >= 10:
+                    break
+        except sec.SecFetchError as exc:
+            post_error = str(exc)
+
+    # 공식 런웨이 재료 판정(수용 2). 제한·만기 중 하나라도 확인 불가면
+    # 승격 불가 - 어떤 재료가 비었는지도 함께 적는다.
+    missing = []
+    if not (_usable("restricted_cash_current") or _usable("restricted_cash_noncurrent")
+            or derived is not None):
+        missing.append("restricted_cash")
+    for _ob in ("debt_due_next_12m", "lease_due_next_12m"):
+        if _usable(_ob) is None:
+            missing.append(_ob)
+            _f = _ok(_ob)
+            if _f is not None:
+                warns.append(
+                    f"{_ob} 최신 보고값이 기준일보다 {_f['days_behind_base']}일 "
+                    f"뒤처져 있습니다({_f['end']}) - 공식 런웨이 재료로 쓰지 않습니다.")
+    official = ({"status": "inputs_available"} if not missing
+                else {"status": "unavailable", "missing": missing,
+                      "note": "이 항목들이 원문(10-K/10-Q 주석)으로 확인되기 "
+                              "전까지 공식 런웨이로 승격하지 마세요."})
+    runway_inputs = {
+        "cash_only_base": cash["value"] if cash else None,
+        "available_liquidity_base": (total_available.get("value")
+                                     if cash else None),
+        "official_runway": official,
+        "note": "런웨이 개월 = 기반액 / 월 소진액(burn). burn 은 "
+                "get_us_financial_statement(ticker, statement_type='cash_flow', "
+                "period='quarterly')의 영업현금흐름으로 정하세요.",
+    }
+
+    not_reported = sorted(n for n, f in facts.items() if f.get("status") == "not_reported")
+    fetch_errors = sorted(n for n, f in facts.items() if f.get("status") == "fetch_error")
+    if fetch_errors:
+        warns.append("조회 실패(재시도 가능): " + ", ".join(fetch_errors))
+    if missing:
+        warns.append("공식 런웨이 승격 불가 - 확인 불가 재료: " + ", ".join(missing))
+    if post_error:
+        warns.append(f"보고기간 후 공시 목록 조회 실패: {post_error}")
+    if fin_notice:
+        warns.append(fin_notice)
+
+    has_gap = bool(missing or fetch_errors or not cash or excluded or post_error)
+    coverage = {
+        "truncated": False,
+        "coverage_complete": not has_gap,
+        "not_reported": not_reported,
+        "fetch_errors": fetch_errors,
+        "reason": "source_limit" if has_gap else None,
+    }
+
+    payload = {
+        "ticker": issuer["requested_ticker"],
+        "issuer": {"cik": cik, "name": issuer["name"]},
+        "base_date": base_date,
+        "liquidity": {
+            "cash": facts["cash"],
+            "cash_incl_restricted": facts["cash_incl_restricted"],
+            "marketable_securities": facts["marketable_securities"],
+            "revolver_available": facts["revolver_available"],
+            "restricted_cash": restricted,
+            "total_available": total_available,
+        },
+        "obligations": obligations,
+        "post_period_financing": {
+            "cutoff": base_date, "rows": post_rows,
+            "note": "기준일 이후 제출된 자금조달성 공시(424B·S-1/S-3·FWP, "
+                    "8-K item 1.01/2.03/3.02)입니다. 조달 여부·금액은 원문으로 "
+                    "확인하세요 - 여기 있다는 것은 후보라는 뜻입니다.",
+        },
+        "runway_inputs": runway_inputs,
+        "_meta": _us_meta(
+            kind="filing",
+            data_as_of=base_date,
+            data_completeness=rmeta.PARTIAL if has_gap else rmeta.COMPLETE,
+            coverage=coverage,
+            warnings=warns or None,
+            extra={"source": "SEC XBRL companyconcept",
+                   "unit": (cash or {}).get("unit")},
+        ),
+    }
+    return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
 
 
 @mcp.tool()
