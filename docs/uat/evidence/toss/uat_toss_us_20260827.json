@@ -1,0 +1,1626 @@
+{
+ "summary": {
+  "provider": "toss",
+  "market": "US",
+  "ran_at": "2026-08-27T22:58:29.808942+09:00",
+  "release_gate_opened_for_verification": true,
+  "auto_route": {
+   "gate_preview": true,
+   "selected_provider": "toss",
+   "primary_provider": "toss",
+   "selection_reason": "broker_connected_and_intraday_supported",
+   "rows": 5,
+   "provider_matches": true
+  },
+  "error_classification": {
+   "bad_symbol": "entity_not_found",
+   "bad_key_auth": "credential_invalid"
+  },
+  "primary_switch": {
+   "before": "toss",
+   "via": "kiwoom",
+   "steps": [
+    "kiwoom",
+    "toss"
+   ],
+   "ok": true
+  },
+  "failures": 50
+ },
+ "symbols": [
+  {
+   "symbol": "AAPL",
+   "venue": "NAS",
+   "trading_date": "latest",
+   "intervals": {
+    "1m": {
+     "rows": 25,
+     "provider": "toss",
+     "complete": true,
+     "pages": 3,
+     "warnings": [
+      "정규장 밖 행 539개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_toss_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "first": "2026-08-27T09:30:00-04:00",
+     "last": "2026-08-27T09:54:00-04:00"
+    },
+    "5m": {
+     "rows": 5,
+     "provider": "toss",
+     "complete": true,
+     "pages": 3,
+     "warnings": [
+      "정규장 밖 행 539개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_toss_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "first": "2026-08-27T09:30:00-04:00",
+     "last": "2026-08-27T09:50:00-04:00"
+    },
+    "15m": {
+     "rows": 1,
+     "provider": "toss",
+     "complete": true,
+     "pages": 3,
+     "warnings": [
+      "정규장 밖 행 539개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_toss_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "first": "2026-08-27T09:30:00-04:00",
+     "last": "2026-08-27T09:30:00-04:00"
+    },
+    "60m": {
+     "rows": 0,
+     "provider": "toss",
+     "complete": true,
+     "pages": 3,
+     "warnings": [
+      "정규장 밖 행 539개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_toss_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [
+      "검산 가능한 완전 버킷이 없음"
+     ],
+     "first": null,
+     "last": null
+    },
+    "120m": {
+     "rows": 0,
+     "provider": "toss",
+     "complete": true,
+     "pages": 3,
+     "warnings": [
+      "정규장 밖 행 539개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_toss_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [
+      "검산 가능한 완전 버킷이 없음"
+     ],
+     "first": null,
+     "last": null
+    },
+    "240m": {
+     "rows": 0,
+     "provider": "toss",
+     "complete": true,
+     "pages": 3,
+     "warnings": [
+      "정규장 밖 행 539개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_toss_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [
+      "검산 가능한 완전 버킷이 없음"
+     ],
+     "first": null,
+     "last": null
+    }
+   },
+   "pagination": {
+    "pages": 3,
+    "rows": 27,
+    "complete": true
+   },
+   "kis_cross_check": {
+    "available": false,
+    "error": "kis_empty"
+   }
+  },
+  {
+   "symbol": "MSFT",
+   "venue": "NAS",
+   "trading_date": "latest",
+   "intervals": {
+    "1m": {
+     "rows": 25,
+     "provider": "toss",
+     "complete": true,
+     "pages": 3,
+     "warnings": [
+      "정규장 밖 행 513개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_toss_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "first": "2026-08-27T09:30:00-04:00",
+     "last": "2026-08-27T09:54:00-04:00"
+    },
+    "5m": {
+     "rows": 5,
+     "provider": "toss",
+     "complete": true,
+     "pages": 3,
+     "warnings": [
+      "정규장 밖 행 513개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_toss_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "first": "2026-08-27T09:30:00-04:00",
+     "last": "2026-08-27T09:50:00-04:00"
+    },
+    "15m": {
+     "rows": 1,
+     "provider": "toss",
+     "complete": true,
+     "pages": 3,
+     "warnings": [
+      "정규장 밖 행 513개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_toss_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "first": "2026-08-27T09:30:00-04:00",
+     "last": "2026-08-27T09:30:00-04:00"
+    },
+    "60m": {
+     "rows": 0,
+     "provider": "toss",
+     "complete": true,
+     "pages": 3,
+     "warnings": [
+      "정규장 밖 행 513개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_toss_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [
+      "검산 가능한 완전 버킷이 없음"
+     ],
+     "first": null,
+     "last": null
+    },
+    "120m": {
+     "rows": 0,
+     "provider": "toss",
+     "complete": true,
+     "pages": 3,
+     "warnings": [
+      "정규장 밖 행 513개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_toss_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [
+      "검산 가능한 완전 버킷이 없음"
+     ],
+     "first": null,
+     "last": null
+    },
+    "240m": {
+     "rows": 0,
+     "provider": "toss",
+     "complete": true,
+     "pages": 3,
+     "warnings": [
+      "정규장 밖 행 513개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_toss_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [
+      "검산 가능한 완전 버킷이 없음"
+     ],
+     "first": null,
+     "last": null
+    }
+   },
+   "pagination": {
+    "pages": 3,
+    "rows": 27,
+    "complete": true
+   },
+   "kis_cross_check": {
+    "available": false,
+    "error": "kis_empty"
+   }
+  },
+  {
+   "symbol": "NVDA",
+   "venue": "NAS",
+   "trading_date": "latest",
+   "intervals": {
+    "1m": {
+     "rows": 25,
+     "provider": "toss",
+     "complete": true,
+     "pages": 3,
+     "warnings": [
+      "정규장 밖 행 570개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_toss_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "first": "2026-08-27T09:30:00-04:00",
+     "last": "2026-08-27T09:54:00-04:00"
+    },
+    "5m": {
+     "rows": 5,
+     "provider": "toss",
+     "complete": true,
+     "pages": 3,
+     "warnings": [
+      "정규장 밖 행 570개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_toss_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "first": "2026-08-27T09:30:00-04:00",
+     "last": "2026-08-27T09:50:00-04:00"
+    },
+    "15m": {
+     "rows": 1,
+     "provider": "toss",
+     "complete": true,
+     "pages": 3,
+     "warnings": [
+      "정규장 밖 행 570개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_toss_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "first": "2026-08-27T09:30:00-04:00",
+     "last": "2026-08-27T09:30:00-04:00"
+    },
+    "60m": {
+     "rows": 0,
+     "provider": "toss",
+     "complete": true,
+     "pages": 3,
+     "warnings": [
+      "정규장 밖 행 570개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_toss_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [
+      "검산 가능한 완전 버킷이 없음"
+     ],
+     "first": null,
+     "last": null
+    },
+    "120m": {
+     "rows": 0,
+     "provider": "toss",
+     "complete": true,
+     "pages": 3,
+     "warnings": [
+      "정규장 밖 행 570개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_toss_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [
+      "검산 가능한 완전 버킷이 없음"
+     ],
+     "first": null,
+     "last": null
+    },
+    "240m": {
+     "rows": 0,
+     "provider": "toss",
+     "complete": true,
+     "pages": 3,
+     "warnings": [
+      "정규장 밖 행 570개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_toss_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [
+      "검산 가능한 완전 버킷이 없음"
+     ],
+     "first": null,
+     "last": null
+    }
+   },
+   "pagination": {
+    "pages": 3,
+    "rows": 27,
+    "complete": true
+   },
+   "kis_cross_check": {
+    "available": false,
+    "error": "kis_empty"
+   }
+  },
+  {
+   "symbol": "TSLA",
+   "venue": "NAS",
+   "trading_date": "latest",
+   "intervals": {
+    "1m": {
+     "rows": 26,
+     "provider": "toss",
+     "complete": true,
+     "pages": 3,
+     "warnings": [
+      "정규장 밖 행 552개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_toss_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "first": "2026-08-27T09:30:00-04:00",
+     "last": "2026-08-27T09:55:00-04:00"
+    },
+    "5m": {
+     "rows": 5,
+     "provider": "toss",
+     "complete": true,
+     "pages": 3,
+     "warnings": [
+      "정규장 밖 행 552개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_toss_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "first": "2026-08-27T09:30:00-04:00",
+     "last": "2026-08-27T09:50:00-04:00"
+    },
+    "15m": {
+     "rows": 1,
+     "provider": "toss",
+     "complete": true,
+     "pages": 3,
+     "warnings": [
+      "정규장 밖 행 552개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_toss_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "first": "2026-08-27T09:30:00-04:00",
+     "last": "2026-08-27T09:30:00-04:00"
+    },
+    "60m": {
+     "rows": 0,
+     "provider": "toss",
+     "complete": true,
+     "pages": 3,
+     "warnings": [
+      "정규장 밖 행 552개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_toss_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [
+      "검산 가능한 완전 버킷이 없음"
+     ],
+     "first": null,
+     "last": null
+    },
+    "120m": {
+     "rows": 0,
+     "provider": "toss",
+     "complete": true,
+     "pages": 3,
+     "warnings": [
+      "정규장 밖 행 552개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_toss_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [
+      "검산 가능한 완전 버킷이 없음"
+     ],
+     "first": null,
+     "last": null
+    },
+    "240m": {
+     "rows": 0,
+     "provider": "toss",
+     "complete": true,
+     "pages": 3,
+     "warnings": [
+      "정규장 밖 행 552개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_toss_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [
+      "검산 가능한 완전 버킷이 없음"
+     ],
+     "first": null,
+     "last": null
+    }
+   },
+   "pagination": {
+    "pages": 3,
+    "rows": 28,
+    "complete": true
+   },
+   "kis_cross_check": {
+    "available": false,
+    "error": "kis_empty"
+   }
+  },
+  {
+   "symbol": "IBM",
+   "venue": "NYS",
+   "trading_date": "latest",
+   "intervals": {
+    "1m": {
+     "rows": 26,
+     "provider": "toss",
+     "complete": true,
+     "pages": 2,
+     "warnings": [
+      "정규장 밖 행 225개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_toss_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "first": "2026-08-27T09:30:00-04:00",
+     "last": "2026-08-27T09:55:00-04:00"
+    },
+    "5m": {
+     "rows": 5,
+     "provider": "toss",
+     "complete": true,
+     "pages": 2,
+     "warnings": [
+      "정규장 밖 행 225개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_toss_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "first": "2026-08-27T09:30:00-04:00",
+     "last": "2026-08-27T09:50:00-04:00"
+    },
+    "15m": {
+     "rows": 1,
+     "provider": "toss",
+     "complete": true,
+     "pages": 2,
+     "warnings": [
+      "정규장 밖 행 225개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_toss_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "first": "2026-08-27T09:30:00-04:00",
+     "last": "2026-08-27T09:30:00-04:00"
+    },
+    "60m": {
+     "rows": 0,
+     "provider": "toss",
+     "complete": true,
+     "pages": 2,
+     "warnings": [
+      "정규장 밖 행 225개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_toss_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [
+      "검산 가능한 완전 버킷이 없음"
+     ],
+     "first": null,
+     "last": null
+    },
+    "120m": {
+     "rows": 0,
+     "provider": "toss",
+     "complete": true,
+     "pages": 2,
+     "warnings": [
+      "정규장 밖 행 225개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_toss_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [
+      "검산 가능한 완전 버킷이 없음"
+     ],
+     "first": null,
+     "last": null
+    },
+    "240m": {
+     "rows": 0,
+     "provider": "toss",
+     "complete": true,
+     "pages": 2,
+     "warnings": [
+      "정규장 밖 행 225개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_toss_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [
+      "검산 가능한 완전 버킷이 없음"
+     ],
+     "first": null,
+     "last": null
+    }
+   },
+   "pagination": {
+    "pages": 2,
+    "rows": 28,
+    "complete": true
+   },
+   "kis_cross_check": {
+    "available": false,
+    "error": "kis_empty"
+   }
+  },
+  {
+   "symbol": "KO",
+   "venue": "NYS",
+   "trading_date": "latest",
+   "intervals": {
+    "1m": {
+     "rows": 26,
+     "provider": "toss",
+     "complete": true,
+     "pages": 3,
+     "warnings": [
+      "정규장 밖 행 455개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_toss_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "first": "2026-08-27T09:30:00-04:00",
+     "last": "2026-08-27T09:55:00-04:00"
+    },
+    "5m": {
+     "rows": 5,
+     "provider": "toss",
+     "complete": true,
+     "pages": 3,
+     "warnings": [
+      "정규장 밖 행 455개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_toss_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "first": "2026-08-27T09:30:00-04:00",
+     "last": "2026-08-27T09:50:00-04:00"
+    },
+    "15m": {
+     "rows": 1,
+     "provider": "toss",
+     "complete": true,
+     "pages": 3,
+     "warnings": [
+      "정규장 밖 행 455개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_toss_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "first": "2026-08-27T09:30:00-04:00",
+     "last": "2026-08-27T09:30:00-04:00"
+    },
+    "60m": {
+     "rows": 0,
+     "provider": "toss",
+     "complete": true,
+     "pages": 3,
+     "warnings": [
+      "정규장 밖 행 455개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_toss_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [
+      "검산 가능한 완전 버킷이 없음"
+     ],
+     "first": null,
+     "last": null
+    },
+    "120m": {
+     "rows": 0,
+     "provider": "toss",
+     "complete": true,
+     "pages": 3,
+     "warnings": [
+      "정규장 밖 행 455개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_toss_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [
+      "검산 가능한 완전 버킷이 없음"
+     ],
+     "first": null,
+     "last": null
+    },
+    "240m": {
+     "rows": 0,
+     "provider": "toss",
+     "complete": true,
+     "pages": 3,
+     "warnings": [
+      "정규장 밖 행 455개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_toss_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [
+      "검산 가능한 완전 버킷이 없음"
+     ],
+     "first": null,
+     "last": null
+    }
+   },
+   "pagination": {
+    "pages": 3,
+    "rows": 28,
+    "complete": true
+   },
+   "kis_cross_check": {
+    "available": false,
+    "error": "kis_empty"
+   }
+  },
+  {
+   "symbol": "JPM",
+   "venue": "NYS",
+   "trading_date": "latest",
+   "intervals": {
+    "1m": {
+     "rows": 26,
+     "provider": "toss",
+     "complete": true,
+     "pages": 1,
+     "warnings": [
+      "정규장 밖 행 166개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_toss_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "first": "2026-08-27T09:30:00-04:00",
+     "last": "2026-08-27T09:55:00-04:00"
+    },
+    "5m": {
+     "rows": 5,
+     "provider": "toss",
+     "complete": true,
+     "pages": 1,
+     "warnings": [
+      "정규장 밖 행 166개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_toss_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "first": "2026-08-27T09:30:00-04:00",
+     "last": "2026-08-27T09:50:00-04:00"
+    },
+    "15m": {
+     "rows": 1,
+     "provider": "toss",
+     "complete": true,
+     "pages": 1,
+     "warnings": [
+      "정규장 밖 행 166개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_toss_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "first": "2026-08-27T09:30:00-04:00",
+     "last": "2026-08-27T09:30:00-04:00"
+    },
+    "60m": {
+     "rows": 0,
+     "provider": "toss",
+     "complete": true,
+     "pages": 1,
+     "warnings": [
+      "정규장 밖 행 166개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_toss_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [
+      "검산 가능한 완전 버킷이 없음"
+     ],
+     "first": null,
+     "last": null
+    },
+    "120m": {
+     "rows": 0,
+     "provider": "toss",
+     "complete": true,
+     "pages": 1,
+     "warnings": [
+      "정규장 밖 행 166개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_toss_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [
+      "검산 가능한 완전 버킷이 없음"
+     ],
+     "first": null,
+     "last": null
+    },
+    "240m": {
+     "rows": 0,
+     "provider": "toss",
+     "complete": true,
+     "pages": 1,
+     "warnings": [
+      "정규장 밖 행 166개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_toss_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [
+      "검산 가능한 완전 버킷이 없음"
+     ],
+     "first": null,
+     "last": null
+    }
+   },
+   "pagination": {
+    "pages": 1,
+    "rows": 28,
+    "complete": true
+   },
+   "kis_cross_check": {
+    "available": false,
+    "error": "kis_empty"
+   }
+  },
+  {
+   "symbol": "QQQ",
+   "venue": "NAS",
+   "trading_date": "latest",
+   "intervals": {
+    "1m": {
+     "rows": 26,
+     "provider": "toss",
+     "complete": true,
+     "pages": 3,
+     "warnings": [
+      "정규장 밖 행 554개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_toss_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "first": "2026-08-27T09:30:00-04:00",
+     "last": "2026-08-27T09:55:00-04:00"
+    },
+    "5m": {
+     "rows": 5,
+     "provider": "toss",
+     "complete": true,
+     "pages": 3,
+     "warnings": [
+      "정규장 밖 행 554개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_toss_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "first": "2026-08-27T09:30:00-04:00",
+     "last": "2026-08-27T09:50:00-04:00"
+    },
+    "15m": {
+     "rows": 1,
+     "provider": "toss",
+     "complete": true,
+     "pages": 3,
+     "warnings": [
+      "정규장 밖 행 554개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_toss_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "first": "2026-08-27T09:30:00-04:00",
+     "last": "2026-08-27T09:30:00-04:00"
+    },
+    "60m": {
+     "rows": 0,
+     "provider": "toss",
+     "complete": true,
+     "pages": 3,
+     "warnings": [
+      "정규장 밖 행 554개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_toss_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [
+      "검산 가능한 완전 버킷이 없음"
+     ],
+     "first": null,
+     "last": null
+    },
+    "120m": {
+     "rows": 0,
+     "provider": "toss",
+     "complete": true,
+     "pages": 3,
+     "warnings": [
+      "정규장 밖 행 554개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_toss_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [
+      "검산 가능한 완전 버킷이 없음"
+     ],
+     "first": null,
+     "last": null
+    },
+    "240m": {
+     "rows": 0,
+     "provider": "toss",
+     "complete": true,
+     "pages": 3,
+     "warnings": [
+      "정규장 밖 행 554개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_toss_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [
+      "검산 가능한 완전 버킷이 없음"
+     ],
+     "first": null,
+     "last": null
+    }
+   },
+   "pagination": {
+    "pages": 3,
+    "rows": 29,
+    "complete": true
+   },
+   "kis_cross_check": {
+    "available": false,
+    "error": "kis_empty"
+   }
+  },
+  {
+   "symbol": "SPY",
+   "venue": "NYS",
+   "trading_date": "latest",
+   "intervals": {
+    "1m": {
+     "rows": 27,
+     "provider": "toss",
+     "complete": true,
+     "pages": 3,
+     "warnings": [
+      "정규장 밖 행 521개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_toss_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "first": "2026-08-27T09:30:00-04:00",
+     "last": "2026-08-27T09:56:00-04:00"
+    },
+    "5m": {
+     "rows": 5,
+     "provider": "toss",
+     "complete": true,
+     "pages": 3,
+     "warnings": [
+      "정규장 밖 행 521개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_toss_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "first": "2026-08-27T09:30:00-04:00",
+     "last": "2026-08-27T09:50:00-04:00"
+    },
+    "15m": {
+     "rows": 1,
+     "provider": "toss",
+     "complete": true,
+     "pages": 3,
+     "warnings": [
+      "정규장 밖 행 521개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_toss_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "first": "2026-08-27T09:30:00-04:00",
+     "last": "2026-08-27T09:30:00-04:00"
+    },
+    "60m": {
+     "rows": 0,
+     "provider": "toss",
+     "complete": true,
+     "pages": 3,
+     "warnings": [
+      "정규장 밖 행 521개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_toss_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [
+      "검산 가능한 완전 버킷이 없음"
+     ],
+     "first": null,
+     "last": null
+    },
+    "120m": {
+     "rows": 0,
+     "provider": "toss",
+     "complete": true,
+     "pages": 3,
+     "warnings": [
+      "정규장 밖 행 521개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_toss_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [
+      "검산 가능한 완전 버킷이 없음"
+     ],
+     "first": null,
+     "last": null
+    },
+    "240m": {
+     "rows": 0,
+     "provider": "toss",
+     "complete": true,
+     "pages": 3,
+     "warnings": [
+      "정규장 밖 행 521개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_toss_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [
+      "검산 가능한 완전 버킷이 없음"
+     ],
+     "first": null,
+     "last": null
+    }
+   },
+   "pagination": {
+    "pages": 3,
+    "rows": 29,
+    "complete": true
+   },
+   "kis_cross_check": {
+    "available": false,
+    "error": "kis_empty"
+   }
+  },
+  {
+   "symbol": "IWM",
+   "venue": "NYS",
+   "trading_date": "latest",
+   "intervals": {
+    "1m": {
+     "rows": 27,
+     "provider": "toss",
+     "complete": true,
+     "pages": 2,
+     "warnings": [
+      "정규장 밖 행 347개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_toss_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "first": "2026-08-27T09:30:00-04:00",
+     "last": "2026-08-27T09:56:00-04:00"
+    },
+    "5m": {
+     "rows": 5,
+     "provider": "toss",
+     "complete": true,
+     "pages": 2,
+     "warnings": [
+      "정규장 밖 행 347개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_toss_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "first": "2026-08-27T09:30:00-04:00",
+     "last": "2026-08-27T09:50:00-04:00"
+    },
+    "15m": {
+     "rows": 1,
+     "provider": "toss",
+     "complete": true,
+     "pages": 2,
+     "warnings": [
+      "정규장 밖 행 347개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_toss_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "first": "2026-08-27T09:30:00-04:00",
+     "last": "2026-08-27T09:30:00-04:00"
+    },
+    "60m": {
+     "rows": 0,
+     "provider": "toss",
+     "complete": true,
+     "pages": 2,
+     "warnings": [
+      "정규장 밖 행 347개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_toss_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [
+      "검산 가능한 완전 버킷이 없음"
+     ],
+     "first": null,
+     "last": null
+    },
+    "120m": {
+     "rows": 0,
+     "provider": "toss",
+     "complete": true,
+     "pages": 2,
+     "warnings": [
+      "정규장 밖 행 347개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_toss_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [
+      "검산 가능한 완전 버킷이 없음"
+     ],
+     "first": null,
+     "last": null
+    },
+    "240m": {
+     "rows": 0,
+     "provider": "toss",
+     "complete": true,
+     "pages": 2,
+     "warnings": [
+      "정규장 밖 행 347개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_toss_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [
+      "검산 가능한 완전 버킷이 없음"
+     ],
+     "first": null,
+     "last": null
+    }
+   },
+   "pagination": {
+    "pages": 2,
+    "rows": 29,
+    "complete": true
+   },
+   "kis_cross_check": {
+    "available": false,
+    "error": "kis_empty"
+   }
+  },
+  {
+   "symbol": "PLTR",
+   "venue": "NAS",
+   "trading_date": "latest",
+   "intervals": {
+    "1m": {
+     "rows": 27,
+     "provider": "toss",
+     "complete": true,
+     "pages": 3,
+     "warnings": [
+      "정규장 밖 행 497개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_toss_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "first": "2026-08-27T09:30:00-04:00",
+     "last": "2026-08-27T09:56:00-04:00"
+    },
+    "5m": {
+     "rows": 5,
+     "provider": "toss",
+     "complete": true,
+     "pages": 3,
+     "warnings": [
+      "정규장 밖 행 497개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_toss_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "first": "2026-08-27T09:30:00-04:00",
+     "last": "2026-08-27T09:50:00-04:00"
+    },
+    "15m": {
+     "rows": 1,
+     "provider": "toss",
+     "complete": true,
+     "pages": 3,
+     "warnings": [
+      "정규장 밖 행 497개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_toss_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "first": "2026-08-27T09:30:00-04:00",
+     "last": "2026-08-27T09:30:00-04:00"
+    },
+    "60m": {
+     "rows": 0,
+     "provider": "toss",
+     "complete": true,
+     "pages": 3,
+     "warnings": [
+      "정규장 밖 행 497개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_toss_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [
+      "검산 가능한 완전 버킷이 없음"
+     ],
+     "first": null,
+     "last": null
+    },
+    "120m": {
+     "rows": 0,
+     "provider": "toss",
+     "complete": true,
+     "pages": 3,
+     "warnings": [
+      "정규장 밖 행 497개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_toss_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [
+      "검산 가능한 완전 버킷이 없음"
+     ],
+     "first": null,
+     "last": null
+    },
+    "240m": {
+     "rows": 0,
+     "provider": "toss",
+     "complete": true,
+     "pages": 3,
+     "warnings": [
+      "정규장 밖 행 497개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_toss_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [
+      "검산 가능한 완전 버킷이 없음"
+     ],
+     "first": null,
+     "last": null
+    }
+   },
+   "pagination": {
+    "pages": 3,
+    "rows": 29,
+    "complete": true
+   },
+   "kis_cross_check": {
+    "available": false,
+    "error": "kis_empty"
+   }
+  },
+  {
+   "symbol": "SOFI",
+   "venue": "NAS",
+   "trading_date": "latest",
+   "intervals": {
+    "1m": {
+     "rows": 27,
+     "provider": "toss",
+     "complete": true,
+     "pages": 2,
+     "warnings": [
+      "정규장 밖 행 282개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_toss_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "first": "2026-08-27T09:30:00-04:00",
+     "last": "2026-08-27T09:56:00-04:00"
+    },
+    "5m": {
+     "rows": 5,
+     "provider": "toss",
+     "complete": true,
+     "pages": 2,
+     "warnings": [
+      "정규장 밖 행 282개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_toss_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "first": "2026-08-27T09:30:00-04:00",
+     "last": "2026-08-27T09:50:00-04:00"
+    },
+    "15m": {
+     "rows": 1,
+     "provider": "toss",
+     "complete": true,
+     "pages": 2,
+     "warnings": [
+      "정규장 밖 행 282개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_toss_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "first": "2026-08-27T09:30:00-04:00",
+     "last": "2026-08-27T09:30:00-04:00"
+    },
+    "60m": {
+     "rows": 0,
+     "provider": "toss",
+     "complete": true,
+     "pages": 2,
+     "warnings": [
+      "정규장 밖 행 282개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_toss_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [
+      "검산 가능한 완전 버킷이 없음"
+     ],
+     "first": null,
+     "last": null
+    },
+    "120m": {
+     "rows": 0,
+     "provider": "toss",
+     "complete": true,
+     "pages": 2,
+     "warnings": [
+      "정규장 밖 행 282개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_toss_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [
+      "검산 가능한 완전 버킷이 없음"
+     ],
+     "first": null,
+     "last": null
+    },
+    "240m": {
+     "rows": 0,
+     "provider": "toss",
+     "complete": true,
+     "pages": 2,
+     "warnings": [
+      "정규장 밖 행 282개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_toss_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [
+      "검산 가능한 완전 버킷이 없음"
+     ],
+     "first": null,
+     "last": null
+    }
+   },
+   "pagination": {
+    "pages": 2,
+    "rows": 30,
+    "complete": true
+   },
+   "kis_cross_check": {
+    "available": false,
+    "error": "kis_empty"
+   }
+  },
+  {
+   "symbol": "BRK.B",
+   "venue": "NYS",
+   "trading_date": "latest",
+   "intervals": {
+    "1m": {
+     "rows": 28,
+     "provider": "toss",
+     "complete": true,
+     "pages": 2,
+     "warnings": [
+      "정규장 밖 행 223개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_toss_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "first": "2026-08-27T09:30:00-04:00",
+     "last": "2026-08-27T09:57:00-04:00"
+    },
+    "5m": {
+     "rows": 5,
+     "provider": "toss",
+     "complete": true,
+     "pages": 2,
+     "warnings": [
+      "정규장 밖 행 223개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_toss_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "first": "2026-08-27T09:30:00-04:00",
+     "last": "2026-08-27T09:50:00-04:00"
+    },
+    "15m": {
+     "rows": 1,
+     "provider": "toss",
+     "complete": true,
+     "pages": 2,
+     "warnings": [
+      "정규장 밖 행 223개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_toss_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "first": "2026-08-27T09:30:00-04:00",
+     "last": "2026-08-27T09:30:00-04:00"
+    },
+    "60m": {
+     "rows": 0,
+     "provider": "toss",
+     "complete": true,
+     "pages": 2,
+     "warnings": [
+      "정규장 밖 행 223개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_toss_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [
+      "검산 가능한 완전 버킷이 없음"
+     ],
+     "first": null,
+     "last": null
+    },
+    "120m": {
+     "rows": 0,
+     "provider": "toss",
+     "complete": true,
+     "pages": 2,
+     "warnings": [
+      "정규장 밖 행 223개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_toss_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [
+      "검산 가능한 완전 버킷이 없음"
+     ],
+     "first": null,
+     "last": null
+    },
+    "240m": {
+     "rows": 0,
+     "provider": "toss",
+     "complete": true,
+     "pages": 2,
+     "warnings": [
+      "정규장 밖 행 223개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_toss_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [
+      "검산 가능한 완전 버킷이 없음"
+     ],
+     "first": null,
+     "last": null
+    }
+   },
+   "pagination": {
+    "pages": 2,
+    "rows": 30,
+    "complete": true
+   },
+   "kis_cross_check": {
+    "available": false,
+    "error": "kis_empty"
+   }
+  },
+  {
+   "symbol": "AAPL",
+   "venue": "NAS",
+   "trading_date": "2026-08-20",
+   "intervals": {
+    "1m": {
+     "rows": 0,
+     "provider": "toss",
+     "complete": true,
+     "pages": 2,
+     "warnings": [
+      "기준일 2026-08-20 데이터가 토스 제공 범위 밖입니다.",
+      "정규장 밖 행 213개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_toss_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "first": null,
+     "last": null
+    },
+    "5m": {
+     "rows": 0,
+     "provider": "toss",
+     "complete": true,
+     "pages": 2,
+     "warnings": [
+      "기준일 2026-08-20 데이터가 토스 제공 범위 밖입니다.",
+      "정규장 밖 행 213개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_toss_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [
+      "1m 원천 없음 - 검산 생략"
+     ],
+     "first": null,
+     "last": null
+    },
+    "15m": {
+     "rows": 0,
+     "provider": "toss",
+     "complete": true,
+     "pages": 2,
+     "warnings": [
+      "기준일 2026-08-20 데이터가 토스 제공 범위 밖입니다.",
+      "정규장 밖 행 213개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_toss_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [
+      "1m 원천 없음 - 검산 생략"
+     ],
+     "first": null,
+     "last": null
+    },
+    "60m": {
+     "rows": 0,
+     "provider": "toss",
+     "complete": true,
+     "pages": 2,
+     "warnings": [
+      "기준일 2026-08-20 데이터가 토스 제공 범위 밖입니다.",
+      "정규장 밖 행 213개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_toss_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [
+      "1m 원천 없음 - 검산 생략"
+     ],
+     "first": null,
+     "last": null
+    },
+    "120m": {
+     "rows": 0,
+     "provider": "toss",
+     "complete": true,
+     "pages": 2,
+     "warnings": [
+      "기준일 2026-08-20 데이터가 토스 제공 범위 밖입니다.",
+      "정규장 밖 행 213개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_toss_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [
+      "1m 원천 없음 - 검산 생략"
+     ],
+     "first": null,
+     "last": null
+    },
+    "240m": {
+     "rows": 0,
+     "provider": "toss",
+     "complete": true,
+     "pages": 2,
+     "warnings": [
+      "기준일 2026-08-20 데이터가 토스 제공 범위 밖입니다.",
+      "정규장 밖 행 213개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_toss_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [
+      "1m 원천 없음 - 검산 생략"
+     ],
+     "first": null,
+     "last": null
+    }
+   },
+   "kis_cross_check": null
+  },
+  {
+   "symbol": "AAPL",
+   "venue": "NAS",
+   "trading_date": "2026-07-30",
+   "intervals": {
+    "1m": {
+     "rows": 0,
+     "provider": "toss",
+     "complete": true,
+     "pages": 2,
+     "warnings": [
+      "기준일 2026-07-30 데이터가 토스 제공 범위 밖입니다.",
+      "정규장 밖 행 239개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_toss_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "first": null,
+     "last": null
+    },
+    "5m": {
+     "rows": 0,
+     "provider": "toss",
+     "complete": true,
+     "pages": 2,
+     "warnings": [
+      "기준일 2026-07-30 데이터가 토스 제공 범위 밖입니다.",
+      "정규장 밖 행 239개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_toss_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [
+      "1m 원천 없음 - 검산 생략"
+     ],
+     "first": null,
+     "last": null
+    },
+    "15m": {
+     "rows": 0,
+     "provider": "toss",
+     "complete": true,
+     "pages": 2,
+     "warnings": [
+      "기준일 2026-07-30 데이터가 토스 제공 범위 밖입니다.",
+      "정규장 밖 행 239개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_toss_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [
+      "1m 원천 없음 - 검산 생략"
+     ],
+     "first": null,
+     "last": null
+    },
+    "60m": {
+     "rows": 0,
+     "provider": "toss",
+     "complete": true,
+     "pages": 2,
+     "warnings": [
+      "기준일 2026-07-30 데이터가 토스 제공 범위 밖입니다.",
+      "정규장 밖 행 239개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_toss_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [
+      "1m 원천 없음 - 검산 생략"
+     ],
+     "first": null,
+     "last": null
+    },
+    "120m": {
+     "rows": 0,
+     "provider": "toss",
+     "complete": true,
+     "pages": 2,
+     "warnings": [
+      "기준일 2026-07-30 데이터가 토스 제공 범위 밖입니다.",
+      "정규장 밖 행 239개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_toss_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [
+      "1m 원천 없음 - 검산 생략"
+     ],
+     "first": null,
+     "last": null
+    },
+    "240m": {
+     "rows": 0,
+     "provider": "toss",
+     "complete": true,
+     "pages": 2,
+     "warnings": [
+      "기준일 2026-07-30 데이터가 토스 제공 범위 밖입니다.",
+      "정규장 밖 행 239개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_toss_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [
+      "1m 원천 없음 - 검산 생략"
+     ],
+     "first": null,
+     "last": null
+    }
+   },
+   "kis_cross_check": null
+  }
+ ]
+}

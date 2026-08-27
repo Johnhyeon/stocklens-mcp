@@ -45,9 +45,10 @@ def _v2_state(*providers, primary=None):
 
 class ReleaseGateTableTests(unittest.TestCase):
     def test_current_honest_table(self):
-        # 지금 시점의 정직한 상태: KIS KR 만 출시 검증 완료다.
+        # 지금 시점의 정직한 상태: KIS KR·US 만 출시 검증 완료다.
+        # (KIS US: 2026-08-27 본장 15종목 PASS, 재계산 1,541 버킷 0)
         self.assertTrue(is_release_verified("kis", "kr_intraday"))
-        self.assertFalse(is_release_verified("kis", "us_intraday"))
+        self.assertTrue(is_release_verified("kis", "us_intraday"))
         self.assertFalse(is_release_verified("kiwoom", "kr_intraday"))
         self.assertFalse(is_release_verified("kiwoom", "us_intraday"))
         self.assertFalse(is_release_verified("toss", "kr_intraday"))

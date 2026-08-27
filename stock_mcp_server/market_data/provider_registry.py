@@ -178,8 +178,10 @@ _RELEASE_VERIFIED: dict[tuple[str, str], bool] = {
     # KIS KR: 0.9 브랜치 국내 15종목 UAT 2회(장중·장마감) + 재계산
     # 3213 버킷 불일치 0 + 공식 종가 대조 (2026-08-27)
     ("kis", "kr_intraday"): True,
-    # KIS US: 야간 본장 UAT 예정 (2026-08-27 22:33)
-    ("kis", "us_intraday"): False,
+    # KIS US: 미국 본장 15종목 UAT PASS 14 / WARN 1(BRK.B 심볼 형식) /
+    # FAIL 0, 독립 재계산 1,541 버킷 불일치 0 (2026-08-27 22:56 KST,
+    # docs/uat/evidence/kis/uat_live_US_225613.json)
+    ("kis", "us_intraday"): True,
     # 키움: 독립 검산 러너로 재검증 후 켠다 (1차 15/15 는 러너가 운영
     # 코드 재사용이라 독립 증거로 불인정 - 리뷰 차단 항목 4)
     ("kiwoom", "kr_intraday"): False,
