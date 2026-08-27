@@ -653,66 +653,104 @@ def _broker_keyring():
     return keyring
 
 
-_BROKER_PROFILES = ("real", "demo")
+_BROKER_CAPABILITIES = {
+    "broker_connection_contract": 1,
+    "market_data_router_contract": 1,
+    # 1.0 멀티 증권사 (additive)
+    "broker_provider_registry_contract": 1,
+    "multi_broker_primary_contract": 1,
+    "credential_schema_contract": 1,
+}
 
 
 def _broker_summary() -> tuple[dict, dict]:
-    """(capabilities, provider_connections). 비밀값 없는 요약만 만든다.
+    """(capabilities, provider_connections). 비밀값 없는 allowlist DTO.
 
-    상태 파일이 기본값(미연결)이면 keychain 을 읽지 않는다. doctor 는
-    진단일 뿐이므로 어떤 실패도 전체 상태에 영향을 주지 않는다.
+    상태 dict 를 복사하지 않는다 - 필드를 하나씩 옮겨 담아 낯선 필드,
+    credential_ref, 비밀처럼 보이는 값이 doctor 출력에 닿지 못하게 한다.
+    상태 파일에 기록이 없는 공급자는 keychain 을 읽지 않는다.
     """
-    capabilities = {
-        "broker_connection_contract": 1,
-        "market_data_router_contract": 1,
-    }
-    connection: dict = {
-        "status": "not_configured",
-        "active_profile": None,
-        "data_source_mode": "legacy",
-        "profiles": {p: {"configured": False, "verified": False}
-                     for p in _BROKER_PROFILES},
-        "storage": "os-keychain",
-    }
+    capabilities = dict(_BROKER_CAPABILITIES)
+
+    from stock_mcp_server.market_data.provider_registry import registry
+
+    connections: dict = {}
     try:
-        from stock_mcp_server.market_data.connection_state import load_state
-
-        state = load_state()
-        connection["data_source_mode"] = state.get(
-            "data_source_mode", "legacy")
-        caps_res = state.get("capability_results") or {}
-        if state.get("active_provider") == "kis" or caps_res:
-            from stock_mcp_server.market_data.broker_profiles import (
-                BrokerProfileStore,
-                KeychainUnavailableError,
-            )
-
-            store = BrokerProfileStore(
-                provider="kis", keyring_module=_broker_keyring())
-            try:
-                for p in _BROKER_PROFILES:
-                    configured = store.has_profile(p)
-                    connection["profiles"][p] = {
-                        "configured": configured,
-                        "verified": bool(caps_res.get(p)) and configured,
-                    }
-            except KeychainUnavailableError:
-                # keychain 을 못 읽으면 "미설정"으로 단정하지 않는다.
-                connection["status"] = "unknown"
-                connection["active_profile"] = state.get("active_profile")
-                return capabilities, {"kis": connection}
-            active = state.get("active_profile")
-            connection["active_profile"] = active
-            if active and connection["profiles"].get(
-                    active, {}).get("configured"):
-                connection["status"] = "connected"
-            elif any(v["configured"]
-                     for v in connection["profiles"].values()):
-                connection["status"] = "configured"
+        from stock_mcp_server.market_data.connection_state import (
+            load_state_v2,
+        )
+        state = load_state_v2()
     except Exception:  # noqa: BLE001
-        # 요약 실패는 진단 실패가 아니다. 보수적 기본값을 유지한다.
-        pass
-    return capabilities, {"kis": connection}
+        state = None
+
+    for pid in registry.ids():
+        descriptor = registry.require(pid)
+        connection: dict = {
+            "status": "not_configured",
+            "primary": False,
+            "lifecycle": None,
+            "active_profile": None,
+            "data_source_mode": "legacy",
+            "profiles": {
+                p: {"configured": False, "verified": False,
+                    "verified_at": None, "capabilities": {}}
+                for p in descriptor.supported_profiles
+            },
+            "storage": "os-keychain",
+        }
+        connections[pid] = connection
+        if state is None:
+            continue
+        connection["data_source_mode"] = state["data_source_mode"]
+        connection["primary"] = state["primary_provider"] == pid
+        record = state["providers"].get(pid)
+        if record is None:
+            continue
+        connection["lifecycle"] = record["lifecycle"]
+        connection["active_profile"] = record["active_profile"]
+
+        keyring = _broker_keyring()
+        service = f"stocklens-broker-{pid}"
+        unknown = False
+        for name in descriptor.supported_profiles:
+            prec = record["profiles"].get(name)
+            usernames = []
+            ref = (prec or {}).get("credential_ref")
+            if ref and ref != "legacy":
+                usernames.append(f"{pid}:{name}:{ref}")
+            usernames.append(f"{pid}:{name}")
+            configured = False
+            try:
+                for username in dict.fromkeys(usernames):
+                    if keyring.get_password(service, username):
+                        configured = True
+                        break
+            except Exception:  # noqa: BLE001
+                unknown = True
+                break
+            connection["profiles"][name] = {
+                "configured": configured,
+                "verified": bool(
+                    prec and prec.get("verified") and configured),
+                "verified_at": (prec or {}).get("verified_at"),
+                "capabilities": dict((prec or {}).get(
+                    "capabilities") or {}),
+            }
+        if unknown:
+            # keychain 을 못 읽으면 "미설정"으로 단정하지 않는다.
+            connection["status"] = "unknown"
+            continue
+        if record["lifecycle"] != "connected":
+            connection["status"] = "disabled"
+            continue
+        active = record["active_profile"]
+        if active and connection["profiles"].get(
+                active, {}).get("configured"):
+            connection["status"] = "connected"
+        elif any(v["configured"]
+                 for v in connection["profiles"].values()):
+            connection["status"] = "configured"
+    return capabilities, connections
 
 
 async def run_diagnostics_async(*, online: bool = False) -> DiagnosticReport:
@@ -769,8 +807,7 @@ async def run_diagnostics_async(*, online: bool = False) -> DiagnosticReport:
         broker_capabilities, provider_connections = _broker_summary()
     except Exception:  # noqa: BLE001
         broker_capabilities, provider_connections = (
-            {"broker_connection_contract": 1,
-             "market_data_router_contract": 1}, None)
+            dict(_BROKER_CAPABILITIES), None)
 
     overall = _overall_status(checks)
     return DiagnosticReport(
