@@ -174,6 +174,22 @@ class FetchTests(unittest.TestCase):
             for b in ds.bars))
         self.assertTrue(any("세션 밖" in w for w in ds.warnings))
 
+    def test_all_filtered_page_continues_to_regular_session(self):
+        # 실측(2026-08-27): NAS 피드는 최신부터 애프터마켓 행이 이어진다.
+        # 한 페이지 전체가 세션 밖이어도 중단하지 말고 계속 넘겨야
+        # 그 뒤의 정규장 행에 도달한다 (AAPL 등 대형주에서 0행 반환 재현).
+        after_hours_page = copy.deepcopy(PAGE_1)
+        for i, row in enumerate(after_hours_page["output2"]):
+            row["xhms"] = f"18{35 - i:02d}00"  # 18:35, 18:34, 18:33
+        handler = Handler({
+            "": after_hours_page,
+            # 다음 KEYB = 18:33 - 1분
+            "20260826183200": PAGE_1,  # 정규장 행 페이지
+        })
+        ds = _run(_provider(handler).fetch_bars(_request()))
+        self.assertEqual(len(ds.bars), 3)
+        self.assertTrue(all(b.start_at.hour == 9 for b in ds.bars))
+
     def test_no_progress_keyb_stops(self):
         handler = Handler({
             "": PAGE_1,

@@ -170,25 +170,39 @@ class KisOverseasProvider:
             if not rows:
                 break
 
+            # cursor 진행은 세션 필터와 무관하게 "파싱된 전체 행" 기준이다.
+            # 실측(2026-08-27): NAS 피드는 최신부터 애프터마켓 행이 이어져
+            # 한 페이지 전체가 세션 밖일 수 있다 - 채택 행 기준으로 멈추면
+            # 그 뒤의 정규장 행에 영영 도달하지 못한다 (AAPL 0행 재현).
             page_bars: list[NormalizedBar] = []
+            parsed_all: list[NormalizedBar] = []
             for row in rows:
                 bar = _parse_row(row, minutes, request.interval)
                 if bar is None:
                     dropped += 1
                     continue
+                parsed_all.append(bar)
                 if request.session == "regular":
                     local = bar.start_at.time()
-                    if local < _REGULAR_OPEN or local >= _REGULAR_CLOSE:
+                    # 마감 정각(16:00) 체결은 공식 종가라 포함한다.
+                    if local < _REGULAR_OPEN or local > _REGULAR_CLOSE:
                         out_of_session += 1
                         continue
                 page_bars.append(bar)
 
-            if not page_bars:
-                if dropped and not bars:
+            if not parsed_all:
+                # 행은 있는데 하나도 못 읽었다. 형식이 바뀐 것이다.
+                if not bars:
                     raise KisApiError("source_parse_error")
+                complete = False
+                failure_status = "source_parse_error"
+                resume_keyb = keyb
+                warnings.append(
+                    f"페이지 {pages}의 행을 해석하지 못했습니다. "
+                    "이미 받은 구간만 반환합니다.")
                 break
 
-            earliest = min(b.start_at for b in page_bars)
+            earliest = min(b.start_at for b in parsed_all)
             if prev_earliest is not None and earliest >= prev_earliest:
                 warnings.append(
                     "KEYB가 진행되지 않아 pagination을 중단했습니다.")
