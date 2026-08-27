@@ -2911,7 +2911,8 @@ async def get_indicators(
     result = compute_indicators(ohlcv, include, params=params, timeframe=timeframe)
     ind_errors = _indicator_error_list(result)
     ind_cov = _indicator_coverage(
-        include=include, available_bars=len(ohlcv), params=params
+        include=include, available_bars=len(ohlcv), params=params,
+        timeframe=timeframe,
     )
     payload = {
         "code": code,
@@ -2998,9 +2999,17 @@ _INDICATOR_MIN_BARS = {
 
 
 def _indicator_coverage(
-    *, include: list[str] | None, available_bars: int, params: dict | None = None
+    *, include: list[str] | None, available_bars: int, params: dict | None = None,
+    timeframe: str = "day",
 ) -> dict:
-    """요청한 지표가 이 봉 수로 실제 계산되는지. 부족 항목을 이름으로 돌려준다."""
+    """요청한 지표가 이 봉 수로 실제 계산되는지. 부족 항목을 이름으로 돌려준다.
+
+    달력 기간 라벨이 붙는 요구량은 봉 주기를 따라야 한다: 52주 위치는
+    일봉 252 / 주봉 52 / 월봉 12 봉이다. 계산 창(compute_position)만 고치고
+    여기를 252 로 두면, 104주 주봉을 넣어도 판정문이 partial 로 틀린다.
+    """
+    from stock_mcp_server._indicators import _BARS_PER_YEAR
+
     required: dict[str, int] = {}
     for key in include or []:
         builder = _INDICATOR_MIN_BARS.get(key)
@@ -3010,6 +3019,8 @@ def _indicator_coverage(
             required.update(builder((params or {}).get(key) or {}))
         except Exception:
             continue
+    if "position_52w" in required:
+        required["position_52w"] = _BARS_PER_YEAR.get(timeframe, 252)
     return {
         "available_bars": available_bars,
         "required_bars": dict(sorted(required.items())),
@@ -3268,7 +3279,8 @@ async def get_indicators_bulk(
     # 종목마다 이력 길이가 다르다. 가장 짧은 종목을 기준으로 잡아야 "전 종목
     # ma120 이 나왔다"는 과대 주장을 하지 않는다.
     ind_cov = _indicator_coverage(
-        include=include, available_bars=min(bars_seen) if bars_seen else 0, params=params
+        include=include, available_bars=min(bars_seen) if bars_seen else 0,
+        params=params, timeframe=timeframe,
     )
     # 봉 상태는 종목별로 계산한 뒤 합친다. 한 종목이라도 미완성 봉을 물고
     # 있으면 이 배치의 계산에는 미완성 봉이 섞인 것이다.

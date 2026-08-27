@@ -68,6 +68,22 @@ _CLOSED = {
 _EVENING = datetime(2026, 8, 26, 21, 0, tzinfo=rmeta.KST)
 
 
+class CoverageMetaTests(unittest.TestCase):
+    def test_required_bars_follow_timeframe(self):
+        cov_w = server._indicator_coverage(include=["position"],
+                                           available_bars=104, timeframe="week")
+        self.assertEqual(cov_w["required_bars"]["position_52w"], 52)
+        self.assertEqual(cov_w["insufficient"], [])
+        cov_m = server._indicator_coverage(include=["position"],
+                                           available_bars=24, timeframe="month")
+        self.assertEqual(cov_m["required_bars"]["position_52w"], 12)
+        self.assertEqual(cov_m["insufficient"], [])
+        cov_d = server._indicator_coverage(include=["position"],
+                                           available_bars=104)
+        self.assertEqual(cov_d["required_bars"]["position_52w"], 252)
+        self.assertEqual(cov_d["insufficient"], ["position_52w"])
+
+
 class ToolLevelTests(unittest.IsolatedAsyncioTestCase):
     async def test_weekly_indicators_use_52_bar_window(self):
         bars = _weekly_bars()
@@ -79,6 +95,12 @@ class ToolLevelTests(unittest.IsolatedAsyncioTestCase):
         pos = payload["indicators"]["position"]
         self.assertEqual(pos["high_52w"], 1_100)
         self.assertEqual(pos["lookback_bars"], 52)
+        # coverage 메타도 주봉 기준이어야 한다 - 260봉(5년) 주봉이 252 요구에
+        # 걸려 partial 로 나가면 계산은 맞는데 판정문이 틀린다.
+        cov = payload["_meta"]["indicator_coverage"]
+        self.assertEqual(cov["required_bars"]["position_52w"], 52)
+        self.assertNotIn("position_52w", cov["insufficient"])
+        self.assertEqual(payload["_meta"]["data_completeness"], "complete")
 
 
 if __name__ == "__main__":
