@@ -183,6 +183,15 @@ class KiwoomDomesticProvider:
             if not rows:
                 break
 
+            # 실측(2026-08-27): 없는 종목은 return_code 0 + 전 필드 빈
+            # 문자열 행이 온다. 형식 파손(키 자체가 없음)과 구분해
+            # 종목 없음으로 분류한다.
+            if not bars and all(
+                    "cntr_tm" in row
+                    and not str(row.get("cntr_tm") or "").strip()
+                    for row in rows):
+                raise KiwoomApiError("entity_not_found")
+
             page_bars: list[NormalizedBar] = []
             other_day = 0
             for row in rows:

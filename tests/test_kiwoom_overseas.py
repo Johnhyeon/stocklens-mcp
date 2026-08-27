@@ -215,6 +215,16 @@ class KiwoomOverseasTests(unittest.TestCase):
             _run(provider.fetch_bars(_request(symbol="BRK.B")))
         self.assertEqual(server.chart_requests, [])
 
+    def test_unknown_symbol_empty_field_row_is_entity_not_found(self):
+        from stock_mcp_server.market_data.kiwoom_client import KiwoomApiError
+        page = {"return_code": 0, "result_list": [{
+            "cur_prc": "", "trde_qty": "", "cntr_tm": "", "bus_dt": "",
+            "open_pric": "", "high_pric": "", "low_pric": ""}]}
+        server = PageServer([(page, None, None)])
+        with self.assertRaises(KiwoomApiError) as ctx:
+            _run(_provider(server).fetch_bars(_request()))
+        self.assertEqual(ctx.exception.provider_status, "entity_not_found")
+
     def test_contract_guards(self):
         server = PageServer([])
         provider = _provider(server)

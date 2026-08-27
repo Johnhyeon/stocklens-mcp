@@ -220,6 +220,19 @@ class KiwoomDomesticTests(unittest.TestCase):
             _run(_provider(server).fetch_bars(_request()))
         self.assertEqual(ctx.exception.provider_status, "source_parse_error")
 
+    def test_unknown_symbol_empty_field_row_is_entity_not_found(self):
+        # 실측(2026-08-27): 없는 종목은 return_code 0 + 전 필드 빈 문자열
+        # 1행이 온다. 형식 파손(source_parse_error)이 아니라 종목 없음이다.
+        page = {"return_code": 0, "return_msg": "정상적으로 처리되었습니다",
+                "stk_cd": "999999",
+                "stk_min_pole_chart_qry": [{
+                    "cur_prc": "", "trde_qty": "", "cntr_tm": "",
+                    "open_pric": "", "high_pric": "", "low_pric": ""}]}
+        server = PageServer([(page, None, None)])
+        with self.assertRaises(KiwoomApiError) as ctx:
+            _run(_provider(server).fetch_bars(_request()))
+        self.assertEqual(ctx.exception.provider_status, "entity_not_found")
+
     def test_row_limit_keeps_recent(self):
         server = PageServer([(_PAGE_1, None, None)])
         ds = _run(_provider(server).fetch_bars(_request(row_limit=2)))
