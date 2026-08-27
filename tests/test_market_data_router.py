@@ -101,7 +101,9 @@ class DecisionTableTests(unittest.TestCase):
     def _route(self, mode, market, interval, connected, source="auto"):
         return resolve_source(
             mode=mode, market=market, interval=interval,
-            requested_source=source, capabilities=_caps(connected=connected))
+            requested_source=source,
+            capabilities={"kis": _caps(connected=connected)},
+            primary_provider="kis")
 
     def test_route_table(self):
         cases = [
@@ -178,7 +180,8 @@ class NoAutoSwitchTests(unittest.TestCase):
         yahoo = FakeProvider("yahoo", result=_dataset("yahoo", [_bar(0)]))
         res = resolve_source(
             mode="auto", market="US", interval="5m",
-            requested_source="auto", capabilities=_caps())
+            requested_source="auto", capabilities={"kis": _caps()},
+            primary_provider="kis")
         with self.assertRaises(KisApiError):
             _run(fetch_with_failover(
                 res, {"kis": kis, "yahoo": yahoo},
@@ -191,7 +194,8 @@ class NoAutoSwitchTests(unittest.TestCase):
         yahoo = FakeProvider("yahoo", result=_dataset("yahoo", [_bar(0)]))
         res = resolve_source(
             mode="auto", market="US", interval="5m",
-            requested_source="auto", capabilities=_caps())
+            requested_source="auto", capabilities={"kis": _caps()},
+            primary_provider="kis")
         ds, meta = _run(fetch_with_failover(
             res, {"kis": kis, "yahoo": yahoo},
             _request(market="US", venue="NAS")))
@@ -206,7 +210,8 @@ class NoAutoSwitchTests(unittest.TestCase):
         yahoo = FakeProvider("yahoo", result=_dataset("yahoo", [_bar(0)]))
         res = resolve_source(
             mode="auto", market="US", interval="5m",
-            requested_source="auto", capabilities=_caps())
+            requested_source="auto", capabilities={"kis": _caps()},
+            primary_provider="kis")
         ds, meta = _run(fetch_with_failover(
             res, {"kis": kis, "yahoo": yahoo},
             _request(market="US", venue="NAS")))
@@ -219,7 +224,8 @@ class NoAutoSwitchTests(unittest.TestCase):
         yahoo = FakeProvider("yahoo", result=_dataset("yahoo", [_bar(0)]))
         res = resolve_source(
             mode="auto", market="US", interval="5m",
-            requested_source="yahoo", capabilities=_caps())
+            requested_source="yahoo", capabilities={"kis": _caps()},
+            primary_provider="kis")
         ds, meta = _run(fetch_with_failover(
             res, {"yahoo": yahoo},
             _request(market="US", venue="NAS", source="yahoo")))

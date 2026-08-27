@@ -116,7 +116,8 @@ class LegacyModeCharacterization(unittest.TestCase):
         for market, interval, expected in cases:
             res = resolve_source(
                 mode="legacy", market=market, interval=interval,
-                requested_source="auto", capabilities=_caps())
+                requested_source="auto", capabilities={"kis": _caps()},
+                primary_provider="kis")
             self.assertEqual(res.selected_provider, expected)
             self.assertEqual(res.selection_reason,
                              "legacy_mode_default_source")
@@ -126,7 +127,8 @@ class LegacyModeCharacterization(unittest.TestCase):
         yahoo = _CountingProvider("yahoo", result=_dataset("yahoo", [_bar(0)]))
         res = resolve_source(
             mode="legacy", market="US", interval="5m",
-            requested_source="auto", capabilities=_caps())
+            requested_source="auto", capabilities={"kis": _caps()},
+            primary_provider="kis")
         _run(fetch_with_failover(
             res, {"kis": kis, "yahoo": yahoo},
             _request(market="US", venue="NAS")))
@@ -137,7 +139,8 @@ class LegacyModeCharacterization(unittest.TestCase):
         with self.assertRaises(RouterError) as ctx:
             resolve_source(
                 mode="legacy", market="KR", interval="5m",
-                requested_source="auto", capabilities=_caps())
+                requested_source="auto", capabilities={"kis": _caps()},
+                primary_provider="kis")
         self.assertEqual(ctx.exception.provider_status, "not_configured")
 
 
@@ -147,7 +150,8 @@ class KisRoutingCharacterization(unittest.TestCase):
         for market in ("KR", "US"):
             res = resolve_source(
                 mode="auto", market=market, interval="5m",
-                requested_source="auto", capabilities=_caps())
+                requested_source="auto", capabilities={"kis": _caps()},
+                primary_provider="kis")
             self.assertEqual(res, SourceResolution(
                 requested_source="auto",
                 selected_provider="kis",
@@ -156,12 +160,15 @@ class KisRoutingCharacterization(unittest.TestCase):
                 mode="auto",
                 capability_version=1,
                 fallback_provider=None,
+                # 1.0 Task 10 승인 변경: primary 기반 라우팅 필드 추가.
+                primary_provider="kis",
             ))
 
     def test_explicit_kis_is_strict(self):
         res = resolve_source(
             mode="auto", market="US", interval="5m",
-            requested_source="kis", capabilities=_caps())
+            requested_source="kis", capabilities={"kis": _caps()},
+            primary_provider="kis")
         self.assertEqual(res.selected_provider, "kis")
         self.assertEqual(res.selection_reason, "explicit_source_kis_strict")
         self.assertFalse(res.fallback_allowed_before_first_bar)
@@ -171,7 +178,9 @@ class KisRoutingCharacterization(unittest.TestCase):
         with self.assertRaises(RouterError) as ctx:
             resolve_source(
                 mode="auto", market="US", interval="5m",
-                requested_source="kis", capabilities=_caps(connected=False))
+                requested_source="kis",
+                capabilities={"kis": _caps(connected=False)},
+                primary_provider="kis")
         self.assertEqual(ctx.exception.provider_status, "not_configured")
         self.assertIn("strict", str(ctx.exception))
 
@@ -182,7 +191,8 @@ class KisRoutingCharacterization(unittest.TestCase):
         yahoo = _CountingProvider("yahoo", result=_dataset("yahoo", [_bar(0)]))
         res = resolve_source(
             mode="auto", market="US", interval="5m",
-            requested_source="auto", capabilities=_caps())
+            requested_source="auto", capabilities={"kis": _caps()},
+            primary_provider="kis")
         with self.assertRaises(KisApiError):
             _run(fetch_with_failover(
                 res, {"kis": kis, "yahoo": yahoo},

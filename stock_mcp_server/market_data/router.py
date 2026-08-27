@@ -41,6 +41,7 @@ class SourceResolution:
     mode: str
     capability_version: int
     fallback_provider: str | None = None
+    primary_provider: str | None = None
 
 
 # 시장별 기존(legacy) 공급자. KR 분봉은 기존 공급자가 없다.
@@ -72,12 +73,19 @@ def _legacy_for(market: str, interval: str) -> str | None:
     return provider
 
 
-def _kis_capable(market: str, interval: str, capabilities: dict) -> bool:
-    if not capabilities.get("connected"):
+# 레지스트리 등록 증권사. 목록을 여기 복제하지 않는다.
+def _broker_ids() -> tuple[str, ...]:
+    from stock_mcp_server.market_data.provider_registry import registry
+    return registry.ids()
+
+
+def _provider_capable(market: str, interval: str,
+                      capabilities: dict | None) -> bool:
+    if not capabilities or not capabilities.get("connected"):
         return False
     kind = _kind(interval)
     if kind == "daily":
-        # 수정주가·기업행위 검증 전까지 KIS 일·주·월봉은 unverified 다.
+        # 수정주가·기업행위 검증 전까지 증권사 일·주·월봉은 unverified 다.
         return bool(capabilities.get(f"{market.lower()}_daily"))
     return bool(capabilities.get(f"{market.lower()}_intraday"))
 
@@ -89,8 +97,14 @@ def resolve_source(
     interval: str,
     requested_source: str,
     capabilities: dict,
+    primary_provider: str | None = None,
 ) -> SourceResolution:
-    """공급자 하나를 고정해 돌려준다. 선택 불가면 RouterError."""
+    """공급자 하나를 고정해 돌려준다. 선택 불가면 RouterError.
+
+    capabilities 는 {provider_id: 능력 dict} 형태다. auto 는 주 사용
+    증권사(primary_provider) 하나만 본다. 추가 연결된 다른 증권사는
+    명시 source 로만 쓸 수 있다.
+    """
 
     def _make(provider: str, reason: str, *, fallback: str | None = None):
         return SourceResolution(
@@ -101,19 +115,26 @@ def resolve_source(
             mode=mode,
             capability_version=CAPABILITY_VERSION,
             fallback_provider=fallback,
+            primary_provider=primary_provider,
         )
 
     legacy = _legacy_for(market, interval)
-    kis_ok = _kis_capable(market, interval, capabilities)
+    primary_ok = primary_provider is not None and _provider_capable(
+        market, interval, capabilities.get(primary_provider))
 
     # --- 요청별 명시 지정 ---
-    if requested_source == "kis":
-        if not kis_ok:
+    if requested_source in _broker_ids():
+        # primary 가 아니어도 연결·검증된 공급자는 허용한다. 단 strict:
+        # 실패해도 다른 공급원으로 전환하지 않는다.
+        if not _provider_capable(market, interval,
+                                 capabilities.get(requested_source)):
             raise RouterError(
                 "not_configured",
-                "KIS가 연결되어 있지 않거나 이 요청을 지원하지 않습니다. "
-                "source=kis는 strict 모드라 다른 공급원으로 전환하지 않습니다.")
-        return _make("kis", "explicit_source_kis_strict")
+                f"{requested_source}가 연결되어 있지 않거나 이 요청을 "
+                f"지원하지 않습니다. source={requested_source}는 strict "
+                "모드라 다른 공급원으로 전환하지 않습니다.")
+        return _make(requested_source,
+                     f"explicit_source_{requested_source}_strict")
 
     if requested_source == "naver":
         if market != "KR" or _kind(interval) != "daily":
@@ -133,7 +154,7 @@ def resolve_source(
             "entity_not_found",
             f"지원하지 않는 source: {requested_source}")
 
-    # --- legacy 모드: KIS 호출 0회 ---
+    # --- legacy 모드: 증권사 호출 0회 ---
     if mode == "legacy":
         if legacy is None:
             raise RouterError(
@@ -144,10 +165,10 @@ def resolve_source(
 
     kind = _kind(interval)
 
-    # --- 일·주·월봉: KIS 능력 검증 전까지 기존 공급원 ---
+    # --- 일·주·월봉: 능력 검증 전까지 기존 공급원 ---
     if kind == "daily":
-        if mode == "broker_first" and kis_ok:
-            return _make("kis", "broker_first_daily_verified")
+        if mode == "broker_first" and primary_ok:
+            return _make(primary_provider, "broker_first_daily_verified")
         if legacy is None:
             raise RouterError(
                 "not_configured",
@@ -158,11 +179,13 @@ def resolve_source(
 
     # --- 분·시간봉 ---
     # 1.0 정책(대표 결정 2026-08-27): 자동 전환 없음. 증권사를 연결한
-    # 사용자는 증권사 데이터로 고정된다 - 장애 시 다른 공급자로 조용히
-    # 바꾸면 거래량 기준(상장 거래소 vs 통합 테이프)이 소리 없이 바뀐다.
-    # 전환은 사용자의 직접 선택(source 명시·모드 변경)으로만 한다.
-    if kis_ok:
-        return _make("kis", "broker_connected_and_intraday_supported")
+    # 사용자는 주 사용 증권사 데이터로 고정된다 - 장애 시 다른 공급자로
+    # 조용히 바꾸면 거래량 기준(상장 거래소 vs 통합 테이프)이 소리 없이
+    # 바뀐다. 전환은 사용자의 직접 선택(source 명시·primary 변경·모드
+    # 변경)으로만 한다. 추가 연결된 다른 증권사도 auto 대상이 아니다.
+    if primary_ok:
+        return _make(primary_provider,
+                     "broker_connected_and_intraday_supported")
 
     if legacy is not None:
         # 미연결·능력 없음은 "전환"이 아니라 요청 시작 전의 초기 선택이다.
@@ -174,7 +197,7 @@ def resolve_source(
     raise RouterError(
         "not_configured",
         f"{market} {interval} 분봉을 제공할 공급원이 없습니다. "
-        "KIS 연결이 필요합니다.")
+        "증권사 연결이 필요합니다.")
 
 
 async def fetch_with_failover(

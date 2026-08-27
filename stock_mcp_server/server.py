@@ -7981,8 +7981,8 @@ def _broker_capabilities(state: dict) -> dict:
     }
 
 
-def _intraday_providers(market: str, profile: str | None = None) -> dict:
-    return _PROVIDER_RUNTIME.providers_for(market)
+def _intraday_providers(market: str, source: str = "auto") -> dict:
+    return _PROVIDER_RUNTIME.providers_for(market, source)
 
 
 def _previous_trading_day(market: str, day):
@@ -8054,14 +8054,33 @@ async def _fetch_intraday_dataset(
 ):
     """공급원 고정 → 조회(필요 시 다일) → 세션 집계 → 완성 봉 필터."""
     state = _broker_state()
+    primary = state.get("active_provider")
     caps = _broker_capabilities(state)
+    caps_by_provider = {primary: caps} if primary else {}
+    v2 = state.get("state_v2")
+    if v2 is not None:
+        # 명시 source 로 지정될 수 있는 다른 연결 공급자의 능력도 싣는다.
+        from stock_mcp_server.market_data.provider_registry import (
+            registry as _registry,
+        )
+        for pid in _registry.ids():
+            caps_by_provider.setdefault(
+                pid, _provider_capabilities_v2(v2, pid))
     resolution = _resolve_source(
         mode=state.get("data_source_mode", "legacy"),
         market=market, interval=interval,
-        requested_source=source, capabilities=caps)
+        requested_source=source, capabilities=caps_by_provider,
+        primary_provider=primary)
 
-    profile = state.get("active_profile") if caps["connected"] else None
-    providers = _intraday_providers(market, profile)
+    selected_caps = caps_by_provider.get(resolution.selected_provider) or {}
+    if not selected_caps.get("connected"):
+        profile = None
+    elif v2 is not None:
+        profile = (v2["providers"].get(resolution.selected_provider)
+                   or {}).get("active_profile")
+    else:
+        profile = state.get("active_profile")
+    providers = _intraday_providers(market, source)
 
     if now is None:
         now = _dt.datetime.now(
