@@ -392,6 +392,13 @@ def handle_request(
                 "verifier_unavailable",
                 f"{descriptor.display_name} 연결 시험 기능이 아직 "
                 "활성화되지 않았습니다")
+        if result.get("auth") == "ip_not_allowed":
+            # 공식 오류 코드로 확인된 허용 IP 차단. 키 문제가 아니다.
+            return _error(
+                "ip_not_allowed",
+                "허용 IP 목록에 없는 IP에서 호출했습니다. 증권사 설정 "
+                "화면에서 현재 PC의 IP를 허용 IP로 등록한 뒤 다시 "
+                "시도하세요.")
         if result.get("auth") != "ok":
             return _error(
                 "credential_invalid",

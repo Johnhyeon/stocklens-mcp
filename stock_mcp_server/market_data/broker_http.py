@@ -34,10 +34,12 @@ class BrokerHttpError(Exception):
 
     def __init__(self, provider_status: str, message: str,
                  status_code: int | None = None,
-                 payload: dict | None = None):
+                 payload: dict | None = None,
+                 retry_after: int | None = None):
         self.provider_status = provider_status
         self.status_code = status_code
         self.payload = payload
+        self.retry_after = retry_after
         super().__init__(message)
 
     def __repr__(self) -> str:
@@ -92,6 +94,7 @@ class BrokerHttpTransport:
         headers: Mapping[str, str] | None = None,
         params: Mapping[str, str] | None = None,
         json_body: Mapping | None = None,
+        form_body: Mapping | None = None,
     ) -> SafeHttpResponse:
         spec = descriptor.endpoint(endpoint_id)
         if spec is None:
@@ -123,7 +126,8 @@ class BrokerHttpTransport:
                     spec.method, url,
                     headers=dict(headers or {}),
                     params=dict(params or {}),
-                    json=json_body)
+                    json=json_body,
+                    data=dict(form_body) if form_body else None)
         except httpx.HTTPError as exc:
             # 원문 메시지에 URL·비밀이 섞일 수 있다. 형식명만 보고한다.
             raise BrokerHttpError(
@@ -149,11 +153,16 @@ class BrokerHttpTransport:
             payload = None
 
         if response.status_code >= 400:
+            retry_after = None
+            raw_retry = response.headers.get("retry-after")
+            if raw_retry and str(raw_retry).isdigit():
+                retry_after = int(raw_retry)
             raise BrokerHttpError(
                 _status_for(response.status_code),
                 f"{label} 오류 응답: HTTP {response.status_code}",
                 status_code=response.status_code,
-                payload=payload if isinstance(payload, dict) else None)
+                payload=payload if isinstance(payload, dict) else None,
+                retry_after=retry_after)
 
         return SafeHttpResponse(
             response.status_code, payload, response.headers)

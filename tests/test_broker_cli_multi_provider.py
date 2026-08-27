@@ -189,6 +189,23 @@ class MultiProviderCliTests(unittest.TestCase):
         self.assertTrue(resp["recovered"]["removed"])
         self.assertFalse(resp["recovered"]["failed"])
 
+    def test_toss_ip_not_allowed_maps_to_actionable_error(self):
+        def _ip_verifier(provider, profile, payload):
+            return {"auth": "ip_not_allowed",
+                    "kr_intraday": "unverified",
+                    "us_intraday": "unverified"}
+
+        resp = self._handle({
+            "contract_version": 1, "action": "verify_and_save",
+            "provider": "toss", "profile": "real",
+            "credentials": dict(_CREDS["toss"]),
+        }, verifier=_ip_verifier)
+        self.assertFalse(resp["ok"])
+        self.assertEqual(resp["error"]["code"], "ip_not_allowed")
+        self.assertIn("허용 IP", resp["error"]["message"])
+        # 아무것도 저장되지 않는다.
+        self.assertFalse(self.service.has_profile("toss", "real"))
+
     def test_contract_v1_kis_request_still_works(self):
         # Manager v1 이 보내는 요청 그대로. 응답의 기존 필드가 유지된다.
         resp = self._save("kis")
