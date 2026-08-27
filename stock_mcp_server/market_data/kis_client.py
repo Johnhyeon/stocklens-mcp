@@ -12,10 +12,14 @@ import time
 
 import httpx
 
+from stock_mcp_server.market_data.broker_http import EndpointNotAllowedError
 from stock_mcp_server.market_data.broker_profiles import BrokerCredentials
+from stock_mcp_server.market_data.provider_registry import registry
 
-REAL_BASE_URL = "https://openapi.koreainvestment.com:9443"
-DEMO_BASE_URL = "https://openapivts.koreainvestment.com:29443"
+# host·경로의 단일 출처는 레지스트리다 (1.0 Task 11). 상수는 호환용 별칭.
+_DESCRIPTOR = registry.require("kis")
+REAL_BASE_URL = f"https://{_DESCRIPTOR.host_for_profile('real')}"
+DEMO_BASE_URL = f"https://{_DESCRIPTOR.host_for_profile('demo')}"
 
 _TOKEN_PATH = "/oauth2/tokenP"
 
@@ -45,11 +49,18 @@ class KisClient:
         generation_provider=None,
         clock=None,
     ) -> None:
-        if profile not in ("real", "demo"):
+        if profile not in _DESCRIPTOR.supported_profiles:
             raise ValueError(f"지원하지 않는 프로필: {profile}")
-        self._credentials = credentials
+        # SecretPayload 와 기존 BrokerCredentials 를 모두 받는다.
+        if hasattr(credentials, "get") and not hasattr(credentials,
+                                                       "app_key"):
+            self._app_key = credentials.get("app_key")
+            self._app_secret = credentials.get("app_secret")
+        else:
+            self._app_key = credentials.app_key
+            self._app_secret = credentials.app_secret
         self.profile = profile
-        self.base_url = REAL_BASE_URL if profile == "real" else DEMO_BASE_URL
+        self.base_url = f"https://{_DESCRIPTOR.host_for_profile(profile)}"
         self._transport = transport
         self._generation_provider = generation_provider or (lambda: 0)
         self._clock = clock or time.monotonic
@@ -85,8 +96,8 @@ class KisClient:
                 self.base_url + _TOKEN_PATH,
                 json={
                     "grant_type": "client_credentials",
-                    "appkey": self._credentials.app_key,
-                    "appsecret": self._credentials.app_secret,
+                    "appkey": self._app_key,
+                    "appsecret": self._app_secret,
                 },
             )
         except httpx.TimeoutException:
@@ -146,7 +157,14 @@ class KisClient:
         params: dict | None = None,
         headers: dict | None = None,
     ) -> dict:
-        """토큰을 붙여 요청 하나를 보낸다. 401이면 한 번만 재발급·재시도한다."""
+        """토큰을 붙여 요청 하나를 보낸다. 401이면 한 번만 재발급·재시도한다.
+
+        경로는 레지스트리 허용 목록 안이어야 한다. 밖이면 네트워크에
+        나가기 전에 거부한다 (주문·계좌 경로는 목록에 없다).
+        """
+        if path not in _DESCRIPTOR.allowed_paths:
+            raise EndpointNotAllowedError(
+                f"kis에 허용되지 않은 경로 요청: {path}")
         async with httpx.AsyncClient(
             transport=self._transport, timeout=_TIMEOUT_SECONDS
         ) as http:
@@ -172,8 +190,8 @@ class KisClient:
         token = await self._ensure_token(http)
         request_headers = {
             "authorization": f"Bearer {token}",
-            "appkey": self._credentials.app_key,
-            "appsecret": self._credentials.app_secret,
+            "appkey": self._app_key,
+            "appsecret": self._app_secret,
             "tr_id": tr_id,
             "custtype": "P",
         }

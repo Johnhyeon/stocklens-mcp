@@ -88,9 +88,6 @@ class ProviderRuntime:
 
     def _build_client(self, provider: str, profile: str):
         if provider == "kis":
-            from stock_mcp_server.market_data.broker_profiles import (
-                BrokerCredentials,
-            )
             from stock_mcp_server.market_data.kis_client import KisClient
 
             payload = self._credentials.load_active("kis", profile)
@@ -98,10 +95,7 @@ class ProviderRuntime:
                 return None
             home = self._home
             return KisClient(
-                BrokerCredentials(
-                    app_key=payload.get("app_key"),
-                    app_secret=payload.get("app_secret")),
-                profile,
+                payload, profile,
                 generation_provider=lambda: load_state_v2(home)[
                     "providers"].get("kis", {}).get("generation", -1))
         # kiwoom·toss 는 해당 어댑터 Task 에서 연결된다. 그 전에는 구성 불가.

@@ -272,7 +272,11 @@ class NetworkFailureTests(unittest.TestCase):
     def test_dns_failure_is_provider_unavailable(self):
         client = self._client(httpx.ConnectError("getaddrinfo failed"))
         with self.assertRaises(KisApiError) as ctx:
-            asyncio.run(client.request("GET", "/x", tr_id="T1"))
+            asyncio.run(client.request(
+                "GET",
+                "/uapi/domestic-stock/v1/quotations/"
+                "inquire-time-dailychartprice",
+                tr_id="T1"))
         self.assertEqual(ctx.exception.provider_status,
                          "provider_unavailable")
 
@@ -280,7 +284,11 @@ class NetworkFailureTests(unittest.TestCase):
         client = self._client(httpx.ConnectError(
             "CERTIFICATE_VERIFY_FAILED"))
         with self.assertRaises(KisApiError) as ctx:
-            asyncio.run(client.request("GET", "/x", tr_id="T1"))
+            asyncio.run(client.request(
+                "GET",
+                "/uapi/domestic-stock/v1/quotations/"
+                "inquire-time-dailychartprice",
+                tr_id="T1"))
         self.assertEqual(ctx.exception.provider_status,
                          "provider_unavailable")
 

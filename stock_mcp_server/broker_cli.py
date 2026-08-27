@@ -420,17 +420,10 @@ def make_cli_verifier(kis_verifier):
     """
     import asyncio
 
-    from stock_mcp_server.market_data.broker_profiles import (
-        BrokerCredentials,
-    )
-
     def _verifier(provider, profile, payload):
         if provider != "kis":
             return None
-        credentials = BrokerCredentials(
-            app_key=payload.get("app_key"),
-            app_secret=payload.get("app_secret"))
-        return asyncio.run(kis_verifier.verify(credentials, profile))
+        return asyncio.run(kis_verifier.verify(payload, profile))
 
     return _verifier
 

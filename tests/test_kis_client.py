@@ -27,6 +27,10 @@ SENTINEL_KEY = "PSA-SENTINEL-APP-KEY-222"
 SENTINEL_SECRET = "PSA-SENTINEL-APP-SECRET-222"
 SENTINEL_TOKEN = "PSA-SENTINEL-ACCESS-TOKEN-222"
 
+# 허용 목록 안의 실제 시세 경로 (1.0 Task 11: 임의 경로 요청 불가)
+_ALLOWED_PATH = \
+    "/uapi/domestic-stock/v1/quotations/inquire-time-dailychartprice"
+
 
 def _creds() -> BrokerCredentials:
     return BrokerCredentials(app_key=SENTINEL_KEY, app_secret=SENTINEL_SECRET)
@@ -93,9 +97,9 @@ class TokenLifecycleTests(unittest.TestCase):
         client = _client(rec, clock=lambda: now[0])
 
         async def go():
-            await client.request("GET", "/x", tr_id="T1")
+            await client.request("GET", _ALLOWED_PATH, tr_id="T1")
             now[0] += 100
-            await client.request("GET", "/x", tr_id="T1")
+            await client.request("GET", _ALLOWED_PATH, tr_id="T1")
 
         _run(go())
         self.assertEqual(rec.token_calls, 1)
@@ -108,10 +112,10 @@ class TokenLifecycleTests(unittest.TestCase):
         client = _client(rec, clock=lambda: now[0])
 
         async def go():
-            await client.request("GET", "/x", tr_id="T1")
+            await client.request("GET", _ALLOWED_PATH, tr_id="T1")
             # 만료 직전(여유 마진 안쪽)으로 이동하면 재발급해야 한다.
             now[0] += 600 - 10
-            await client.request("GET", "/x", tr_id="T1")
+            await client.request("GET", _ALLOWED_PATH, tr_id="T1")
 
         _run(go())
         self.assertEqual(rec.token_calls, 2)
@@ -122,9 +126,9 @@ class TokenLifecycleTests(unittest.TestCase):
         client = _client(rec, generation_provider=lambda: gen[0])
 
         async def go():
-            await client.request("GET", "/x", tr_id="T1")
+            await client.request("GET", _ALLOWED_PATH, tr_id="T1")
             gen[0] = 2
-            await client.request("GET", "/x", tr_id="T1")
+            await client.request("GET", _ALLOWED_PATH, tr_id="T1")
 
         _run(go())
         self.assertEqual(rec.token_calls, 2)
@@ -132,7 +136,7 @@ class TokenLifecycleTests(unittest.TestCase):
     def test_auth_header_uses_bearer_token(self):
         rec = Recorder()
         client = _client(rec)
-        _run(client.request("GET", "/x", tr_id="T1"))
+        _run(client.request("GET", _ALLOWED_PATH, tr_id="T1"))
         api_req = rec.requests[-1]
         self.assertTrue(
             api_req.headers["authorization"].startswith("Bearer "))
@@ -147,7 +151,7 @@ class RetryAndErrorTests(unittest.TestCase):
             httpx.Response(200, json={"rt_cd": "0", "output": ["ok"]}),
         ]
         client = _client(rec)
-        result = _run(client.request("GET", "/x", tr_id="T1"))
+        result = _run(client.request("GET", _ALLOWED_PATH, tr_id="T1"))
         self.assertEqual(result["output"], ["ok"])
         self.assertEqual(rec.token_calls, 2)
         self.assertEqual(rec.api_calls, 2)
@@ -160,7 +164,7 @@ class RetryAndErrorTests(unittest.TestCase):
         ]
         client = _client(rec)
         with self.assertRaises(KisApiError) as ctx:
-            _run(client.request("GET", "/x", tr_id="T1"))
+            _run(client.request("GET", _ALLOWED_PATH, tr_id="T1"))
         self.assertEqual(ctx.exception.provider_status, "authentication_failed")
         self.assertEqual(rec.api_calls, 2)
 
@@ -169,7 +173,7 @@ class RetryAndErrorTests(unittest.TestCase):
         rec.api_responses = [httpx.Response(403, json={})]
         client = _client(rec)
         with self.assertRaises(KisApiError) as ctx:
-            _run(client.request("GET", "/x", tr_id="T1"))
+            _run(client.request("GET", _ALLOWED_PATH, tr_id="T1"))
         self.assertEqual(ctx.exception.provider_status, "permission_denied")
 
     def test_429_rate_limited(self):
@@ -177,7 +181,7 @@ class RetryAndErrorTests(unittest.TestCase):
         rec.api_responses = [httpx.Response(429, json={})]
         client = _client(rec)
         with self.assertRaises(KisApiError) as ctx:
-            _run(client.request("GET", "/x", tr_id="T1"))
+            _run(client.request("GET", _ALLOWED_PATH, tr_id="T1"))
         self.assertEqual(ctx.exception.provider_status, "rate_limited")
 
     def test_malformed_json_source_parse_error(self):
@@ -185,7 +189,7 @@ class RetryAndErrorTests(unittest.TestCase):
         rec.api_responses = [httpx.Response(200, text="<html>oops</html>")]
         client = _client(rec)
         with self.assertRaises(KisApiError) as ctx:
-            _run(client.request("GET", "/x", tr_id="T1"))
+            _run(client.request("GET", _ALLOWED_PATH, tr_id="T1"))
         self.assertEqual(ctx.exception.provider_status, "source_parse_error")
 
     def test_timeout_provider_unavailable(self):
@@ -193,7 +197,7 @@ class RetryAndErrorTests(unittest.TestCase):
         rec.api_responses = [httpx.ConnectTimeout("slow")]
         client = _client(rec)
         with self.assertRaises(KisApiError) as ctx:
-            _run(client.request("GET", "/x", tr_id="T1"))
+            _run(client.request("GET", _ALLOWED_PATH, tr_id="T1"))
         self.assertEqual(ctx.exception.provider_status, "provider_unavailable")
 
     def test_token_endpoint_401_credential_invalid(self):
@@ -201,7 +205,7 @@ class RetryAndErrorTests(unittest.TestCase):
         rec.token_response = httpx.Response(401, json={"msg1": "invalid"})
         client = _client(rec)
         with self.assertRaises(KisApiError) as ctx:
-            _run(client.request("GET", "/x", tr_id="T1"))
+            _run(client.request("GET", _ALLOWED_PATH, tr_id="T1"))
         self.assertEqual(ctx.exception.provider_status, "credential_invalid")
 
     def test_token_throttle_egw00133_is_rate_limited_not_credential(self):
@@ -213,7 +217,7 @@ class RetryAndErrorTests(unittest.TestCase):
                        "error_description": "접근토큰 발급 잠시 후 다시 시도"})
         client = _client(rec)
         with self.assertRaises(KisApiError) as ctx:
-            _run(client.request("GET", "/x", tr_id="T1"))
+            _run(client.request("GET", _ALLOWED_PATH, tr_id="T1"))
         self.assertEqual(ctx.exception.provider_status, "rate_limited")
 
 
@@ -230,7 +234,7 @@ class SecretLeakTests(unittest.TestCase):
         ]
         client = _client(rec)
         try:
-            _run(client.request("GET", "/x", tr_id="T1"))
+            _run(client.request("GET", _ALLOWED_PATH, tr_id="T1"))
             self.fail("expected KisApiError")
         except KisApiError as exc:
             self._assert_clean(str(exc))
@@ -245,10 +249,58 @@ class SecretLeakTests(unittest.TestCase):
         ]
         client = _client(rec)
         try:
-            _run(client.request("GET", "/x", tr_id="T1"))
+            _run(client.request("GET", _ALLOWED_PATH, tr_id="T1"))
             self.fail("expected KisApiError")
         except KisApiError as exc:
             self._assert_clean(str(exc) + repr(exc))
+
+
+class RegistryIntegrationTests(unittest.TestCase):
+    """1.0 Task 11: KIS 를 레지스트리 계약에 올린다. 외부 동작은 불변."""
+
+    def test_client_hosts_come_from_registry(self):
+        from stock_mcp_server.market_data.provider_registry import registry
+
+        desc = registry.require("kis")
+        rec = Recorder()
+        for profile in ("real", "demo"):
+            client = _client(rec, profile)
+            self.assertEqual(
+                client.base_url,
+                f"https://{desc.host_for_profile(profile)}")
+
+    def test_request_path_outside_allowlist_is_rejected(self):
+        from stock_mcp_server.market_data.broker_http import (
+            EndpointNotAllowedError,
+        )
+
+        rec = Recorder()
+        client = _client(rec)
+        for path in ("/uapi/domestic-stock/v1/trading/order-cash",
+                     "/uapi/domestic-stock/v1/trading/inquire-balance",
+                     "/x"):
+            with self.assertRaises(EndpointNotAllowedError):
+                _run(client.request("GET", path, tr_id="T1"))
+        # 허용 목록 밖 요청은 네트워크에 나가지도 않는다.
+        self.assertEqual(rec.api_calls, 0)
+        self.assertEqual(rec.token_calls, 0)
+
+    def test_client_accepts_secret_payload(self):
+        from stock_mcp_server.market_data.provider_registry import registry
+        from stock_mcp_server.market_data.secrets import SecretPayload
+
+        payload = SecretPayload.from_schema(
+            registry.require("kis").credential_schema,
+            {"app_key": SENTINEL_KEY, "app_secret": SENTINEL_SECRET})
+        rec = Recorder()
+        client = KisClient(
+            credentials=payload, profile="real",
+            transport=httpx.MockTransport(rec.handler))
+        result = _run(client.request("GET", _ALLOWED_PATH, tr_id="T1"))
+        self.assertEqual(result["rt_cd"], "0")
+        sent = rec.requests[-1]
+        self.assertEqual(sent.headers["appkey"], SENTINEL_KEY)
+        self.assertNotIn(SENTINEL_KEY, repr(client))
 
 
 if __name__ == "__main__":

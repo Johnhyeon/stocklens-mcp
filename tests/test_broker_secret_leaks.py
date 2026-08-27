@@ -143,7 +143,11 @@ class SecretSweepTests(unittest.TestCase):
             BrokerCredentials(app_key=KEY, app_secret=SECRET), "real",
             transport=httpx.MockTransport(handler))
         try:
-            asyncio.run(client.request("GET", "/x", tr_id="T1"))
+            asyncio.run(client.request(
+                "GET",
+                "/uapi/domestic-stock/v1/quotations/"
+                "inquire-time-dailychartprice",
+                tr_id="T1"))
             self.fail("expected KisApiError")
         except KisApiError as exc:
             _assert_clean(self, str(exc) + repr(exc), "KisApiError")
