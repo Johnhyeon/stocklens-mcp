@@ -117,23 +117,14 @@ async def resolve_issuer(ticker: str) -> dict | None:
     }
 
 
-async def get_submissions(cik: int) -> dict:
-    """발행사의 최근 공시 목록(SEC submissions).
-
-    반환: {"name", "rows": [...], "recent_count", "has_older"}
-    rows 원소: form / filing_date / report_date / accession / primary_document /
-    primary_doc_description / items(8-K 항목).
-    """
-    try:
-        data = await _get_json(SUBMISSIONS_URL.format(cik=cik))
-    except Exception as e:
-        raise SecFetchError(f"submissions 조회 실패(CIK {cik}): {type(e).__name__}") from e
-    recent = (data.get("filings") or {}).get("recent") or {}
-    forms = recent.get("form") or []
+def _parse_filing_rows(columns: dict) -> list[dict]:
+    """SEC submissions 의 컬럼 배열 묶음 -> 행 리스트. recent 와 구간 파일이
+    같은 형태(컬럼별 병렬 배열)라 파서를 공유한다."""
+    forms = columns.get("form") or []
     rows = []
     for i in range(len(forms)):
         def g(key):
-            values = recent.get(key) or []
+            values = columns.get(key) or []
             return values[i] if i < len(values) else None
         rows.append({
             "form": g("form"),
@@ -144,6 +135,31 @@ async def get_submissions(cik: int) -> dict:
             "primary_doc_description": g("primaryDocDescription"),
             "items": g("items") or None,
         })
+    return rows
+
+
+async def get_submissions(cik: int) -> dict:
+    """발행사의 최근 공시 목록(SEC submissions).
+
+    반환: {"name", "rows": [...], "recent_count", "has_older", "pages"}
+    rows 원소: form / filing_date / report_date / accession / primary_document /
+    primary_doc_description / items(8-K 항목).
+    pages: 최근 목록보다 오래된 구간 파일들 - get_submissions_page(cik, name)
+    으로 순회한다. 이게 없으면 완전한 검색을 recent 만으로 끝낼 수 없다.
+    """
+    try:
+        data = await _get_json(SUBMISSIONS_URL.format(cik=cik))
+    except Exception as e:
+        raise SecFetchError(f"submissions 조회 실패(CIK {cik}): {type(e).__name__}") from e
+    rows = _parse_filing_rows((data.get("filings") or {}).get("recent") or {})
+    pages = [
+        {"name": f.get("name"),
+         "count": f.get("filingCount"),
+         "filing_from": f.get("filingFrom"),
+         "filing_to": f.get("filingTo")}
+        for f in (data.get("filings") or {}).get("files") or []
+        if f.get("name")
+    ]
     return {
         "name": data.get("name"),
         "tickers": data.get("tickers") or [],
@@ -151,10 +167,32 @@ async def get_submissions(cik: int) -> dict:
         "sic_description": data.get("sicDescription"),
         "rows": rows,
         "recent_count": len(rows),
-        # recent 는 최근 1000건까지다. 그보다 오래된 공시는 별도 파일에 있고
-        # 여기서는 세지 않는다 - 전체 건수를 안다고 말하면 안 된다.
-        "has_older": bool((data.get("filings") or {}).get("files")),
+        # recent 는 최근 1000건까지다. 그보다 오래된 공시는 pages 의 구간
+        # 파일에 있다 - 전체 건수는 recent 만으로 알 수 없다.
+        "has_older": bool(pages),
+        "pages": pages,
     }
+
+
+_PAGE_NAME_RE = re.compile(r"^CIK(\d{10})-submissions-\d{3}\.json$")
+
+
+async def get_submissions_page(cik: int, name: str) -> list[dict]:
+    """구간 파일(pages 의 name) 하나의 공시 행들.
+
+    name 은 get_submissions 가 돌려준 것만 받는다 - 형식(CIK 일치 포함)을
+    검증해 임의 경로가 SEC 요청으로 새지 않게 한다.
+    """
+    m = _PAGE_NAME_RE.match(name or "")
+    if not m or int(m.group(1)) != int(cik):
+        raise ValueError(f"구간 파일 이름이 아닙니다: {name!r} - "
+                         "get_submissions 의 pages[].name 을 그대로 쓰세요.")
+    try:
+        data = await _get_json(f"https://data.sec.gov/submissions/{name}")
+    except Exception as e:
+        raise SecFetchError(f"구간 파일 조회 실패({name}): {type(e).__name__}") from e
+    # 구간 파일은 최상위가 곧 컬럼 배열 묶음이다(recent 래퍼 없음).
+    return _parse_filing_rows(data)
 
 
 CONCEPT_URL = ("https://data.sec.gov/api/xbrl/companyconcept/"

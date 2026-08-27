@@ -5713,11 +5713,17 @@ async def get_us_short(ticker: str) -> str:
 @mcp.tool()
 @safe_us_tool
 @track_metrics("get_us_filings")
-async def get_us_filings(ticker: str, limit: int = 15, forms: list[str] | None = None) -> str:
+async def get_us_filings(ticker: str, limit: int = 15, forms: list[str] | None = None,
+                         page: str | None = None) -> str:
     """US SEC filings — SEC EDGAR 공시 목록 (accession number·원문 URL 포함).
 
     "AAPL 10-K", "RIVN latest filings", "8-K", "SEC filing" 같은 질문에 사용합니다.
     본문·exhibit 를 읽으려면 결과의 accession number 로 `get_us_filing_detail` 을 부르세요.
+
+    기본 조회는 SEC 의 최근 구간(최대 1000건)입니다. 그보다 오래된 공시는
+    구간 파일로 나뉘어 있고, 결과 메타의 coverage.older_pages 에 구간 목록
+    (이름·기간·건수)이 옵니다. `page=` 에 그 이름을 넣어 순회하세요 -
+    older_pages 가 빌 때까지 돌면 완전한 검색이 끝난 것입니다.
 
     SEC 는 발행사를 티커가 아니라 CIK 로 식별합니다. GOOGL/GOOG 같은 클래스주는
     같은 발행사로 정규화되어 같은 공시 집합이 나오고, 요청 티커는 메타에 보존됩니다.
@@ -5726,6 +5732,7 @@ async def get_us_filings(ticker: str, limit: int = 15, forms: list[str] | None =
         ticker: US 티커
         limit: 표시할 공시 건수 (기본 15, 최대 100)
         forms: 공시 유형 필터 (예: ["10-Q", "8-K"]). 비우면 전체.
+        page: 구간 파일 이름 (coverage.older_pages[].name). 비우면 최근 구간.
     """
     limit = max(1, min(int(limit), 100))
     requested_forms = [str(f).upper() for f in (forms or [])] or None
@@ -5765,12 +5772,36 @@ async def get_us_filings(ticker: str, limit: int = 15, forms: list[str] | None =
                      "0건이 아니라 조회 실패이므로 재시도하세요.",
                      f"SEC 조회 실패: {e}")
 
-    rows = subs["rows"]
+    all_pages = subs.get("pages") or []
+    page_label = "최근 구간"
+    if page:
+        try:
+            rows = await sec.get_submissions_page(issuer["cik"], page)
+        except ValueError as e:
+            return _fail(f"⚠️ {e}", f"잘못된 page: {page}")
+        except sec.SecFetchError as e:
+            return _fail(f"⚠️ SEC 구간 파일 조회에 실패했습니다 ({e}). "
+                         "0건이 아니라 조회 실패이므로 재시도하세요.",
+                         f"SEC 조회 실패: {e}")
+        # 이 구간보다 더 오래된 페이지들만 남은 순회 대상이다. 구간 파일은
+        # 최신 -> 과거 순서로 번호가 붙는다.
+        older_pages = all_pages[
+            next((i + 1 for i, pg in enumerate(all_pages) if pg["name"] == page),
+                 len(all_pages)):]
+        this_pg = next((pg for pg in all_pages if pg["name"] == page), None)
+        if this_pg:
+            page_label = f"구간 {this_pg['filing_from']}~{this_pg['filing_to']}"
+        else:
+            page_label = f"구간 {page}"
+    else:
+        rows = subs["rows"]
+        older_pages = all_pages
+
     if requested_forms:
         rows = [r for r in rows if str(r.get("form") or "").upper() in requested_forms]
     total_matching = len(rows)
     shown = rows[:limit]
-    has_older = subs["has_older"]
+    has_older = bool(older_pages)
 
     issuer_line = (
         f"발행사: **{issuer['name']}** (CIK {issuer['cik']}) · "
@@ -5782,10 +5813,11 @@ async def get_us_filings(ticker: str, limit: int = 15, forms: list[str] | None =
     )
 
     if not shown:
-        note = ("최근 공시 목록에 해당 유형이 없습니다."
-                if requested_forms else "최근 공시 목록이 비어 있습니다.")
+        note = (f"{page_label}에 해당 유형이 없습니다."
+                if requested_forms else f"{page_label} 공시 목록이 비어 있습니다.")
         if has_older:
-            note += " 더 오래된 공시가 SEC 에 존재하므로 '공시가 없다'고 결론 내리면 안 됩니다."
+            note += (" 더 오래된 구간이 남아 있으므로 '공시가 없다'고 결론 내리면"
+                     " 안 됩니다 - coverage.older_pages 로 이어서 조회하세요.")
         return _append_result_meta(
             f"**{issuer['requested_ticker']}** SEC 공시\n{issuer_line}\n\n{note}",
             _us_meta(
@@ -5795,14 +5827,15 @@ async def get_us_filings(ticker: str, limit: int = 15, forms: list[str] | None =
                           "returned_count": 0,
                           "total_count": None if has_older else total_matching,
                           "truncated": False, "coverage_complete": not has_older,
+                          "page": page, "older_pages": older_pages,
                           "reason": "source_limit" if has_older else None},
                 extra={"issuer": issuer},
-                warnings=(["최근 목록 밖(구간 외) 공시가 존재합니다."] if has_older else None),
+                warnings=(["더 오래된 구간이 남아 있습니다."] if has_older else None),
             ),
         )
 
-    lines = [f"**{issuer['requested_ticker']}** SEC 공시 (표시 {len(shown)}건"
-             + (f" / 최근 목록 {total_matching}건" if total_matching > len(shown) else "")
+    lines = [f"**{issuer['requested_ticker']}** SEC 공시 · {page_label} (표시 {len(shown)}건"
+             + (f" / 이 구간 {total_matching}건" if total_matching > len(shown) else "")
              + ")", issuer_line, ""]
     lines.append("접수일 | 유형 | 보고서 기준일 | accession | 원문")
     lines.append("---|---|---|---|---")
@@ -5816,7 +5849,11 @@ async def get_us_filings(ticker: str, limit: int = 15, forms: list[str] | None =
     lines.append("")
     lines.append("_본문·exhibit 검색: `get_us_filing_detail(ticker, accession_no, find=...)`_")
     if has_older:
-        lines.append("_이 목록은 SEC 의 최근 공시 구간입니다. 더 오래된 공시는 여기 없습니다._")
+        nxt = older_pages[0]
+        lines.append(
+            f"_더 오래된 구간 {len(older_pages)}개가 남아 있습니다. 다음: "
+            f"`page=\"{nxt['name']}\"` ({nxt['filing_from']}~{nxt['filing_to']}, "
+            f"{nxt['count']}건). older_pages 가 빌 때까지 돌면 전체 순회가 끝납니다._")
 
     truncated = len(shown) < total_matching
     incomplete = truncated or has_older
@@ -5832,6 +5869,8 @@ async def get_us_filings(ticker: str, limit: int = 15, forms: list[str] | None =
                 "total_count": None if has_older else total_matching,
                 "truncated": truncated,
                 "coverage_complete": not incomplete,
+                "page": page,
+                "older_pages": older_pages,
                 "reason": ("server_cap" if truncated
                            else "source_limit" if has_older else None),
             },

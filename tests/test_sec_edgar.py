@@ -77,8 +77,12 @@ class FilingsToolTests(unittest.IsolatedAsyncioTestCase):
     """요구 1·2·3·6 - 목록 도구."""
 
     def _subs(self, rows, has_older=False):
+        pages = ([{"name": "CIK0001652044-submissions-001.json", "count": 500,
+                   "filing_from": "2015-01-01", "filing_to": "2020-01-01"}]
+                 if has_older else [])
         return {"name": "Alphabet Inc.", "tickers": ["GOOGL", "GOOG"],
-                "rows": rows, "recent_count": len(rows), "has_older": has_older}
+                "rows": rows, "recent_count": len(rows),
+                "has_older": has_older, "pages": pages}
 
     async def _run(self, issuer=_ISSUER_GOOGL, subs=None, **kw):
         opts = dict(ticker="GOOGL")
@@ -224,7 +228,8 @@ class FilingDetailToolTests(unittest.IsolatedAsyncioTestCase):
         fetch = (AsyncMock(side_effect=text_error) if text_error
                  else AsyncMock(return_value=text))
         subs = {"name": "Rivian", "tickers": ["RIVN"],
-                "rows": [_row()], "recent_count": 1, "has_older": False}
+                "rows": [_row()], "recent_count": 1, "has_older": False,
+                "pages": []}
         issuer = {"requested_ticker": "RIVN", "cik": 1874178, "name": "Rivian",
                   "primary_ticker": "RIVN", "issuer_tickers": ["RIVN"]}
         with patch.object(server.sec, "resolve_issuer", AsyncMock(return_value=issuer)), \
