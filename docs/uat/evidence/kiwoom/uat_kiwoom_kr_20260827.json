@@ -2,7 +2,7 @@
  "summary": {
   "provider": "kiwoom",
   "market": "KR",
-  "ran_at": "2026-08-27T22:20:31.499804+09:00",
+  "ran_at": "2026-08-27T22:35:30.395974+09:00",
   "release_gate_opened_for_verification": true,
   "auto_route": {
    "gate_preview": true,
@@ -26,6 +26,7 @@
    "ok": true
   },
   "pagination_continuation": {
+   "market": "KR",
    "page1_rows": 900,
    "page2_rows": 900,
    "cont_yn": "Y",
@@ -1352,6 +1353,108 @@
     "kis_rows": 381,
     "provider_rows": 381,
     "common": 381,
+    "only_kis": 0,
+    "only_provider": 0,
+    "only_kis_timestamps": [],
+    "only_provider_timestamps": [],
+    "ohlc_diff_minutes": 0,
+    "ohlc_diff_samples": [],
+    "volume_ratio_median": 1.0
+   }
+  },
+  {
+   "symbol": "003555",
+   "venue": null,
+   "trading_date": "latest",
+   "intervals": {
+    "1m": {
+     "rows": 500,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": null,
+     "warnings": [],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "first": "2026-08-24T14:10:00+09:00",
+     "last": "2026-08-27T15:29:00+09:00"
+    },
+    "5m": {
+     "rows": 200,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": null,
+     "warnings": [],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "first": "2026-08-25T09:40:00+09:00",
+     "last": "2026-08-27T15:25:00+09:00"
+    },
+    "15m": {
+     "rows": 200,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": null,
+     "warnings": [],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "first": "2026-08-18T10:30:00+09:00",
+     "last": "2026-08-27T15:15:00+09:00"
+    },
+    "60m": {
+     "rows": 70,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": null,
+     "warnings": [],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "first": "2026-08-13T09:00:00+09:00",
+     "last": "2026-08-27T15:00:00+09:00"
+    },
+    "120m": {
+     "rows": 40,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": null,
+     "warnings": [],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "first": "2026-08-13T09:00:00+09:00",
+     "last": "2026-08-27T15:00:00+09:00"
+    },
+    "240m": {
+     "rows": 20,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": null,
+     "warnings": [],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "first": "2026-08-13T09:00:00+09:00",
+     "last": "2026-08-27T13:00:00+09:00"
+    }
+   },
+   "pagination": {
+    "pages": 1,
+    "rows": 165,
+    "complete": true
+   },
+   "cache_second_read": {
+    "cache_hit": true,
+    "provider_calls": 0,
+    "rows": 50
+   },
+   "kis_cross_check": {
+    "available": true,
+    "kis_rows": 165,
+    "provider_rows": 165,
+    "common": 165,
     "only_kis": 0,
     "only_provider": 0,
     "only_kis_timestamps": [],
