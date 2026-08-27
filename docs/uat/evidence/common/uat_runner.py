@@ -32,14 +32,18 @@ sys.path.insert(0, str(ROOT))
 
 from stock_mcp_server import server  # noqa: E402
 
+# KR 16 사례 = 고유 14종목 + 005930 과거일 재조회 2건 (계획서와 일치)
 KR_SYMBOLS = [
     ("005930", None), ("000660", None), ("373220", None),
     ("035720", None), ("035420", None), ("051910", None),
     ("950140", None), ("043370", None), ("036560", None),
     ("069500", None), ("371460", None), ("305720", None),
-    ("005935", None), ("005930", -5), ("005930", -20),
+    ("005935", None), ("003555", None),
+    ("005930", -5), ("005930", -20),
 ]
 
+# US 15 사례 = 고유 13종목 + AAPL 과거일 재조회 2건.
+# AMEX(NA) 상장 실측 종목 선정은 보류 항목이다 (계획서 참조).
 US_SYMBOLS = [
     ("AAPL", "NAS", None), ("MSFT", "NAS", None), ("NVDA", "NAS", None),
     ("TSLA", "NAS", None), ("IBM", "NYS", None), ("KO", "NYS", None),
@@ -240,10 +244,15 @@ def _direct_fetch_1m(provider, market, symbol, venue, trading_date,
                                  type(exc).__name__))
 
 
-def _continuation_probe(provider: str, symbol: str) -> dict:
-    """키움 연속조회 실측: 하루(381행)가 페이지 크기(실측 900행)보다
-    작아 단일 거래일 조회로는 다페이지가 구조적으로 불가능하다. 대신
-    raw 연속 헤더 왕복으로 커서 진행을 직접 증명한다."""
+def _continuation_probe(provider: str, market: str, symbol: str,
+                        venue=None) -> dict:
+    """키움 연속조회 실측 (KR·US 공통): raw cont-yn/next-key 왕복으로
+    커서가 과거로 진행함을 직접 증명한다.
+
+    KR 은 페이지 900행 > 하루 381행이라 이 leg 가 유일한 다페이지
+    증거다. US 는 페이지 100행이라 어댑터 pages 로도 증명되지만,
+    연속 헤더 계약 자체도 함께 실측한다.
+    """
     from stock_mcp_server.market_data.credential_store import (
         CredentialStore,
     )
@@ -258,22 +267,34 @@ def _continuation_probe(provider: str, symbol: str) -> dict:
         client = KiwoomClient(payload, "real")
         _DIRECT_CLIENTS[key] = client
 
-    async def go():
-        body = {"stk_cd": symbol, "tic_scope": "1",
-                "upd_stkpc_tp": "0",
+    if market == "KR":
+        endpoint, api_id = "kr_chart", "ka10080"
+        rows_key = "stk_min_pole_chart_qry"
+        body = {"stk_cd": symbol, "tic_scope": "1", "upd_stkpc_tp": "0",
                 "base_dt": dt.date.today().strftime("%Y%m%d")}
-        r1 = await client.request("kr_chart", api_id="ka10080", body=body)
-        rows1 = r1.payload.get("stk_min_pole_chart_qry") or []
+    else:
+        from stock_mcp_server.market_data.kiwoom_symbols import to_stex_tp
+        endpoint, api_id = "us_chart", "usa06011"
+        rows_key = "result_list"
+        body = {"stex_tp": to_stex_tp(venue or "NAS"), "stk_cd": symbol,
+                "strt_dt": dt.date.today().strftime("%Y%m%d"),
+                "tic_scope": "1", "upd_stkpc_tp": "0",
+                "exrt_appl_tp": "0"}
+
+    async def go():
+        r1 = await client.request(endpoint, api_id=api_id, body=body)
+        rows1 = r1.payload.get(rows_key) or []
         if r1.cont_yn != "Y" or not r1.next_key:
             return {"page1_rows": len(rows1), "cont_yn": r1.cont_yn,
                     "ok": False, "reason": "연속 헤더 없음"}
-        r2 = await client.request("kr_chart", api_id="ka10080", body=body,
+        r2 = await client.request(endpoint, api_id=api_id, body=body,
                                   cont_yn="Y", next_key=r1.next_key)
-        rows2 = r2.payload.get("stk_min_pole_chart_qry") or []
+        rows2 = r2.payload.get(rows_key) or []
         first1 = str(rows1[0].get("cntr_tm")) if rows1 else ""
         first2 = str(rows2[0].get("cntr_tm")) if rows2 else ""
         progressed = bool(first1 and first2 and first2 < first1)
         return {
+            "market": market,
             "page1_rows": len(rows1), "page2_rows": len(rows2),
             "cont_yn": r1.cont_yn, "cursor_progressed": progressed,
             "ok": progressed and len(rows2) > 0,
@@ -573,12 +594,16 @@ def _run_inner(provider: str, market: str, out_dir: Path) -> int:
                     "rows": len(direct_ds.bars),
                     "complete": direct_ds.coverage.get("complete"),
                 }
-                # 공급자별 기준: 키움은 페이지 크기(실측 900행) > 하루
-                # (381행)라 단일 거래일 조회로 다페이지가 불가능하다.
-                # 키움은 별도 연속조회 leg 로 증명하고, kis(100행/页)·
-                # 토스(200행/页)는 실제 pages >= 2 를 요구한다.
+                # 공급자·시장별 기준 (전부 실측 페이지 크기 기반):
+                # - kis KR 100행/페이지, 토스 200행/페이지, 키움 US
+                #   100행/페이지: 하루 세션(381~391행) 조회에서 실제
+                #   pages >= 2 가 구조적으로 발생해야 한다.
+                # - 키움 KR 만 페이지 900행 > 하루 381행이라 단일
+                #   거래일 다페이지가 불가능하다. 별도 연속조회 leg 로
+                #   증명한다.
                 pages = direct_ds.coverage.get("pages")
-                if provider != "kiwoom" and (not pages or pages < 2):
+                exempt = provider == "kiwoom" and market == "KR"
+                if not exempt and (not pages or pages < 2):
                     failures += 1
             else:
                 record["pagination"] = {"error": direct_err}
@@ -659,10 +684,12 @@ def _run_inner(provider: str, market: str, out_dir: Path) -> int:
     switch = summary["primary_switch"] or {}
     if not switch.get("ok") and not switch.get("skipped"):
         failures += 1
-    # 키움 전용: 연속조회(cont-yn/next-key) 커서 진행을 raw 로 증명한다.
-    if provider == "kiwoom" and market == "KR":
+    # 키움 전용 (KR·US 모두): 연속조회 커서 진행을 raw 로 증명한다.
+    if provider == "kiwoom":
+        first = symbols[0]
         summary["pagination_continuation"] = _continuation_probe(
-            provider, symbols[0][0])
+            provider, market, first[0],
+            None if market == "KR" else first[1])
         if not summary["pagination_continuation"].get("ok"):
             failures += 1
     summary["failures"] = failures

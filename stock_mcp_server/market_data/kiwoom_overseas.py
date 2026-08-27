@@ -1,17 +1,23 @@
-"""키움 미국 1분봉 공급자 (1.0 Task 14).
+"""키움 미국 1분봉 공급자 (1.0 Task 14, 2026-08-27 실계좌 실측 개정).
 
 공식 스펙(usa06011): POST /api/us/chart
 - body: stex_tp(NA/ND/NY), stk_cd, strt_dt(YYYYMMDD), tic_scope,
   upd_stkpc_tp(0 미적용), exrt_appl_tp(0 미적용 = USD 원 표기)
-- 응답: result_list 최신순. cntr_tm YYYYMMDDHHmmss, bus_dt 영업일자.
-- 연속조회: cont-yn / next-key 헤더.
+- 응답: result_list 최신순. 페이지 크기 실측 100행.
+- 연속조회: cont-yn / next-key 헤더 (커서는 과거로 진행, 실측 확인).
 
-해석 규칙:
-- cntr_tm 을 미국 동부(America/New_York) 현지 시각의 봉 시작으로 본다.
-  실계좌 UAT 에서 검증하기 전까지 capability 는 unverified 다.
+실계좌 실측으로 확정한 semantics (AAPL, 2026-08-27):
+- cntr_tm 은 **한국 시각(KST) 라벨**이다. ET 09:11 프리장 체결이
+  20260826221100 으로 온다. Asia/Seoul 로 파싱한 뒤 America/New_York
+  로 변환해 저장한다.
+- bus_dt 가 미국 영업일자다. 요청 거래일 필터는 bus_dt 기준이다.
+- strt_dt 는 KST 달력 날짜 필터다. 미국 영업일 D 의 세션은 KST 로
+  D 22:30 ~ D+1 05:00(EDT)에 걸치므로 **D+1 로 anchoring** 하고
+  과거로 페이지네이션한다.
+- 응답에 프리장·애프터마켓 행이 포함된다. ET 정규장(09:30~16:00,
+  마감 print 포함) 밖 행은 버린다.
 - bus_dt 가 요청 거래일과 다른 행은 채택하지 않는다. 과거일 요청에
   최신 데이터를 대신 돌려줘도 메우지 않는다 (빈 결과 + 경고).
-- 정규장 09:30~16:00 (마감 체결 print 포함) 밖 행은 버린다.
 """
 
 from __future__ import annotations
@@ -37,6 +43,7 @@ from stock_mcp_server.market_data.models import (
 )
 
 _NY = ZoneInfo("America/New_York")
+_KST = ZoneInfo("Asia/Seoul")
 
 _API_ID = "usa06011"
 _ENDPOINT = "us_chart"
@@ -59,8 +66,9 @@ def _decimal_price(raw: object) -> Decimal:
 def _parse_row(row: dict) -> NormalizedBar | None:
     try:
         raw_tm = str(row["cntr_tm"])
+        # 실측: cntr_tm 은 KST 라벨이다. ET 로 변환해 저장한다.
         start = datetime.strptime(raw_tm, "%Y%m%d%H%M%S")
-        start = start.replace(second=0, tzinfo=_NY)
+        start = start.replace(second=0, tzinfo=_KST).astimezone(_NY)
         return NormalizedBar(
             start_at=start,
             end_at=start + timedelta(minutes=1),
@@ -134,6 +142,10 @@ class KiwoomOverseasProvider:
         ticker = validate_ticker(request.symbol)
 
         trading_date_str = request.trading_date.strftime("%Y%m%d")
+        # strt_dt 는 KST 달력 날짜다. 미국 영업일 D 의 세션 후반(ET
+        # 11:00~마감)은 KST D+1 에 있으므로 D+1 로 anchoring 한다.
+        strt_dt = (request.trading_date
+                   + timedelta(days=1)).strftime("%Y%m%d")
         bars: list[NormalizedBar] = []
         warnings: list[str] = []
         dropped = 0
@@ -155,7 +167,7 @@ class KiwoomOverseasProvider:
                     body={
                         "stex_tp": stex_tp,
                         "stk_cd": ticker,
-                        "strt_dt": trading_date_str,
+                        "strt_dt": strt_dt,
                         "tic_scope": "1",
                         "upd_stkpc_tp": "0",
                         "exrt_appl_tp": "0",

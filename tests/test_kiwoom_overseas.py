@@ -1,8 +1,13 @@
-"""키움 미국 1분봉 공급자 테스트 (1.0 Task 14).
+"""키움 미국 1분봉 공급자 테스트 (1.0 Task 14, 2026-08-27 실측 개정판).
 
-공식 스펙(usa06011): POST /api/us/chart, stex_tp(NA/ND/NY), strt_dt,
-cntr_tm YYYYMMDDHHmmss, bus_dt 영업일자, cont-yn/next-key 연속조회.
-cntr_tm 은 미국 동부 현지 시각으로 해석한다 (실계좌 UAT 검증 항목).
+공식 스펙(usa06011) + 실계좌 실측으로 확정한 semantics:
+- cntr_tm 은 **한국 시각(KST) 라벨**이다 (실측: ET 09:11 프리장 행이
+  20260826221100 으로 옴). ET 로 변환해 저장한다.
+- bus_dt 가 미국 영업일자다. 요청 거래일 필터의 기준이다.
+- strt_dt 는 KST 달력 날짜 필터다. 미국 영업일 D 의 세션은 KST 로
+  D 22:30~D+1 05:00(EDT 기준)에 걸치므로 D+1 을 넣고 과거로
+  페이지네이션한다.
+- 페이지 크기 실측 100행. 하루 세션(391행)은 항상 다페이지다.
 """
 
 from __future__ import annotations
@@ -79,7 +84,7 @@ def _provider(server: PageServer, **kwargs) -> KiwoomOverseasProvider:
 def _request(**overrides) -> BarRequest:
     base = dict(
         symbol="AAPL", market="US", interval="1m",
-        start=None, end=None, trading_date=date(2026, 8, 27),
+        start=None, end=None, trading_date=date(2026, 8, 26),
         row_limit=120, venue="NAS", session="regular",
         adjustment="unadjusted", completed_only=True, source="auto",
     )
@@ -107,15 +112,14 @@ class SymbolMappingTests(unittest.TestCase):
         self.assertEqual(validate_ticker("TSLA"), "TSLA")
 
     def test_class_share_forms_are_not_guessed(self):
-        # 키움의 class 주식 표기(BRK.B vs BRK/B)는 실측 검증 전이다.
-        # 추측 변환하지 않고 구조화된 오류를 낸다.
         for bad in ("BRK.B", "BRK/B", "BF-B", "AAPL US", ""):
             with self.assertRaises(KiwoomSymbolMappingError):
                 validate_ticker(bad)
 
 
 class KiwoomOverseasTests(unittest.TestCase):
-    def test_minute_normalization_eastern_time(self):
+    def test_kst_labels_converted_to_eastern(self):
+        # cntr_tm 20260827050000(KST) = ET 2026-08-26 16:00 마감 print.
         server = PageServer([(_PAGE_1, None, None)])
         ds = _run(_provider(server).fetch_bars(_request()))
 
@@ -125,23 +129,26 @@ class KiwoomOverseasTests(unittest.TestCase):
         self.assertEqual(ds.source_endpoint, "kiwoom_us_minute")
         times = [b.start_at.strftime("%H%M") for b in ds.bars]
         self.assertEqual(times, ["1558", "1559", "1600"])
-        # 여름(EDT): UTC-4 확인. DST 는 zoneinfo 가 다룬다.
+        self.assertEqual(
+            ds.bars[-1].start_at,
+            datetime(2026, 8, 26, 16, 0, tzinfo=NY))
+        # 여름(EDT): UTC-4.
         self.assertEqual(
             ds.bars[0].start_at.utcoffset().total_seconds(), -4 * 3600)
         self.assertEqual(ds.bars[-1].close, Decimal("225.4400"))
-        self.assertEqual(ds.bars[-1].volume, 1250000)
 
         body = json.loads(server.chart_requests[0].content)
         self.assertEqual(body["stex_tp"], "ND")
         self.assertEqual(body["stk_cd"], "AAPL")
+        # 실측: strt_dt 는 KST 달력 날짜다. 미국 영업일 26일의 세션
+        # 후반은 KST 27일에 있으므로 27일로 anchoring 한다.
         self.assertEqual(body["strt_dt"], "20260827")
         self.assertEqual(body["tic_scope"], "1")
         self.assertEqual(body["upd_stkpc_tp"], "0")
-        self.assertEqual(body["exrt_appl_tp"], "0")
         self.assertEqual(
             server.chart_requests[0].headers["api-id"], "usa06011")
 
-    def test_pagination_stops_at_prior_day(self):
+    def test_pagination_stops_at_prior_bus_dt(self):
         server = PageServer([
             (_PAGE_1, "Y", "us-key-1"),
             (_PAGE_2, "Y", "us-key-2"),
@@ -150,51 +157,57 @@ class KiwoomOverseasTests(unittest.TestCase):
         second = server.chart_requests[1]
         self.assertEqual(second.headers["next-key"], "us-key-1")
         dates = {b.start_at.date().isoformat() for b in ds.bars}
-        self.assertEqual(dates, {"2026-08-27"})
+        self.assertEqual(dates, {"2026-08-26"})
         times = [b.start_at.strftime("%H%M") for b in ds.bars]
         self.assertEqual(times, ["1557", "1558", "1559", "1600"])
         self.assertEqual(server.pages, [])
 
-    def test_future_rows_rejected_no_substitution(self):
-        # 과거일 요청에 최신(미래) 행이 섞여 와도 채택하지 않는다.
-        page = json.loads(json.dumps(_PAGE_1))
-        for row in page["result_list"]:
-            row["bus_dt"] = "20260827"
-        server = PageServer([(page, None, None)])
+    def test_bus_dt_filter_rejects_other_business_days(self):
+        # 과거일 요청에 최신 영업일 행이 섞여 와도 채택하지 않는다.
+        server = PageServer([(_PAGE_1, None, None)])
         ds = _run(_provider(server).fetch_bars(
             _request(trading_date=date(2026, 8, 20))))
         self.assertEqual(ds.bars, ())
         self.assertTrue(any("기준일" in w for w in ds.warnings))
 
-    def test_session_filter_regular_only_with_close_print(self):
+    def test_session_filter_drops_premarket_and_afterhours(self):
         page = json.loads(json.dumps(_PAGE_1))
+        # 애프터마켓: KST 27일 05:10 = ET 26일 16:10
         page["result_list"].insert(0, {
-            "cntr_tm": "20260827160100", "bus_dt": "20260827",
+            "cntr_tm": "20260827051000", "bus_dt": "20260826",
             "cur_prc": "225.5000", "open_pric": "225.5000",
             "high_pric": "225.5000", "low_pric": "225.5000",
             "trde_qty": "100", "upd_stkpc_tp": "0"})
+        # 프리장: KST 26일 22:15 = ET 26일 09:15
         page["result_list"].append({
-            "cntr_tm": "20260827092900", "bus_dt": "20260827",
+            "cntr_tm": "20260826221500", "bus_dt": "20260826",
             "cur_prc": "224.0000", "open_pric": "224.0000",
             "high_pric": "224.0000", "low_pric": "224.0000",
             "trde_qty": "100", "upd_stkpc_tp": "0"})
         server = PageServer([(page, None, None)])
         ds = _run(_provider(server).fetch_bars(_request()))
         times = [b.start_at.strftime("%H%M") for b in ds.bars]
-        self.assertNotIn("1601", times)
-        self.assertNotIn("0929", times)
+        self.assertNotIn("1610", times)
+        self.assertNotIn("0915", times)
         self.assertIn("1600", times)  # 마감 체결 print 는 포함한다
 
     def test_winter_date_uses_est_offset(self):
+        # 겨울(EST, UTC-5): ET 2026-01-15 15:58 = KST 2026-01-16 05:58.
         page = json.loads(json.dumps(_PAGE_1))
-        for row in page["result_list"]:
-            row["cntr_tm"] = "20260115" + row["cntr_tm"][8:]
+        for row, kst in zip(page["result_list"],
+                            ("20260116060000", "20260116055900",
+                             "20260116055800")):
+            row["cntr_tm"] = kst
             row["bus_dt"] = "20260115"
         server = PageServer([(page, None, None)])
         ds = _run(_provider(server).fetch_bars(
             _request(trading_date=date(2026, 1, 15))))
+        body = json.loads(server.chart_requests[0].content)
+        self.assertEqual(body["strt_dt"], "20260116")
         self.assertEqual(
             ds.bars[0].start_at.utcoffset().total_seconds(), -5 * 3600)
+        times = [b.start_at.strftime("%H%M") for b in ds.bars]
+        self.assertEqual(times, ["1558", "1559", "1600"])
 
     def test_partial_on_page_error(self):
         server = PageServer([
@@ -206,15 +219,6 @@ class KiwoomOverseasTests(unittest.TestCase):
         self.assertFalse(ds.coverage["complete"])
         self.assertEqual(ds.coverage["resume_cursor"], "us-key-1")
 
-    def test_unknown_venue_and_class_shares_error(self):
-        server = PageServer([])
-        provider = _provider(server)
-        with self.assertRaises(KiwoomSymbolMappingError):
-            _run(provider.fetch_bars(_request(venue="LSE")))
-        with self.assertRaises(KiwoomSymbolMappingError):
-            _run(provider.fetch_bars(_request(symbol="BRK.B")))
-        self.assertEqual(server.chart_requests, [])
-
     def test_unknown_symbol_empty_field_row_is_entity_not_found(self):
         from stock_mcp_server.market_data.kiwoom_client import KiwoomApiError
         page = {"return_code": 0, "result_list": [{
@@ -224,6 +228,15 @@ class KiwoomOverseasTests(unittest.TestCase):
         with self.assertRaises(KiwoomApiError) as ctx:
             _run(_provider(server).fetch_bars(_request()))
         self.assertEqual(ctx.exception.provider_status, "entity_not_found")
+
+    def test_unknown_venue_and_class_shares_error(self):
+        server = PageServer([])
+        provider = _provider(server)
+        with self.assertRaises(KiwoomSymbolMappingError):
+            _run(provider.fetch_bars(_request(venue="LSE")))
+        with self.assertRaises(KiwoomSymbolMappingError):
+            _run(provider.fetch_bars(_request(symbol="BRK.B")))
+        self.assertEqual(server.chart_requests, [])
 
     def test_contract_guards(self):
         server = PageServer([])

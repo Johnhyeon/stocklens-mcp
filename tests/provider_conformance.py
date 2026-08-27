@@ -233,9 +233,28 @@ def _kiwoom_kr_error():
 
 
 def _kiwoom_us_rows(times, day="20260826"):
-    return [{"cntr_tm": day + t, "bus_dt": day, "cur_prc": "230.4000",
-             "open_pric": "230.1000", "high_pric": "230.5500",
-             "low_pric": "229.9000", "trde_qty": "1200"} for t in times]
+    """실측 semantics: cntr_tm 은 KST 라벨, bus_dt 가 미국 영업일자.
+
+    ET 시각(HHMMSS) 목록을 받아 KST 라벨(cntr_tm)로 변환해 만든다
+    (EDT = KST-13시간, 2026-08 기준).
+    """
+    import datetime as _dt
+    from zoneinfo import ZoneInfo as _Z
+
+    rows = []
+    bus = _dt.datetime.strptime(day, "%Y%m%d").date()
+    for t in times:
+        et = _dt.datetime(
+            bus.year, bus.month, bus.day,
+            int(t[:2]), int(t[2:4]), int(t[4:6]),
+            tzinfo=_Z("America/New_York"))
+        kst = et.astimezone(_Z("Asia/Seoul"))
+        rows.append({
+            "cntr_tm": kst.strftime("%Y%m%d%H%M%S"), "bus_dt": day,
+            "cur_prc": "230.4000", "open_pric": "230.1000",
+            "high_pric": "230.5500", "low_pric": "229.9000",
+            "trde_qty": "1200"})
+    return rows
 
 
 def _kiwoom_us(pages):
