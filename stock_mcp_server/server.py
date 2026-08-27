@@ -7349,6 +7349,8 @@ from stock_mcp_server.market_data.models import (  # noqa: E402
     SUPPORTED_INTERVALS as _INTRADAY_INTERVALS,
     BarDataset as _BDS,
     BarRequest as _BarRequest,
+    bar_from_dict as _bar_from_dict,
+    bar_to_dict as _bar_to_dict,
 )
 from zoneinfo import ZoneInfo as _ZoneInfo  # noqa: E402
 from stock_mcp_server.market_data.naver_provider import (  # noqa: E402
@@ -7452,6 +7454,52 @@ def _previous_trading_day(market: str, day):
     return None
 
 
+def _intraday_disk_cache():
+    """공급자별 디스크 캐시. STOCKLENS_HOME 을 호출 시점에 읽는다."""
+    from stock_mcp_server.market_data.provider_cache import ProviderCache
+    return ProviderCache()
+
+
+def _trading_day_completed(market: str, day, now) -> bool:
+    win = _session_window(market, day)
+    return win is not None and now >= win.close_at
+
+
+def _kis_day_cache_key(profile: str, market: str, symbol: str,
+                       venue: str, session: str, day) -> dict:
+    return {
+        "provider": "kis", "profile": profile, "market": market,
+        "symbol": symbol, "venue": venue, "session": session,
+        "source_interval": "1m", "trading_date": day.strftime("%Y%m%d"),
+        "cursor": "", "adjustment": "unadjusted",
+    }
+
+
+def _load_cached_kis_day(cache, key: dict):
+    """완전(complete) entry 만 봉으로 복원한다. 손상 시 None."""
+    try:
+        entry = cache.get(key, connected=True)
+    except Exception:  # noqa: BLE001
+        return None
+    if not entry or not entry.get("complete"):
+        return None
+    payload = entry.get("payload") or {}
+    try:
+        bars = tuple(_bar_from_dict(r) for r in payload.get("bars", []))
+    except Exception:  # noqa: BLE001
+        return None
+    return bars or None
+
+
+def _store_kis_day(cache, key: dict, bars) -> None:
+    """캐시 저장 실패는 조회 실패가 아니다. 조용히 넘어간다."""
+    try:
+        cache.put(key, {"bars": [_bar_to_dict(b) for b in bars]},
+                  complete=True)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 async def _fetch_intraday_dataset(
     *,
     symbol: str,
@@ -7493,18 +7541,71 @@ async def _fetch_intraday_dataset(
         fetch_interval = "1m"
 
     def _make_request(day) -> _BarRequest:
+        base_rows = max(row_limit * max(
+            target_minutes // _INTRADAY_INTERVALS[fetch_interval], 1),
+            row_limit)
+        # 완료 거래일은 캐시에 '완전한 하루'로 저장된다. 부분 조회가 완전
+        # 캐시로 둔갑하지 않도록 그날 세션 전체를 요청한다.
+        if market == "KR" and fetch_interval == "1m" and \
+                _trading_day_completed(market, day, now):
+            win = _session_window(market, day)
+            if win is not None:
+                base_rows = max(base_rows, win.minutes + 1)
         return _BarRequest(
             symbol=symbol, market=market, interval=fetch_interval,
             start=None, end=None, trading_date=day,
-            row_limit=max(row_limit * max(
-                target_minutes // _INTRADAY_INTERVALS[fetch_interval], 1),
-                row_limit),
+            row_limit=base_rows,
             venue=venue if venue is not None else default_venue,
             session=session, adjustment="unadjusted",
             completed_only=completed_only, source=source)
 
-    dataset, route_meta = await _fetch_with_failover(
-        resolution, providers, _make_request(trading_date))
+    # --- 완료 거래일 디스크 캐시 (KR KIS 1m 원천 전용) ---
+    # 진행 중 거래일은 캐시하지 않는다 (낡은 장중 데이터 금지). 캐시는
+    # 연결 능력을 대신하지 않는다 - 이 분기는 라우터가 KIS 를 선택했을
+    # 때만 도달한다.
+    cache = _intraday_disk_cache()
+    kis_kr_primary = (resolution.selected_provider == "kis"
+                      and market == "KR" and profile is not None)
+    primary_completed = _trading_day_completed(market, trading_date, now)
+
+    dataset = None
+    route_meta = None
+    if kis_kr_primary and primary_completed:
+        key = _kis_day_cache_key(
+            profile, market, symbol, "KRX", session, trading_date)
+        cached_bars = _load_cached_kis_day(cache, key)
+        if cached_bars:
+            dataset = _BDS(
+                bars=cached_bars, market=market, symbol=symbol,
+                provider="kis", profile=profile, venue="KRX",
+                timezone="Asia/Seoul", session=session,
+                requested_interval=fetch_interval, source_interval="1m",
+                aggregation_method="provider_native",
+                adjustment_basis="unadjusted",
+                source_endpoint="domestic_minute",
+                coverage={"complete": True,
+                          "returned_rows": len(cached_bars),
+                          "cache_hit": True},
+                warnings=())
+            route_meta = {
+                "requested_source": resolution.requested_source,
+                "selected_provider": "kis",
+                "selection_reason": resolution.selection_reason,
+                "mode": resolution.mode,
+                "fallback_used": False,
+                "fallback_from": None,
+                "cache_hit": True,
+            }
+
+    if dataset is None:
+        dataset, route_meta = await _fetch_with_failover(
+            resolution, providers, _make_request(trading_date))
+        if kis_kr_primary and primary_completed and \
+                dataset.provider == "kis" and dataset.bars and \
+                dataset.coverage.get("complete"):
+            key = _kis_day_cache_key(
+                profile, market, symbol, "KRX", session, trading_date)
+            _store_kis_day(cache, key, dataset.bars)
 
     # KIS 국내 1m 원천은 하루 단위 endpoint 다. 필요한 이력이 부족하면 예산
     # 안에서 이전 거래일을 이어 붙인다. 공급원은 바꾸지 않는다.
@@ -7526,16 +7627,27 @@ async def _fetch_intraday_dataset(
             if day is None:
                 break
             days_used += 1
-            try:
-                extra_ds = await provider_obj.fetch_bars(_make_request(day))
-            except Exception:  # noqa: BLE001
-                # 과거 일자 실패는 이미 받은 구간을 버릴 이유가 아니다.
-                warnings.append(
-                    f"{day.isoformat()} 분봉 조회에 실패해 그 이전 이력 없이 "
-                    "계산합니다.")
-                break
+            day_key = _kis_day_cache_key(
+                profile, market, symbol, "KRX", session, day)
+            extra_bars = _load_cached_kis_day(cache, day_key) \
+                if profile else None
+            if extra_bars is None:
+                try:
+                    extra_ds = await provider_obj.fetch_bars(
+                        _make_request(day))
+                except Exception:  # noqa: BLE001
+                    # 과거 일자 실패는 이미 받은 구간을 버릴 이유가 아니다.
+                    warnings.append(
+                        f"{day.isoformat()} 분봉 조회에 실패해 그 이전 이력 "
+                        "없이 계산합니다.")
+                    break
+                extra_bars = extra_ds.bars
+                if profile and extra_bars and \
+                        extra_ds.coverage.get("complete") and \
+                        _trading_day_completed(market, day, now):
+                    _store_kis_day(cache, day_key, extra_bars)
             before = len(merged)
-            merged.extend(extra_ds.bars)
+            merged.extend(extra_bars)
             merged_sorted, dd_warns = _sort_and_dedupe_bars(merged)
             merged = list(merged_sorted)
             warnings.extend(dd_warns)

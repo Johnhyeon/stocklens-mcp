@@ -167,6 +167,48 @@ class BarDataset:
             prev = bar.start_at
 
 
+def bar_to_dict(bar: NormalizedBar) -> dict:
+    """디스크 캐시용 직렬화. timestamp 는 offset 포함 ISO, 가격은 문자열."""
+    return {
+        "start_at": bar.start_at.isoformat(),
+        "end_at": bar.end_at.isoformat(),
+        "open": str(bar.open),
+        "high": str(bar.high),
+        "low": str(bar.low),
+        "close": str(bar.close),
+        "volume": bar.volume,
+        "interval": bar.interval,
+        "session": bar.session,
+        "complete": bar.complete,
+        "session_tail": bar.session_tail,
+        "expected_minutes": bar.expected_minutes,
+        "actual_minutes": bar.actual_minutes,
+        "data_integrity": bar.data_integrity,
+        "source_gap_status": bar.source_gap_status,
+    }
+
+
+def bar_from_dict(raw: dict) -> NormalizedBar:
+    """bar_to_dict 역변환. 형식이 어긋나면 예외를 던진다 (조용한 복구 금지)."""
+    return NormalizedBar(
+        start_at=datetime.fromisoformat(raw["start_at"]),
+        end_at=datetime.fromisoformat(raw["end_at"]),
+        open=Decimal(raw["open"]),
+        high=Decimal(raw["high"]),
+        low=Decimal(raw["low"]),
+        close=Decimal(raw["close"]),
+        volume=int(raw["volume"]),
+        interval=raw["interval"],
+        session=raw["session"],
+        complete=raw["complete"],
+        session_tail=bool(raw["session_tail"]),
+        expected_minutes=int(raw["expected_minutes"]),
+        actual_minutes=int(raw["actual_minutes"]),
+        data_integrity=raw["data_integrity"],
+        source_gap_status=raw["source_gap_status"],
+    )
+
+
 @dataclass(frozen=True)
 class ProviderCapabilities:
     """공급자·프로필별 능력. 실전과 모의를 같은 능력으로 가정하지 않는다."""
