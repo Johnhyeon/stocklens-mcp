@@ -285,9 +285,14 @@ def migrate_v1(raw: object) -> dict:
         if name not in supported:
             continue
         caps = _clean_capabilities(capability_results.get(name))
+        # 0.9 는 인증 게이트(verify_and_save) 통과 시에만 상태를 썼고,
+        # capability_results 에 auth 키가 없었다. 기록의 존재 자체가
+        # 인증 완료의 근거다 - auth 부재를 미검증으로 읽으면 업그레이드가
+        # 기존 구매자의 KIS 라우팅을 꺼버린다 (2026-08-27 실사고).
+        caps.setdefault("auth", "ok")
         profiles[name] = {
             "credential_ref": LEGACY_CREDENTIAL_REF,
-            "verified": caps.get("auth") == "ok",
+            "verified": True,
             "verified_at": None,
             "capabilities": caps,
         }
