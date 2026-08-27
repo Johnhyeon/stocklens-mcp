@@ -154,10 +154,13 @@ class GetIndicatorsRouteTests(unittest.IsolatedAsyncioTestCase):
 
         real_compute = server.compute_indicators
 
-        def spy_compute(ohlcv, include, params=None):
+        # v0.9.0 부터 timeframe 인자가 추가됐다 (주봉 52·월봉 12 요구량).
+        def spy_compute(ohlcv, include, params=None, timeframe="day"):
             seen["ohlcv_len"] = len(ohlcv)
             seen["include"] = list(include)
-            return real_compute(ohlcv, include, params=params)
+            seen["timeframe"] = timeframe
+            return real_compute(ohlcv, include, params=params,
+                                timeframe=timeframe)
 
         with patch.object(server, "get_ohlcv", ohlcv_mock), patch.object(
             server, "compute_indicators", side_effect=spy_compute
