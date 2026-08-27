@@ -364,38 +364,66 @@ class FetchPipelineTests(unittest.IsolatedAsyncioTestCase):
 
 class KisClientReuseTests(unittest.TestCase):
     """도구 호출마다 토큰을 재발급하면 KIS 1분 제한에 걸린다 (실측).
-    같은 (profile, generation) 이면 프로세스 안에서 클라이언트를 재사용한다."""
+    같은 (provider, profile, generation) 이면 runtime 이 클라이언트를
+    재사용하고, generation 이 바뀌면 그 공급자 것만 새로 만든다."""
 
-    def _fake_store(self):
-        class FakeStore:
-            def load_profile(self, profile):
-                from stock_mcp_server.market_data.broker_profiles import (
-                    BrokerCredentials,
-                )
-                return BrokerCredentials(app_key="k", app_secret="s")
-        return FakeStore()
+    class _FakeKeyring:
+        def __init__(self):
+            self.entries = {}
+
+        def set_password(self, service, username, password):
+            self.entries[(service, username)] = password
+
+        def get_password(self, service, username):
+            return self.entries.get((service, username))
+
+        def delete_password(self, service, username):
+            if (service, username) not in self.entries:
+                raise Exception("not found")
+            del self.entries[(service, username)]
+
+    def setUp(self):
+        import tempfile
+        from pathlib import Path
+        from stock_mcp_server.market_data.credential_store import (
+            CredentialStore,
+        )
+        from stock_mcp_server.market_data.runtime import ProviderRuntime
+
+        self._tmp = tempfile.TemporaryDirectory()
+        self.home = Path(self._tmp.name)
+        keyring = self._FakeKeyring()
+        self.store = CredentialStore(keyring_module=keyring, home=self.home)
+        self.runtime = ProviderRuntime(keyring_module=keyring,
+                                       home=self.home)
+        self._connect()
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def _connect(self):
+        from stock_mcp_server.market_data.provider_registry import registry
+        from stock_mcp_server.market_data.secrets import SecretPayload
+
+        payload = SecretPayload.from_schema(
+            registry.require("kis").credential_schema,
+            {"app_key": "k", "app_secret": "s"})
+        pending = self.store.stage("kis", "real", payload)
+        self.store.commit(pending, {
+            "auth": "ok", "kr_intraday": "available",
+            "us_intraday": "available"})
 
     def test_same_generation_reuses_client(self):
-        server._KIS_CLIENT_CACHE.clear()
-        state = {"connection_generation": 5, "active_profile": "real",
-                 "active_provider": "kis", "data_source_mode": "auto"}
-        with patch.object(server, "_BrokerProfileStore",
-                          return_value=self._fake_store()), \
-             patch.object(server, "_broker_load_state", return_value=state):
-            p1 = server._intraday_providers("KR", "real")
-            p2 = server._intraday_providers("US", "real")
+        with patch.object(server, "_PROVIDER_RUNTIME", self.runtime):
+            p1 = server._intraday_providers("KR")
+            p2 = server._intraday_providers("US")
         self.assertIs(p1["kis"]._client, p2["kis"]._client)
 
     def test_generation_change_builds_new_client(self):
-        server._KIS_CLIENT_CACHE.clear()
-        state = {"connection_generation": 5, "active_profile": "real",
-                 "active_provider": "kis", "data_source_mode": "auto"}
-        with patch.object(server, "_BrokerProfileStore",
-                          return_value=self._fake_store()), \
-             patch.object(server, "_broker_load_state", return_value=state):
-            p1 = server._intraday_providers("KR", "real")
-            state["connection_generation"] = 6
-            p2 = server._intraday_providers("KR", "real")
+        with patch.object(server, "_PROVIDER_RUNTIME", self.runtime):
+            p1 = server._intraday_providers("KR")
+            self._connect()  # 재연결 -> kis generation 증가
+            p2 = server._intraday_providers("KR")
         self.assertIsNot(p1["kis"]._client, p2["kis"]._client)
 
 

@@ -7878,11 +7878,12 @@ async def export_us_to_excel(
 # 기존 get_chart / get_us_chart / get_indicators 는 변경하지 않는다.
 # =====================================================================
 
-from stock_mcp_server.market_data.broker_profiles import (  # noqa: E402
-    BrokerProfileStore as _BrokerProfileStore,
-)
 from stock_mcp_server.market_data.connection_state import (  # noqa: E402
-    load_state as _broker_load_state,
+    load_state_v2 as _broker_load_state_v2,
+    provider_capabilities_v2 as _provider_capabilities_v2,
+)
+from stock_mcp_server.market_data.runtime import (  # noqa: E402
+    ProviderRuntime as _ProviderRuntimeCls,
 )
 from stock_mcp_server.market_data.indicator_input import (  # noqa: E402
     bars_to_ohlcv as _bars_to_ohlcv,
@@ -7890,13 +7891,6 @@ from stock_mcp_server.market_data.indicator_input import (  # noqa: E402
 )
 from stock_mcp_server.market_data.kis_client import (  # noqa: E402
     KisApiError as _KisApiError,
-    KisClient as _KisClient,
-)
-from stock_mcp_server.market_data.kis_domestic import (  # noqa: E402
-    KisDomesticProvider as _KisDomesticProvider,
-)
-from stock_mcp_server.market_data.kis_overseas import (  # noqa: E402
-    KisOverseasProvider as _KisOverseasProvider,
 )
 from stock_mcp_server.market_data.models import (  # noqa: E402
     SUPPORTED_INTERVALS as _INTRADAY_INTERVALS,
@@ -7937,17 +7931,44 @@ _INTRADAY_SOURCES = ("auto", "kis", "naver", "yahoo")
 _INTRADAY_MAX_FETCH_DAYS = 10
 
 
+# 공급자 runtime. 클라이언트 캐시((provider, profile, generation))와
+# 어댑터 구성을 담당한다. KIS 토큰 발급 1분 1회 제한 때문에 재사용 필수.
+_PROVIDER_RUNTIME = _ProviderRuntimeCls()
+
+
 def _broker_state() -> dict:
-    """현재 연결 상태. 매 요청 파일에서 읽어 Manager 변경을 즉시 반영한다."""
-    return _broker_load_state()
+    """현재 연결 상태. 매 요청 파일에서 읽어 Manager 변경을 즉시 반영한다.
+
+    v2 상태에서 만든 호환 형태를 돌려준다. active_provider 는 주 사용
+    증권사(primary)를 뜻한다.
+    """
+    state = _broker_load_state_v2()
+    primary = state["primary_provider"]
+    record = state["providers"].get(primary) if primary else None
+    return {
+        "data_source_mode": state["data_source_mode"],
+        "active_provider": primary,
+        "active_profile": (record or {}).get("active_profile"),
+        "connection_generation": state["routing_generation"],
+        "state_v2": state,
+    }
 
 
 def _broker_capabilities(state: dict) -> dict:
     """연결 시험으로 검증된 능력만 산다. 추측으로 활성화하지 않는다."""
+    disconnected = {"connected": False, "kr_intraday": False,
+                    "us_intraday": False, "kr_daily": False,
+                    "us_daily": False}
+    v2 = state.get("state_v2")
+    if v2 is not None:
+        # 라우터는 아직 KIS 전용이다. primary 가 kis 일 때만 산다.
+        if state.get("active_provider") != "kis":
+            return disconnected
+        return _provider_capabilities_v2(v2, "kis")
+    # 시험용 v1 형태 dict 호환 경로
     if state.get("active_provider") != "kis" or \
             not state.get("active_profile"):
-        return {"connected": False, "kr_intraday": False,
-                "us_intraday": False, "kr_daily": False, "us_daily": False}
+        return disconnected
     results = (state.get("capability_results") or {}).get(
         state["active_profile"]) or {}
     return {
@@ -7960,43 +7981,8 @@ def _broker_capabilities(state: dict) -> dict:
     }
 
 
-# (profile, generation) -> KisClient. 호출마다 새 클라이언트를 만들면 매번
-# 토큰을 재발급하는데, KIS 는 토큰 발급을 1분당 1회로 제한한다 (실측).
-# generation 이 바뀌면 자격 증명이 바뀌었을 수 있으므로 새로 만든다.
-_KIS_CLIENT_CACHE: dict = {}
-
-
-def _get_kis_client(profile: str):
-    generation = _broker_load_state()["connection_generation"]
-    key = (profile, generation)
-    cached = _KIS_CLIENT_CACHE.get("client")
-    if cached is not None and cached[0] == key:
-        return cached[1]
-    store = _BrokerProfileStore()
-    creds = store.load_profile(profile)
-    if creds is None:
-        return None
-    client = _KisClient(
-        creds, profile,
-        generation_provider=lambda: _broker_load_state()[
-            "connection_generation"])
-    _KIS_CLIENT_CACHE["client"] = (key, client)
-    return client
-
-
-def _intraday_providers(market: str, profile: str | None) -> dict:
-    providers: dict = {
-        "yahoo": _YahooBarProvider(),
-        "naver": _NaverBarProvider(),
-    }
-    if profile:
-        client = _get_kis_client(profile)
-        if client is not None:
-            if market == "KR":
-                providers["kis"] = _KisDomesticProvider(client, profile)
-            else:
-                providers["kis"] = _KisOverseasProvider(client, profile)
-    return providers
+def _intraday_providers(market: str, profile: str | None = None) -> dict:
+    return _PROVIDER_RUNTIME.providers_for(market)
 
 
 def _previous_trading_day(market: str, day):
