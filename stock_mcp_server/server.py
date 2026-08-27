@@ -865,6 +865,32 @@ def _emit_coverage_counters(lens: str, meta: dict) -> None:
         pass
 
 
+def _classify_insider_tx(row: dict) -> str:
+    """Form 4 거래 한 건의 경제적 유형(SL-15).
+
+    실측(XOM): 무상 부여·증여가 제공자 요약의 Purchases 에 섞여, 실제 현금
+    매수 0건·매도 6건인 종목이 "내부자 대량 순매수"로 읽혔다. 대금이 실제로
+    오간 거래와 주식만 움직인 거래를 같은 이름으로 합치지 않는다.
+    """
+    action = ((row.get("transaction") or "") or (row.get("text") or "")).lower()
+    value = row.get("value")
+    has_cash = isinstance(value, (int, float)) and value > 0
+    if "gift" in action:
+        return "gift"
+    if "award" in action or "grant" in action:
+        return "grant"
+    if "tax" in action or "payment of exercise" in action:
+        return "tax_withholding"
+    if "exercise" in action or "conversion" in action:
+        return "exercise"
+    if "purchase" in action or "buy" in action:
+        # 대금 없는 "Purchase" 는 공개시장 매수가 아니다 - 부여·오기재일 수 있다.
+        return "open_market_buy" if has_cash else "unknown"
+    if "sale" in action or "sell" in action:
+        return "sale"
+    return "unknown"
+
+
 def _classify_us_security(q: dict) -> str:
     """스크리너 행의 증권 유형 판정(SL-12).
 
@@ -4890,9 +4916,89 @@ async def get_us_insider(ticker: str) -> str:
     lines = [f"**{data['ticker']}** 내부자 거래"]
 
     summary = data.get("purchases_last_6m") or {}
-    if summary:
+    tx = data.get("recent_transactions") or []
+
+    def _tx_action(row: dict) -> str:
+        a = (row.get("transaction") or "").strip()
+        if not a:
+            a = (row.get("text") or "").split(" at price")[0].strip() or "-"
+        return a
+
+    # ── 유형별 집계(SL-15 요구 1) ─────────────────────────────────────────
+    # 무상 부여·증여·옵션 행사·세금 원천징수는 주식만 움직인 것이지 시장에서
+    # 산 것이 아니다. 경제적 방향은 현금 거래로 판단해야 한다.
+    categories: dict[str, dict] = {}
+    for key in ("open_market_buy", "sale", "grant", "gift", "exercise",
+                "tax_withholding", "unknown"):
+        categories[key] = {"count": 0, "shares": 0, "value": 0.0}
+    for r in tx:
+        cat = _classify_insider_tx(r)
+        categories[cat]["count"] += 1
+        if isinstance(r.get("shares"), (int, float)):
+            categories[cat]["shares"] += int(r["shares"])
+        if isinstance(r.get("value"), (int, float)):
+            categories[cat]["value"] += float(r["value"])
+
+    # ── 기본 헤드라인 = 실제 현금 거래(요구 2) ───────────────────────────
+    if tx:
+        buys, sells = categories["open_market_buy"], categories["sale"]
         lines.append("")
-        lines.append("## 📊 최근 6개월 요약")
+        lines.append("## 💵 실제 현금 거래만 (부여·증여 제외) - 기본 판단 기준")
+        lines.append(f"- 공개시장 매수(Purchase): {buys['count']}건, ${buys['value']:,.0f}")
+        lines.append(f"- 매도(Sale): {sells['count']}건, ${sells['value']:,.0f}")
+        if not buys["count"]:
+            lines.append("- ⚠️ 대금이 실제로 지급된 **매수는 없습니다** - "
+                         "아래 제공자 요약의 순매수는 부여·증여입니다.")
+
+        lines.append("")
+        lines.append("## 📦 전체 주식 이동 (유형별 - 현금 거래와 별개)")
+        lines.append("유형 | 건수 | 주식수 | 금액($)")
+        lines.append("---|---:|---:|---:")
+        for key, label in (("open_market_buy", "공개시장 매수"), ("sale", "매도"),
+                           ("grant", "무상 부여(grant)"), ("gift", "증여(gift)"),
+                           ("exercise", "옵션 행사(exercise)"),
+                           ("tax_withholding", "세금 원천징수(tax_withholding)"),
+                           ("unknown", "unknown")):
+            c = categories[key]
+            if not c["count"]:
+                continue
+            lines.append(f"{label} | {c['count']} | {c['shares']:,} | {c['value']:,.0f}")
+        if categories["unknown"]["count"]:
+            lines.append(
+                f"※ unknown {categories['unknown']['count']}건은 원문에 유형·대금이 "
+                "비어 있는 이동입니다. 무상 부여 등일 수 있으나 이 데이터로는 확인 "
+                "불가라 매수로도 부여로도 세지 않습니다."
+            )
+
+    # ── 제공자 요약 - 부호 검산(요구 3) ──────────────────────────────────
+    summary_valid = True
+    summary_warns: list[str] = []
+    if summary:
+        net_shares = None
+        net_pct = None
+        for label, vals in summary.items():
+            norm = str(label).strip().lower()
+            v = vals.get("shares")
+            if not isinstance(v, (int, float)):
+                continue
+            if norm.startswith("%") and "net" in norm:
+                net_pct = float(v)
+            elif "net" in norm and "shares" in norm:
+                net_shares = float(v)
+        if net_shares is not None and net_pct is not None and net_shares * net_pct < 0:
+            summary_valid = False
+            summary_warns.append(
+                f"제공자 요약 자체 모순: 순주식수 {net_shares:+,.0f}주인데 "
+                f"순비율은 {net_pct:+.3f}% 로 부호가 다릅니다. 이 요약의 순매수 "
+                "방향은 신뢰할 수 없습니다(invalid). 무상 부여가 매수로 섞인 "
+                "집계일 가능성이 높으니 위의 현금 거래를 기준으로 읽으세요."
+            )
+
+        lines.append("")
+        lines.append("## 📊 제공자 요약 (부여·증여 포함 - 참고용)"
+                     + (" ⚠️ invalid" if not summary_valid else ""))
+        if not summary_valid:
+            lines.append("⚠️ " + summary_warns[0])
         for label, vals in summary.items():
             shares = vals.get("shares")
             trans = vals.get("trans")
@@ -4906,35 +5012,6 @@ async def get_us_insider(ticker: str) -> str:
                 sh_str = "-"
             tr_str = f" ({int(trans)}건)" if isinstance(trans, (int, float)) else ""
             lines.append(f"- {label}: {sh_str}{tr_str}")
-
-    tx = data.get("recent_transactions") or []
-
-    def _tx_action(row: dict) -> str:
-        a = (row.get("transaction") or "").strip()
-        if not a:
-            a = (row.get("text") or "").split(" at price")[0].strip() or "-"
-        return a
-
-    # 위 요약의 "Net Shares Purchased"에는 무상 부여(Stock Award/Grant)와 증여(Gift)가
-    # 섞여 있다. 그대로 읽으면 대금 $0짜리 부여를 매수로 세게 되고, 실제로는 임원이
-    # 팔고 있는 종목이 "내부자 대량 순매수"로 뒤집혀 보인다. 자기 돈으로 산 것만
-    # 따로 세어 준다.
-    if tx:
-        buys = [r for r in tx
-                if "purchase" in _tx_action(r).lower()
-                and isinstance(r.get("value"), (int, float)) and r["value"] > 0]
-        sells = [r for r in tx
-                 if "sale" in _tx_action(r).lower()
-                 and isinstance(r.get("value"), (int, float)) and r["value"] > 0]
-        buy_val = sum(r["value"] for r in buys)
-        sell_val = sum(r["value"] for r in sells)
-        lines.append("")
-        lines.append("## 💵 실제 현금 거래만 (부여·증여 제외)")
-        lines.append(f"- 공개시장 매수(Purchase): {len(buys)}건, ${buy_val:,.0f}")
-        lines.append(f"- 매도(Sale): {len(sells)}건, ${sell_val:,.0f}")
-        if not buys:
-            lines.append("- ⚠️ 대금이 실제로 지급된 **매수는 없습니다** — 위 요약의 순매수는 부여·증여입니다.")
-        lines.append("- ※ 위 '최근 6개월 요약'은 무상 부여(Grant)·증여(Gift)를 포함한 수치입니다.")
 
     if tx:
         lines.append("")
@@ -4974,7 +5051,29 @@ async def get_us_insider(ticker: str) -> str:
             recent = str(r.get("latest_transaction_date", ""))[:10]
             lines.append(f"{name} | {pos} | {held_s} | {recent}")
 
-    return _append_result_meta("\n".join(lines), _us_meta(kind="filing", ticker=ticker))
+    tx_dates = sorted(str(r.get("start_date", ""))[:10] for r in tx
+                      if str(r.get("start_date", ""))[:10])
+    latest_tx = tx_dates[-1] if tx_dates else None
+    insider_coverage = {
+        "provider_window": "6m",
+        "transactions_listed": len(tx),
+        "latest_transaction_date": latest_tx,
+        "categories": categories,
+        "provider_summary_valid": summary_valid,
+    }
+    return _append_result_meta(
+        "\n".join(lines),
+        _us_meta(
+            kind="filing", ticker=ticker,
+            data_as_of=latest_tx,
+            data_completeness=rmeta.COMPLETE if summary_valid else rmeta.PARTIAL,
+            coverage=(None if summary_valid else
+                      {"truncated": False, "coverage_complete": False,
+                       "reason": "unknown"}),
+            extra={"insider_coverage": insider_coverage},
+            warnings=summary_warns or None,
+        ),
+    )
 
 
 @mcp.tool()
