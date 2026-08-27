@@ -8034,7 +8034,12 @@ def _broker_day_cache_key(provider: str, profile: str, market: str,
 
 
 def _load_cached_broker_day(cache, key: dict):
-    """완전(complete) entry 만 봉으로 복원한다. 손상 시 None."""
+    """완전(complete) entry 만 봉으로 복원한다. 손상 시 None.
+
+    봉 날짜가 키의 trading_date 와 다르면 오염된 entry 다 - 복원을
+    거부한다 (2026-08-27 실측: 테스트 오염 캐시가 실서비스 조회에
+    가짜 하루로 잡혔다).
+    """
     try:
         entry = cache.get(key, connected=True)
     except Exception:  # noqa: BLE001
@@ -8046,6 +8051,10 @@ def _load_cached_broker_day(cache, key: dict):
         bars = tuple(_bar_from_dict(r) for r in payload.get("bars", []))
     except Exception:  # noqa: BLE001
         return None
+    expected = str(key.get("trading_date") or "")
+    for bar in bars:
+        if bar.start_at.strftime("%Y%m%d") != expected:
+            return None
     return bars or None
 
 
