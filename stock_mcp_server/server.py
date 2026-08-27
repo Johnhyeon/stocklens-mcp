@@ -865,6 +865,54 @@ def _emit_coverage_counters(lens: str, meta: dict) -> None:
         pass
 
 
+_NEWS_COMPARISON_RE = re.compile(
+    r"\b(vs\.?|versus|better buy|compared to|comparison)\b", re.I)
+_NEWS_SUPPLY_RE = re.compile(
+    r"\b(supplier|supply chain|customer of|partner of|contract manufacturer)\b", re.I)
+_NEWS_LIST_RE = re.compile(
+    r"\b(etf|index fund|\d+\s+(best|top)\b|(best|top)\s+\d+|stocks to (buy|watch)|"
+    r"our list|watchlist)\b", re.I)
+
+
+def _classify_news_relevance(item: dict, names: tuple[str, ...]) -> dict:
+    """기사에서 요청 종목의 역할을 평가한다(SL-10).
+
+    실측(AAPL 피드): InterDigital·NVDA·Sandisk 가 중심인 기사가 그대로 섞여
+    온다. yfinance 새 포맷에는 relatedTickers 도 없어 제목·요약 텍스트로
+    판정한다. 점수는 확률이 아니라 "제목에 있나 / 요약에만 있나 / 없나"의
+    순서 척도이고, 근거(basis)를 항상 같이 돌려준다.
+    """
+    title = (item.get("title") or "")
+    summary = (item.get("summary") or "")
+    hay_title = title.lower()
+    hay_sum = summary.lower()
+    keys = [n.lower() for n in names if n]
+
+    in_title = any(k in hay_title for k in keys)
+    in_summary = any(k in hay_sum for k in keys)
+
+    if not in_title and not in_summary:
+        return {"category": "unrelated", "relevance_score": 10,
+                "basis": "제목·요약 어디에도 종목명이 없음"}
+
+    combined = f"{hay_title} {hay_sum}"
+    if _NEWS_COMPARISON_RE.search(hay_title) or (
+            in_title and _NEWS_COMPARISON_RE.search(combined)):
+        return {"category": "comparison", "relevance_score": 55,
+                "basis": "비교 기사 - 이 종목이 단독 주제가 아님"}
+    if _NEWS_SUPPLY_RE.search(combined) and in_title:
+        return {"category": "supply_chain", "relevance_score": 50,
+                "basis": "공급망 문맥 - 주체는 거래 상대일 수 있음"}
+    if _NEWS_LIST_RE.search(combined):
+        return {"category": "list_or_etf", "relevance_score": 40,
+                "basis": "종목 나열·ETF 문맥 - 개별 재료가 아님"}
+    if in_title:
+        return {"category": "direct", "relevance_score": 90,
+                "basis": "제목에 종목명 - 기사 주제"}
+    return {"category": "mention", "relevance_score": 35,
+            "basis": "요약에만 언급 - 주변 문맥"}
+
+
 def _classify_insider_tx(row: dict) -> str:
     """Form 4 거래 한 건의 경제적 유형(SL-15).
 
@@ -5558,20 +5606,62 @@ async def get_us_filing_detail(
 @mcp.tool()
 @safe_us_tool
 @track_metrics("get_us_news")
-async def get_us_news(ticker: str, limit: int = 10) -> str:
-    """US stock news — 미국 주식 관련 뉴스 헤드라인 (US stock news feed).
+async def get_us_news(ticker: str, limit: int = 10, direct_only: bool = False) -> str:
+    """US stock news — 미국 주식 관련 뉴스 헤드라인 (관련도 판정 포함).
     "AAPL 뉴스", "Tesla news", "NVDA headlines" 같은 질문에 사용합니다.
+
+    Yahoo 피드에는 다른 종목이 중심인 기사가 섞여 옵니다(실측: AAPL 피드에
+    InterDigital·NVDA 단독 기사). 기사마다 관련도(direct/comparison/
+    supply_chain/list_or_etf/mention/unrelated)와 근거가 붙습니다.
+    이 종목이 주제인 기사만 원하면 direct_only=True.
 
     Args:
         ticker: US 티커
         limit: 헤드라인 개수 (기본 10)
+        direct_only: True 면 이 종목이 주제(direct)인 기사만 남깁니다
     """
     data = await us.get_news(ticker, limit=limit)
     if data is None or not data.get("news"):
         return f"티커 '{ticker}'의 뉴스를 가져올 수 없습니다."
 
-    lines = [f"**{data['ticker'].upper()}** 최근 뉴스", ""]
+    # 회사명이 있어야 "Apple" 로 쓴 기사도 잡는다. 실패해도 티커로는 판정한다.
+    names: list[str] = [ticker.upper()]
+    matched_by = "ticker"
+    try:
+        info = await us.get_info_raw(ticker)
+        for key in ("shortName", "longName"):
+            nm = (info or {}).get(key) or ""
+            # "Apple Inc." -> "Apple" (법인 접미사 제거)
+            base = re.sub(
+                r"[,.]?\s*(inc|corp|corporation|co|ltd|plc|sa|nv|ag|group|"
+                r"holdings?|company)\.?$",
+                "", nm.strip(), flags=re.I).strip()
+            if base and base.upper() not in {n.upper() for n in names}:
+                names.append(base)
+                matched_by = "name+ticker"
+    except Exception:
+        pass
+
+    from collections import Counter as _Counter
+    judged = []
     for n in data["news"]:
+        rel = _classify_news_relevance(n, tuple(names))
+        judged.append((n, rel))
+    counts = dict(_Counter(rel["category"] for _, rel in judged))
+
+    excluded_counts: dict = {}
+    if direct_only:
+        kept = [(n, rel) for n, rel in judged if rel["category"] == "direct"]
+        excluded_counts = dict(_Counter(
+            rel["category"] for _, rel in judged if rel["category"] != "direct"))
+        judged = kept
+
+    lines = [f"**{data['ticker'].upper()}** 최근 뉴스", ""]
+    if excluded_counts:
+        parts = ", ".join(f"{k} {v}건" for k, v in sorted(excluded_counts.items()))
+        lines.append(f"⚠️ direct_only=True - 이 종목이 주제가 아닌 {sum(excluded_counts.values())}건 제외: {parts}")
+        lines.append("")
+    for n, rel in judged:
         title = n.get("title") or "-"
         pub = (n.get("published") or "")[:16].replace("T", " ")
         provider = n.get("provider") or "-"
@@ -5580,14 +5670,33 @@ async def get_us_news(ticker: str, limit: int = 10) -> str:
         # HTML 태그 간단 제거
         summary = re.sub(r"<[^>]+>", "", summary)[:200]
         lines.append(f"### {title}")
-        lines.append(f"_{pub} · {provider}_")
+        lines.append(f"_{pub} · {provider}_ · 관련도 **{rel['category']}** "
+                     f"({rel['relevance_score']}) - {rel['basis']}")
         if summary:
             lines.append(summary)
         if url:
             lines.append(f"[링크]({url})")
         lines.append("")
+    if direct_only and not judged:
+        lines.append("(이 종목이 주제인 기사가 없습니다 - 기사가 없다는 뜻이 아니라 "
+                     "이 피드에 직접 기사가 없다는 뜻입니다)")
+        lines.append("")
+    lines.append("※ 관련도는 제목·요약 텍스트 기준의 순서 척도입니다. "
+                 "unrelated 기사를 이 종목의 재료로 읽지 마세요.")
 
-    return "\n".join(lines)
+    return _append_result_meta(
+        "\n".join(lines),
+        _us_meta(
+            kind="snapshot", ticker=ticker,
+            extra={"news_relevance": {
+                "matched_by": matched_by,
+                "names_used": names,
+                "categories": counts,
+                **({"direct_only": True, "excluded": excluded_counts}
+                   if direct_only else {}),
+            }},
+        ),
+    )
 
 
 # ---------------------------------------------------------------------------
