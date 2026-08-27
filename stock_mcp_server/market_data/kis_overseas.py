@@ -113,6 +113,12 @@ class KisOverseasProvider:
                 f"kis_overseas가 지원하지 않는 interval: {request.interval}")
         if request.market != "US":
             raise ValueError(f"kis_overseas는 US 전용입니다: {request.market}")
+        if request.session != "regular":
+            # pre·after·daytime 은 세션 경계·집계가 검증되기 전까지 거부한다.
+            # 라벨만 daytime 이고 내용은 regular 인 혼선을 만들지 않는다.
+            raise ValueError(
+                f"검증되지 않은 session: {request.session} "
+                "(현재 regular 만 지원)")
 
         exchange, kis_symbol = resolve_us_symbol(
             request.symbol, request.venue, session=request.session)
@@ -121,11 +127,20 @@ class KisOverseasProvider:
         warnings: list[str] = []
         dropped = 0
         out_of_session = 0
+        after_date = 0
         pages = 0
         complete = True
         failure_status: str | None = None
         resume_keyb: str | None = None
-        keyb = ""
+        # 요청 거래일이 있으면 첫 KEYB 를 그 다음날 00:00 으로 고정한다.
+        # 빈 KEYB(최신부터)로 시작하면 과거 날짜 요청이 무시된다(리뷰 지적).
+        if request.trading_date is not None:
+            anchor = datetime.combine(
+                request.trading_date + timedelta(days=1),
+                time(0, 0))
+            keyb = anchor.strftime("%Y%m%d%H%M%S")
+        else:
+            keyb = ""
         prev_earliest: datetime | None = None
 
         while pages < self._max_pages:
@@ -182,6 +197,12 @@ class KisOverseasProvider:
                     dropped += 1
                     continue
                 parsed_all.append(bar)
+                # 방어: 앵커가 무시돼 요청일보다 뒤의 행이 와도 채택하지
+                # 않는다. 기준일 이전 이력은 허용(지표용 다일 조회).
+                if request.trading_date is not None and \
+                        bar.start_at.date() > request.trading_date:
+                    after_date += 1
+                    continue
                 if request.session == "regular":
                     local = bar.start_at.time()
                     # 마감 정각(16:00) 체결은 공식 종가라 포함한다.
@@ -228,6 +249,9 @@ class KisOverseasProvider:
         if out_of_session:
             warnings.append(
                 f"정규장 세션 밖 행 {out_of_session}개를 제외했습니다.")
+        if after_date:
+            warnings.append(
+                f"기준일 이후 행 {after_date}개를 제외했습니다.")
 
         ordered, dedupe_warnings = sort_and_dedupe(bars)
         warnings.extend(dedupe_warnings)

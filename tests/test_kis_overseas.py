@@ -113,7 +113,7 @@ class SymbolResolverTests(unittest.TestCase):
 class FetchTests(unittest.TestCase):
     def test_two_pages_normalized_with_dst_timezone(self):
         handler = Handler({
-            "": PAGE_1,
+            "20260827000000": PAGE_1,
             # 다음 KEYB = 최소시각(093300) - 1분
             "20260826093200": PAGE_2,
         })
@@ -138,14 +138,14 @@ class FetchTests(unittest.TestCase):
         page = copy.deepcopy(PAGE_1)
         for row in page["output2"]:
             row["xymd"] = "20261215"
-        handler = Handler({"": page})
+        handler = Handler({"20261216000000": page})
         ds = _run(_provider(handler).fetch_bars(
             _request(trading_date=date(2026, 12, 15))))
         self.assertEqual(
             ds.bars[0].start_at.utcoffset().total_seconds(), -5 * 3600)
 
     def test_request_params_max_120_rows_and_nmin(self):
-        handler = Handler({"": PAGE_1})
+        handler = Handler({"20260827000000": PAGE_1})
         _run(_provider(handler).fetch_bars(_request()))
         params = handler.calls[0]
         self.assertEqual(params["NREC"], "120")
@@ -154,7 +154,7 @@ class FetchTests(unittest.TestCase):
         self.assertEqual(params["SYMB"], "AAPL")
 
     def test_native_nmin_interval(self):
-        handler = Handler({"": PAGE_1})
+        handler = Handler({"20260827000000": PAGE_1})
         ds = _run(_provider(handler).fetch_bars(_request(interval="5m")))
         self.assertEqual(handler.calls[0]["NMIN"], "5")
         self.assertEqual(ds.source_interval, "5m")
@@ -167,7 +167,7 @@ class FetchTests(unittest.TestCase):
             "open": "1", "high": "1", "low": "1", "last": "1",
             "evol": "10", "eamt": "10",
         })
-        handler = Handler({"": page})
+        handler = Handler({"20260827000000": page})
         ds = _run(_provider(handler).fetch_bars(_request()))
         self.assertTrue(all(
             b.start_at.time() >= datetime(2000, 1, 1, 9, 30).time()
@@ -182,7 +182,7 @@ class FetchTests(unittest.TestCase):
         for i, row in enumerate(after_hours_page["output2"]):
             row["xhms"] = f"18{35 - i:02d}00"  # 18:35, 18:34, 18:33
         handler = Handler({
-            "": after_hours_page,
+            "20260827000000": after_hours_page,
             # 다음 KEYB = 18:33 - 1분
             "20260826183200": PAGE_1,  # 정규장 행 페이지
         })
@@ -192,12 +192,54 @@ class FetchTests(unittest.TestCase):
 
     def test_no_progress_keyb_stops(self):
         handler = Handler({
-            "": PAGE_1,
+            "20260827000000": PAGE_1,
             "20260826093200": PAGE_1,  # 같은 페이지 반복
         })
         ds = _run(_provider(handler).fetch_bars(_request()))
         self.assertLessEqual(len(handler.calls), 3)
         self.assertTrue(any("진행" in w for w in ds.warnings))
+
+    def test_trading_date_anchors_initial_keyb(self):
+        # 리뷰 지적(결함 1): 과거 날짜를 요청해도 최신 데이터가 반환됐다.
+        # 첫 KEYB 를 요청일 다음날 00:00 으로 고정해 그 이전을 조회한다.
+        handler = Handler({"20260827000000": PAGE_1})
+        ds = _run(_provider(handler).fetch_bars(
+            _request(trading_date=date(2026, 8, 26))))
+        self.assertEqual(handler.calls[0]["KEYB"], "20260827000000")
+        self.assertEqual(handler.calls[0]["NEXT"], "1")
+        self.assertEqual(len(ds.bars), 3)
+
+    def test_rows_after_trading_date_filtered(self):
+        # 방어: 앵커가 무시돼 요청일보다 뒤의 행이 와도 채택하지 않는다.
+        page = copy.deepcopy(PAGE_1)
+        page["output2"].insert(0, {
+            "xymd": "20260827", "xhms": "100000",
+            "kymd": "20260827", "khms": "230000",
+            "open": "1", "high": "1", "low": "1", "last": "1",
+            "evol": "10", "eamt": "10",
+        })
+        handler = Handler({"20260827000000": page})
+        ds = _run(_provider(handler).fetch_bars(
+            _request(trading_date=date(2026, 8, 26))))
+        dates = {b.start_at.date().isoformat() for b in ds.bars}
+        self.assertEqual(dates, {"2026-08-26"})
+
+    def test_out_of_range_past_date_returns_empty(self):
+        # KIS 가 그 시점 데이터를 안 주면 빈 결과다. 최신으로 메우지 않는다.
+        handler = Handler({})  # 모든 KEYB 에 빈 응답
+        ds = _run(_provider(handler).fetch_bars(
+            _request(trading_date=date(2020, 1, 2))))
+        self.assertEqual(ds.bars, ())
+
+    def test_unverified_session_rejected_by_provider(self):
+        # 세션 능력이 검증되기 전에는 provider 차원에서도 거부한다.
+        # 예전엔 daytime 요청이 regular 라벨의 봉을 담아 반환됐다(혼선).
+        handler = Handler({"": PAGE_1})
+        with self.assertRaisesRegex(ValueError, "session"):
+            _run(_provider(handler).fetch_bars(
+                _request(session="daytime", venue="BAQ")))
+        with self.assertRaisesRegex(ValueError, "session"):
+            _run(_provider(handler).fetch_bars(_request(session="pre")))
 
     def test_unresolved_exchange_raises_mapping_error(self):
         handler = Handler({"": PAGE_1})

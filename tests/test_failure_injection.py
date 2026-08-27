@@ -124,6 +124,46 @@ class KeychainUnavailableTests(unittest.TestCase):
         self.assertEqual(connections["kis"]["status"], "unknown")
 
 
+class StateSaveFailureTests(unittest.TestCase):
+    """리뷰 지적(결함 4): keyring 에 새 키를 쓴 뒤 상태 파일 저장이
+    실패하면 새 키가 남았다 - "실패하면 기존 프로필 유지" 약속 위반.
+    상태 저장 실패 시 keyring 을 원복해야 한다."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.home = Path(self._tmp.name)
+        self.keyring = FakeKeyring()
+        self.store = BrokerProfileStore(
+            provider="kis", keyring_module=self.keyring, home=self.home)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def _fail_state_save(self):
+        from unittest.mock import patch
+        from stock_mcp_server.market_data import broker_profiles
+        return patch.object(
+            broker_profiles, "save_state",
+            side_effect=PermissionError("state file locked"))
+
+    def test_existing_key_restored_when_state_save_fails(self):
+        self.store.save_profile("real", BrokerCredentials(
+            app_key="old-key", app_secret="old-secret"))
+        with self._fail_state_save():
+            with self.assertRaises(PermissionError):
+                self.store.save_profile("real", BrokerCredentials(
+                    app_key="new-key", app_secret="new-secret"))
+        restored = self.store.load_profile("real")
+        self.assertEqual(restored.app_key, "old-key")
+
+    def test_first_save_rolls_back_to_empty_when_state_save_fails(self):
+        with self._fail_state_save():
+            with self.assertRaises(PermissionError):
+                self.store.save_profile("real", BrokerCredentials(
+                    app_key="new-key", app_secret="new-secret"))
+        self.assertIsNone(self.store.load_profile("real"))
+
+
 class NetworkFailureTests(unittest.TestCase):
     def _client(self, exc):
         def handler(request: httpx.Request) -> httpx.Response:

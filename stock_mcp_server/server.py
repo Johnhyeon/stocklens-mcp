@@ -7744,10 +7744,15 @@ def _intraday_error_result(symbol: str, market: str, message: str,
 
 
 def _validate_intraday_args(market: str, interval: str, source: str,
-                            date_str) -> tuple[str | None, object]:
+                            date_str, session: str = "regular",
+                            ) -> tuple[str | None, object]:
     """(오류 메시지, trading_date) 를 돌려준다."""
     if market not in ("KR", "US"):
         return ("market은 KR 또는 US여야 합니다.", None)
+    if session != "regular":
+        # 시간외·주간거래는 세션 경계와 집계가 검증된 뒤에 연다 (설계 14절).
+        return (f"지원하지 않는 session입니다: {session} "
+                "(현재 regular만 지원, 검증 후 확대 예정)", None)
     if interval not in _INTRADAY_INTERVALS:
         return (f"지원하지 않는 interval입니다: {interval} "
                 f"(지원: {', '.join(_INTRADAY_INTERVALS)})", None)
@@ -7801,7 +7806,8 @@ async def get_intraday_chart(
         completed_only: 완성 봉만 반환 (기본 True)
         source: auto|kis|naver|yahoo. kis 는 strict(대체 없음)
     """
-    err, trading_date = _validate_intraday_args(market, interval, source, date)
+    err, trading_date = _validate_intraday_args(
+        market, interval, source, date, session)
     if err:
         return err
     row_limit = max(1, min(row_limit, 500))
@@ -7912,7 +7918,7 @@ async def get_intraday_indicators(
         params: 지표 파라미터 오버라이드
     """
     err, trading_date = _validate_intraday_args(market, interval, source,
-                                                None)
+                                                None, session)
     if err:
         return err
     if include is None:

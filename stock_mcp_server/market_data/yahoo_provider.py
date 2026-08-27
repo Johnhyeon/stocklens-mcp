@@ -94,6 +94,7 @@ class YahooBarProvider:
         warnings: list[str] = []
         dropped_unparsable = 0
         dropped_missing_volume = 0
+        dropped_after_date = 0
         for row in rows:
             raw_ts = row.get("datetime") if intraday_minutes else row.get("date")
             if raw_ts is None:
@@ -143,7 +144,22 @@ class YahooBarProvider:
             except (KeyError, TypeError, ValueError, InvalidOperation):
                 dropped_unparsable += 1
                 continue
+            # 리뷰 지적(결함 1): 요청 기준일 이후의 행을 반환하면 date
+            # 인자가 거짓말이 된다. 기준일 이후는 잘라낸다 (이전 이력 허용).
+            if request.trading_date is not None and \
+                    bar.start_at.date() > request.trading_date:
+                dropped_after_date += 1
+                continue
             bars.append(bar)
+
+        if request.trading_date is not None and rows and not any(
+                b.start_at.date() == request.trading_date for b in bars):
+            # 기준일 데이터 자체가 공급 범위 밖이다 (Yahoo 1m 은 최근
+            # 며칠만). 다른 날짜로 메우지 않고 빈 결과를 돌려준다.
+            bars = []
+            warnings.append(
+                f"기준일 {request.trading_date.isoformat()} 데이터가 "
+                "Yahoo 제공 범위 밖입니다.")
 
         if dropped_unparsable:
             warnings.append(

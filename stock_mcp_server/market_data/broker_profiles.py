@@ -125,8 +125,14 @@ class BrokerProfileStore:
     # --- 변경 ---
 
     def save_profile(self, profile: str, credentials: BrokerCredentials) -> None:
-        """keyring 저장이 성공했을 때만 상태 파일과 generation 을 갱신한다."""
+        """keyring 저장과 상태 파일 갱신을 한 덩어리로 다룬다.
+
+        상태 파일 저장이 실패하면 keyring 을 원복한다 - 안 그러면 새 키가
+        남은 채 오류가 보고되어 "실패하면 기존 프로필 유지" 약속이 깨진다
+        (리뷰 지적, 2026-08-27).
+        """
         self._check_profile(profile)
+        previous = self._get_raw(profile)
         payload = json.dumps({
             "app_key": credentials.app_key,
             "app_secret": credentials.app_secret,
@@ -134,10 +140,23 @@ class BrokerProfileStore:
         self._keyring.set_password(
             self._service(), self._username(profile), payload)
 
-        state = load_state(self._home)
-        state["active_provider"] = self.provider
-        state["active_profile"] = profile
-        save_state(bump_generation(state), self._home)
+        try:
+            state = load_state(self._home)
+            state["active_provider"] = self.provider
+            state["active_profile"] = profile
+            save_state(bump_generation(state), self._home)
+        except BaseException:
+            # keyring 원복. 원복마저 실패하면 원래 오류를 우선 보고한다.
+            try:
+                if previous is None:
+                    self._keyring.delete_password(
+                        self._service(), self._username(profile))
+                else:
+                    self._keyring.set_password(
+                        self._service(), self._username(profile), previous)
+            except Exception:  # noqa: BLE001
+                pass
+            raise
 
     def switch_profile(self, profile: str) -> None:
         self._check_profile(profile)

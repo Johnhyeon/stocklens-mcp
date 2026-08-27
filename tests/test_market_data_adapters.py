@@ -200,6 +200,35 @@ class YahooAdapterTests(unittest.IsolatedAsyncioTestCase):
             await YahooBarProvider().fetch_bars(_us_request(interval="5m"))
         self.assertEqual(rows, snapshot)
 
+    async def test_rows_after_trading_date_filtered(self) -> None:
+        # 리뷰 지적(결함 1): 요청일 이후의 행을 반환하면 date 인자가
+        # 거짓말이 된다. 기준일 이후 행은 잘라낸다 (이전 이력은 허용).
+        rows = copy.deepcopy(_YAHOO_INTRADAY_ROWS)
+        rows.append({
+            "datetime": datetime(2026, 8, 27, 9, 30, tzinfo=NY),
+            "open": 1.0, "high": 1.0, "low": 1.0, "close": 1.0,
+            "volume": 10.0,
+        })
+        with patch("stock_mcp_server.market_data.yahoo_provider.get_history",
+                   AsyncMock(return_value=rows)):
+            ds = await YahooBarProvider().fetch_bars(
+                _us_request(interval="5m",
+                            trading_date=date(2026, 8, 26)))
+        dates = {b.start_at.date().isoformat() for b in ds.bars}
+        self.assertEqual(dates, {"2026-08-26"})
+
+    async def test_past_date_outside_coverage_returns_empty(self) -> None:
+        # Yahoo 1m 은 최근 며칠만 준다. 2020년을 요청하면 최신 데이터로
+        # 메우지 말고 빈 결과를 돌려준다.
+        rows = copy.deepcopy(_YAHOO_INTRADAY_ROWS)
+        with patch("stock_mcp_server.market_data.yahoo_provider.get_history",
+                   AsyncMock(return_value=rows)):
+            ds = await YahooBarProvider().fetch_bars(
+                _us_request(interval="5m",
+                            trading_date=date(2020, 1, 2)))
+        self.assertEqual(ds.bars, ())
+        self.assertTrue(any("기준일" in w for w in ds.warnings))
+
     async def test_missing_volume_row_dropped_with_warning(self) -> None:
         rows = copy.deepcopy(_YAHOO_INTRADAY_ROWS)
         rows[0]["volume"] = None

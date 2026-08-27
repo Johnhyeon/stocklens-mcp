@@ -138,6 +138,19 @@ class IntradayChartTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("날짜", await server.get_intraday_chart(
                 symbol="005930", date="26-08-27"))
 
+    async def test_unverified_sessions_rejected(self):
+        # 리뷰 지적(결함 2): 미검증 세션은 데이터를 섞어 반환하지 말고
+        # 도구 입구에서 거부한다. 검증 후에만 연다.
+        with patch.object(server, "build_market_clock",
+                          return_value=_OPEN_CLOCK):
+            for bad in ("pre", "after", "daytime"):
+                text = await server.get_intraday_chart(
+                    symbol="AAPL", market="US", session=bad, venue="NAS")
+                self.assertIn("session", text)
+                text2 = await server.get_intraday_indicators(
+                    symbol="AAPL", market="US", session=bad, venue="NAS")
+                self.assertIn("session", text2)
+
     async def test_all_intervals_accepted(self):
         bars = _minute_bars(
             datetime(2026, 8, 27, 9, 0, tzinfo=KST), 2, minutes=1)

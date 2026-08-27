@@ -102,6 +102,10 @@ class KisDomesticProvider:
                 f"{request.interval}")
         if request.market != "KR":
             raise ValueError(f"kis_domestic은 KR 전용입니다: {request.market}")
+        if request.session != "regular":
+            raise ValueError(
+                f"검증되지 않은 session: {request.session} "
+                "(현재 regular 만 지원)")
         if request.trading_date is None:
             raise ValueError("trading_date가 필요합니다")
 
