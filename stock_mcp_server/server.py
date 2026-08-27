@@ -865,6 +865,11 @@ def _emit_coverage_counters(lens: str, meta: dict) -> None:
         pass
 
 
+# 업종 밸류에이션에서 한 번에 재무를 긁을 최대 종목 수. KRX 업종은 대부분
+# 이 안에 들어온다(최대 반도체 172개). 넘으면 표본 집계임을 명시한다(SL-11).
+_SECTOR_AGG_CAP = 300
+
+
 def _period_coverage_of(periods_by_entity: dict[str, str]) -> dict:
     """종목별 최신 기간에서 uniform/mixed/unknown 을 판정한다.
 
@@ -2088,10 +2093,12 @@ async def get_sector_valuation(
     통계는 **중앙값이 기준**입니다. 평균은 적자 기업과 극단값(PER 500배 등)에
     쉽게 흔들려 업종 대표값으로 쓰기 어렵습니다.
 
+    **집계는 항상 업종 전체**로 하고, top_n 은 아래 위치 표에 몇 종목을
+    보여줄지만 정합니다 - top_n 을 바꿔도 중앙값은 변하지 않습니다.
+    (업종이 집계 상한을 넘으면 전체 중앙값 대신 **표본 중앙값(sample_median)**
+    으로 이름을 낮춰 표기합니다.)
+
     ⚠️ 적자 기업의 PER은 음수로 나오며 **집계에서 제외**합니다(제외 건수를 함께 표기).
-    ⚠️ 종목 목록은 등락률 순으로 받아오므로, top_n 으로 자르면 그날 많이 오른
-    종목 쪽으로 치우칩니다. 업종 전체를 보려면 `list_sectors`로 종목 수를 확인하고
-    top_n 을 그 이상으로 주세요.
 
     ⭐ **종목코드만 넘겨도 됩니다** — `code="005930"` 이면 그 종목의 업종을 찾아
     집계한 뒤, 그 종목이 업종 안에서 어디에 있는지 표시합니다.
@@ -2100,7 +2107,7 @@ async def get_sector_valuation(
     Args:
         sector_name: 업종명 또는 테마명 (예: "반도체와반도체장비", "건설").
             code 를 주면 생략할 수 있습니다.
-        top_n: 집계에 쓸 최대 종목 수 (기본 40, 최대 80). 클수록 느립니다.
+        top_n: 위치 표에 **표시할** 종목 수 (기본 40, 최대 80). 집계 분모가 아닙니다.
         kind: "sector"(업종, 기본) / "theme"(테마)
         code: 6자리 종목코드. 주면 업종을 자동 판정합니다.
     """
@@ -2143,12 +2150,13 @@ async def get_sector_valuation(
 
     all_codes = [r.get("code") for r in rows if isinstance(r, dict) and r.get("code")]
     universe = len(all_codes)
-    full_scan = universe <= top_n
-    codes = all_codes if full_scan else all_codes[:top_n]
-    # 목록이 등락률 순이라, 기준 종목이 상위 top_n 밖으로 밀려 표에서 사라질 수 있다.
-    # (실제로 "조선" 상위 8개에 한화오션이 없었다.) 기준 종목은 반드시 포함시킨다.
+    # 집계는 업종 전체가 기본이다(SL-11). 등락률 상위 top_n 으로 분모를 자르면
+    # 그날 오른 종목 쪽으로 치우친 값이 "업종 중앙값"으로 나간다(실측: 반도체
+    # 172개 중 40개만 집계). top_n 은 표시 전용이다.
+    codes = all_codes[:_SECTOR_AGG_CAP]
+    full_scan = universe <= len(codes)
     if focus_code and focus_code not in codes:
-        codes = [focus_code] + codes[: max(0, top_n - 1)]
+        codes = [focus_code] + codes[: _SECTOR_AGG_CAP - 1]
     if not codes:
         return f"'{sector_name}'에서 종목코드를 얻지 못했습니다."
 
@@ -2188,15 +2196,17 @@ async def get_sector_valuation(
     if focus_code:
         focus_name = next((s.get("name") for s in snap if s.get("code") == focus_code), focus_code)
     lines = [f"## {sector_name} 밸류에이션 집계", ""]
+    median_label = "중앙값" if full_scan else "표본 중앙값(sample_median)"
     if focus_code:
         lines.append(f"- 기준 종목: **{focus_name}({focus_code})** → 업종 `{sector_name}`")
     if full_scan:
-        lines.append(f"- 대상 종목: **업종 전체 {len(snap)}개** — 편향 없음")
+        lines.append(f"- 집계 대상: **업종 전체 {len(snap)}개** — 표본 편향 없음"
+                     f" (표시는 시총 상위 {top_n}개까지)")
     else:
         lines.append(
-            f"- 대상 종목: {len(snap)}개 / 업종 전체 **{universe}개** "
-            f"→ ⚠️ **등락률 상위만** 집계 (그날 오른 쪽으로 치우침). "
-            f"전체를 보려면 top_n={min(universe, 80)} 로 다시 부르세요."
+            f"- 집계 대상: {len(snap)}개 / 업종 전체 **{universe}개** "
+            f"→ ⚠️ 집계 상한({_SECTOR_AGG_CAP})을 넘어 **표본 중앙값(sample_median)**입니다. "
+            "업종 전체 중앙값이 아닙니다."
         )
     if periods:
         parts = [f"{p}({period_counts[p]}개)" for p in periods]
@@ -2231,7 +2241,7 @@ async def get_sector_valuation(
                      "'할인'으로 보입니다. 실측에서 기계 업종은 113.39배였습니다. "
                      "아래 중앙값과 함께 보고, 두 값이 크게 다르면 그 이유부터 확인하세요.")
     lines.append("")
-    lines.append("지표 | 중앙값 | 평균 | 최소~최대 | 표본")
+    lines.append(f"지표 | {median_label} | 평균 | 최소~최대 | 표본")
     lines.append("---|---:|---:|---|---:")
     lines.append(stat_line("PER(배)", per))
     lines.append(stat_line("PBR(배)", pbr))
@@ -2246,7 +2256,8 @@ async def get_sector_valuation(
 
         # 표가 길어지면 읽히지 않는다(건설 업종은 78종목). 소형주 PER 은 노이즈가
         # 크므로 시가총액 상위부터 남기고, 기준 종목은 잘려도 반드시 넣는다.
-        SHOW = 20
+        # 몇 개를 보여줄지는 top_n 이 정한다 - 집계 분모와는 무관하다(SL-11).
+        SHOW = top_n
         cands = [c for c in per_map if c in name_map]
         omitted = 0
         if len(cands) > SHOW:
@@ -2258,7 +2269,7 @@ async def get_sector_valuation(
             cands = keep
 
         lines.append("")
-        head = f"### 중앙값(PER {med_per:,.2f}배) 대비 위치"
+        head = f"### {median_label}(PER {med_per:,.2f}배) 대비 위치"
         if omitted:
             head += f" — 시총 상위 {len(cands)}개 표시 ({omitted}개 생략)"
         lines.append(head)
@@ -2292,12 +2303,32 @@ async def get_sector_valuation(
     lines.append("※ 낮은 PER이 곧 저평가는 아닙니다. 이익이 정점이거나 성장이 멈출 것이라는")
     lines.append("  기대가 반영된 결과일 수 있습니다. **왜 그 숫자인지**를 함께 확인하세요.")
     lines.append("※ 적자 기업(PER 음수)은 집계에서 빠져 있습니다 — 위 제외 목록을 보세요.")
-    lines.append("※ 종목 목록이 등락률 순이라, top_n 으로 잘랐다면 그날 오른 쪽으로 치우칩니다.")
+    lines.append("※ top_n 은 표시 개수만 정합니다 — 집계(중앙값)는 바뀌지 않습니다.")
 
+    # 중앙값의 실제 분모와 제외 사유(적자·결측)를 메타에 남긴다(SL-11 요구 2).
+    per_numeric = sum(1 for s in snap if isinstance(s.get("per"), (int, float)))
+    valuation_sample = {
+        "scope": "full" if full_scan else "sample",
+        "universe": universe,
+        "aggregated": len(snap),
+        "valid": {"per": len(per), "pbr": len(pbr), "roe": len(roe)},
+        "excluded": {
+            "loss_per": len(neg_per),
+            "missing_per": len(snap) - per_numeric,
+        },
+        "median_name": "median" if full_scan else "sample_median",
+    }
     return _append_result_meta(
         "\n".join(lines),
         _kr_meta(kind="filing",
-                 data_completeness=rmeta.PARTIAL if neg_per else rmeta.COMPLETE),
+                 data_completeness=(rmeta.PARTIAL
+                                    if neg_per or not full_scan else rmeta.COMPLETE),
+                 coverage=(None if full_scan else
+                           {"requested": {"unit": "stock", "value": universe},
+                            "effective": {"unit": "stock", "value": len(snap)},
+                            "truncated": True, "coverage_complete": False,
+                            "reason": "server_cap"}),
+                 extra={"valuation_sample": valuation_sample}),
     )
 
 
