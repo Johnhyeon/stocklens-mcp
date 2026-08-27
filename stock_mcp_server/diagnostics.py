@@ -684,16 +684,23 @@ def _broker_summary() -> tuple[dict, dict]:
         if state.get("active_provider") == "kis" or caps_res:
             from stock_mcp_server.market_data.broker_profiles import (
                 BrokerProfileStore,
+                KeychainUnavailableError,
             )
 
             store = BrokerProfileStore(
                 provider="kis", keyring_module=_broker_keyring())
-            for p in _BROKER_PROFILES:
-                configured = store.has_profile(p)
-                connection["profiles"][p] = {
-                    "configured": configured,
-                    "verified": bool(caps_res.get(p)) and configured,
-                }
+            try:
+                for p in _BROKER_PROFILES:
+                    configured = store.has_profile(p)
+                    connection["profiles"][p] = {
+                        "configured": configured,
+                        "verified": bool(caps_res.get(p)) and configured,
+                    }
+            except KeychainUnavailableError:
+                # keychain 을 못 읽으면 "미설정"으로 단정하지 않는다.
+                connection["status"] = "unknown"
+                connection["active_profile"] = state.get("active_profile")
+                return capabilities, {"kis": connection}
             active = state.get("active_profile")
             connection["active_profile"] = active
             if active and connection["profiles"].get(

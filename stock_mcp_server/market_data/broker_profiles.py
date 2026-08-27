@@ -24,6 +24,14 @@ PROFILES = ("real", "demo")
 _SERVICE_PREFIX = "stocklens-broker"
 
 
+class KeychainUnavailableError(Exception):
+    """운영체제 자격 증명 저장소에 접근할 수 없다 (백엔드 부재·잠김·거부).
+
+    이 오류가 나면 "저장 안 됨"이나 "삭제 완료"로 단정하지 않는다 -
+    실제 상태를 모르는 것이다. 메시지에 비밀값을 싣지 않는다.
+    """
+
+
 @dataclass(frozen=True)
 class BrokerCredentials:
     """비밀값 운반체. repr/str 에 원문·길이·일부 문자를 노출하지 않는다."""
@@ -73,9 +81,18 @@ class BrokerProfileStore:
 
     # --- 조회 ---
 
+    def _get_raw(self, profile: str) -> str | None:
+        try:
+            return self._keyring.get_password(
+                self._service(), self._username(profile))
+        except Exception as exc:  # noqa: BLE001
+            raise KeychainUnavailableError(
+                f"자격 증명 저장소를 읽을 수 없습니다: {type(exc).__name__}"
+            ) from None
+
     def load_profile(self, profile: str) -> BrokerCredentials | None:
         self._check_profile(profile)
-        raw = self._keyring.get_password(self._service(), self._username(profile))
+        raw = self._get_raw(profile)
         if not raw:
             return None
         try:
@@ -131,14 +148,25 @@ class BrokerProfileStore:
         state["active_profile"] = profile
         save_state(bump_generation(state), self._home)
 
-    def disconnect_profile(self, profile: str) -> None:
-        self._check_profile(profile)
+    def _delete_if_present(self, profile: str) -> None:
+        """entry 가 있으면 지운다. 없으면 idempotent 통과.
+
+        삭제가 거부되면 KeychainUnavailableError - 조용히 넘어가면
+        자격 증명이 남았는데 "해제 완료"로 보고하게 된다.
+        """
+        if self._get_raw(profile) is None:
+            return
         try:
             self._keyring.delete_password(
                 self._service(), self._username(profile))
-        except Exception:
-            # 이미 없는 entry 는 idempotent 하게 통과한다.
-            pass
+        except Exception as exc:  # noqa: BLE001
+            raise KeychainUnavailableError(
+                f"자격 증명을 삭제할 수 없습니다: {type(exc).__name__}"
+            ) from None
+
+    def disconnect_profile(self, profile: str) -> None:
+        self._check_profile(profile)
+        self._delete_if_present(profile)
         state = load_state(self._home)
         if state["active_profile"] == profile and \
                 state["active_provider"] == self.provider:
@@ -146,13 +174,13 @@ class BrokerProfileStore:
         save_state(bump_generation(state), self._home)
 
     def disconnect_provider(self) -> None:
-        """real·demo 자격 증명과 active pointer 를 모두 제거한다. idempotent."""
+        """real·demo 자격 증명과 active pointer 를 모두 제거한다. idempotent.
+
+        하나라도 지우지 못하면 KeychainUnavailableError 로 중단한다 -
+        generation 을 올리지 않아 "해제됨"으로 보이지 않는다.
+        """
         for profile in PROFILES:
-            try:
-                self._keyring.delete_password(
-                    self._service(), self._username(profile))
-            except Exception:
-                pass
+            self._delete_if_present(profile)
         state = load_state(self._home)
         if state["active_provider"] == self.provider:
             state["active_provider"] = None

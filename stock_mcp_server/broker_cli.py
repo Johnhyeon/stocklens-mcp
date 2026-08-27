@@ -15,6 +15,7 @@ import sys
 from stock_mcp_server.market_data.broker_profiles import (
     BrokerCredentials,
     BrokerProfileStore,
+    KeychainUnavailableError,
     PROFILES,
 )
 
@@ -168,6 +169,9 @@ def handle_request(
         return verifier(
             action=action, store=store, profile=profile,
             credentials=credentials)
+    except KeychainUnavailableError as exc:
+        # 실제 상태를 모른다. 저장 안 됨·삭제 완료로 단정하지 않는다.
+        return _error("keychain_unavailable", str(exc))
     except Exception as exc:  # noqa: BLE001
         # 비밀값이 예외 문자열에 섞이지 않도록 형식명만 보고한다.
         return _error("internal_error", f"{type(exc).__name__}")
