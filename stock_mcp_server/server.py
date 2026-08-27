@@ -7068,6 +7068,226 @@ _FINANCING_FORMS = {"424B2", "424B3", "424B4", "424B5", "FWP",
 _FINANCING_8K_ITEMS = {"1.01", "2.03", "3.02"}
 
 
+# 규제자본 지표의 us-gaap 후보 태그(SL-17). 대형은행은 2013년 이후 이 비율들을
+# XBRL 로 태깅하지 않는 경우가 대부분이다(실측 JPM: 2009·2013 이후 없음) -
+# 그때는 값이 아니라 "어느 보고서로 가야 하는지"를 구조화해 돌려준다.
+_SOUND_RATIO_CONCEPTS: dict[str, tuple[str, ...]] = {
+    "cet1_ratio": ("BankingRegulationCommonEquityTier1CapitalRatioActual",
+                   "CommonEquityTierOneCapitalToRiskWeightedAssets"),
+    "tier1_ratio": ("BankingRegulationTier1RiskBasedCapitalRatioActual",
+                    "TierOneRiskBasedCapitalToRiskWeightedAssets"),
+    "total_capital_ratio": ("BankingRegulationTotalRiskBasedCapitalRatioActual",
+                            "CapitalToRiskWeightedAssets"),
+    "leverage_ratio": ("BankingRegulationTier1LeverageCapitalRatioActual",
+                       "TierOneLeverageCapitalToAverageAssets"),
+    "lcr": (),   # LCR·NSFR 는 XBRL 표준 태그 자체가 없다 - 항상 원문 경로
+    "nsfr": (),
+    "npl": ("FinancingReceivableRecordedInvestmentNonaccrualStatus",
+            "FinancingReceivableNonaccrualStatus"),
+}
+_SOUND_ASSET_CONCEPTS: dict[str, tuple[str, ...]] = {
+    "allowance_for_credit_losses": (
+        "FinancingReceivableAllowanceForCreditLossExcludingAccruedInterest",
+        "FinancingReceivableAllowanceForCreditLosses"),
+    "gross_loans": (
+        "FinancingReceivableExcludingAccruedInterestBeforeAllowanceForCreditLoss",
+        "NotesReceivableGross"),
+    "net_chargeoffs": (
+        "FinancingReceivableExcludingAccruedInterestAllowanceForCreditLossWriteoffAfterRecovery",),
+}
+_US_CAPITAL_REPORTS = [
+    "10-K/10-Q 'Capital Risk Management' 섹션 (CET1·Tier1·총자본·SLR)",
+    "FR Y-9C / FFIEC 101 (연준 규제 보고)",
+    "Pillar 3 disclosure (분기, 회사 IR 사이트)",
+]
+_US_LIQ_REPORTS = [
+    "10-K/10-Q 'Liquidity Risk Management' 섹션 (LCR·NSFR)",
+    "Pillar 3 disclosure / LCR disclosure report",
+]
+_KR_REPORTS = [
+    "DART 사업보고서·분기보고서 'III. 재무에 관한 사항' 자본적정성 주석 (BIS·CET1)",
+    "은행연합회 은행 경영공시 (자본적정성·자산건전성·유동성)",
+    "금감원 금융통계정보시스템 (NPL·연체율·충당금적립률)",
+]
+
+
+@mcp.tool()
+@safe_us_tool
+@track_metrics("get_financial_soundness")
+async def get_financial_soundness(symbol: str) -> str:
+    """Financial soundness — 금융회사 자금 건전성 경로 (규제자본·자산건전성, JSON).
+
+    은행·보험·증권 같은 금융회사에는 제조업형 CFO 런웨이가 성립하지 않습니다.
+    이 도구가 그 대체 경로입니다: "KB금융 자본비율", "JPM CET1", "충당금 얼마나
+    쌓았나" 같은 질문에 사용합니다.
+
+    - 확보되는 값(미국 XBRL 자산건전성 등)은 출처·기준일과 함께 돌려줍니다.
+    - CET1·LCR·NSFR 처럼 공식 원문에만 있는 지표는 값을 지어내지 않고,
+      **어느 보고서에서 확인해야 하는지**(required_reports)를 구조화합니다.
+    - 규제 체계(미국 Fed / 한국 금감원)가 다른 지표를 하나의 점수로 합치거나
+      시장 간 직접 수치 비교하지 않습니다 - 산식·경과규정이 다릅니다.
+
+    Args:
+        symbol: 한국 종목코드 6자리(예: "105560") 또는 US 티커(예: "JPM")
+    """
+    import re as _re
+
+    sym = (symbol or "").strip()
+    is_kr = bool(_re.match(r"^[0-9]{6}$", sym))
+
+    comparison_note = ("서로 다른 규제 체계(미국 Fed 최종규정 vs 한국 금감원 "
+                       "은행업감독규정)의 비율은 산식·경과규정이 달라 직접 비교 "
+                       "금지 - 각 시장 안에서 시계열·동종 비교만 하세요.")
+
+    if is_kr:
+        metrics = {
+            key: {"status": "not_available_via_stocklens",
+                  "reason": "국내 규제자본·건전성 지표는 시세 API 가 아니라 "
+                            "공시 원문·감독 통계에 있습니다.",
+                  "required_reports": _KR_REPORTS}
+            for key in ("cet1_ratio", "tier1_ratio", "total_capital_ratio",
+                        "lcr", "nsfr", "npl", "allowance_coverage")
+        }
+        payload = {
+            "symbol": sym,
+            "market": "KR",
+            "framework": {"name": "바젤III (금감원 은행업감독규정)",
+                          "comparison_note": comparison_note},
+            "metrics": metrics,
+            "route": {
+                "dart": "DartLens list_disclosures 로 사업보고서·분기보고서 "
+                        "rcept_no 를 찾아 자본적정성 주석을 원문으로 확인하세요.",
+                "bank_disclosure": "은행연합회 경영공시에 분기 BIS·CET1·NPL·"
+                                   "연체율이 표준 양식으로 공시됩니다.",
+            },
+            "_meta": _kr_meta(
+                kind="filing", code=sym,
+                data_completeness=rmeta.PARTIAL,
+                coverage={"truncated": False, "coverage_complete": False,
+                          "reason": "source_limit"},
+                warnings=["규제자본 지표는 이 도구가 값을 만들지 않습니다 - "
+                          "required_reports 의 공식 원문으로 확인하세요."],
+            ),
+        }
+        return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+
+    issuer = await sec.resolve_issuer(sym)
+    if issuer is None:
+        return f"'{sym}'를 SEC 발행사 목록에서 찾지 못했습니다."
+    cik = issuer["cik"]
+
+    sic = None
+    sic_desc = None
+    try:
+        subs = await sec.get_submissions(cik)
+        sic, sic_desc = subs.get("sic"), subs.get("sic_description")
+    except sec.SecFetchError:
+        pass
+    is_financial = bool(sic and str(sic).isdigit() and 6000 <= int(sic) <= 6799)
+
+    async def _component(name: str, cands: tuple[str, ...]) -> tuple[str, dict]:
+        for tag in cands:
+            try:
+                fact = await sec.get_concept_latest(cik, tag)
+            except sec.SecFetchError as exc:
+                return name, {"status": "fetch_error", "detail": str(exc)}
+            if fact is not None:
+                return name, fact
+        return name, {"status": "not_in_xbrl"}
+
+    all_concepts = {**_SOUND_ASSET_CONCEPTS, **_SOUND_RATIO_CONCEPTS}
+    pairs = await asyncio.gather(*(_component(n, c) for n, c in all_concepts.items()))
+    facts = dict(pairs)
+
+    # 기준일 = 확보된 자산건전성 값 중 가장 최신. 그보다 400일 넘게 뒤처진
+    # XBRL 비율(실측 JPM 2009·2013)은 현재값으로 내보내지 않는다.
+    asset_ends = [f["end"] for n, f in facts.items()
+                  if n in _SOUND_ASSET_CONCEPTS and "value" in f]
+    base_date = max(asset_ends) if asset_ends else None
+
+    def _reports_for(key: str) -> list[str]:
+        return _US_LIQ_REPORTS if key in ("lcr", "nsfr") else _US_CAPITAL_REPORTS
+
+    metrics: dict[str, dict] = {}
+    for key in _SOUND_RATIO_CONCEPTS:
+        f = facts[key]
+        how = (f"get_us_filing_detail('{sym}', form='10-Q', "
+               f"keyword='{'LCR' if key in ('lcr', 'nsfr') else 'CET1'}') 로 "
+               "최신 분기 원문에서 해당 표를 바로 찾을 수 있습니다.")
+        if "value" not in f:
+            metrics[key] = {"status": f.get("status", "not_in_xbrl"),
+                            **({"detail": f["detail"]} if f.get("detail") else {}),
+                            "required_reports": _reports_for(key), "how": how}
+            continue
+        behind = None
+        if base_date and f["end"] < base_date:
+            behind = (_dt.date.fromisoformat(base_date)
+                      - _dt.date.fromisoformat(f["end"])).days
+        if behind and behind > 400:
+            metrics[key] = {"status": "stale_in_xbrl",
+                            "last_fact": {**f, "days_behind_base": behind},
+                            "reason": "XBRL 태깅이 과거에 중단된 지표입니다 - "
+                                      "현재값은 원문에만 있습니다.",
+                            "required_reports": _reports_for(key), "how": how}
+        else:
+            metrics[key] = {**f, "framework": "US Basel III (Fed)"}
+
+    for key in _SOUND_ASSET_CONCEPTS:
+        metrics[key] = facts[key]
+
+    allow = facts["allowance_for_credit_losses"]
+    loans = facts["gross_loans"]
+    if "value" in allow and "value" in loans and allow["end"] == loans["end"]             and loans["value"]:
+        metrics["allowance_coverage_of_loans"] = {
+            "value_pct": round(allow["value"] / loans["value"] * 100, 2),
+            "as_of": allow["end"],
+            "basis": "derived_same_date",
+            "note": "충당금/총여신. 같은 기준일 XBRL 값에서만 파생 계산합니다.",
+        }
+    else:
+        metrics["allowance_coverage_of_loans"] = {
+            "status": "unavailable",
+            "reason": "충당금·총여신의 기준일이 다르거나 한쪽이 미확보라 "
+                      "비율을 만들지 않았습니다.",
+        }
+
+    unavailable = sorted(k for k, m in metrics.items()
+                         if m.get("status") in ("not_in_xbrl", "stale_in_xbrl",
+                                                "fetch_error", "unavailable"))
+    warns: list[str] = []
+    if not is_financial:
+        warns.append(
+            f"SIC {sic}({sic_desc}) - 금융회사가 아닐 수 있습니다. 이 지표들은 "
+            "은행·금융지주에만 의미가 있습니다.")
+    if unavailable:
+        warns.append("XBRL 로 확보되지 않은 지표: " + ", ".join(unavailable)
+                     + " - 각 항목의 required_reports 원문으로 확인하세요.")
+
+    payload = {
+        "symbol": issuer["requested_ticker"],
+        "issuer": {"cik": cik, "name": issuer["name"],
+                   "sic": sic, "sic_description": sic_desc},
+        "market": "US",
+        "is_financial_sic": is_financial,
+        "framework": {"name": "US Basel III (Fed 최종규정)",
+                      "comparison_note": comparison_note},
+        "base_date": base_date,
+        "metrics": metrics,
+        "_meta": _us_meta(
+            kind="filing",
+            data_as_of=base_date,
+            data_completeness=rmeta.PARTIAL if unavailable else rmeta.COMPLETE,
+            coverage={"truncated": False,
+                      "coverage_complete": not unavailable,
+                      "unavailable_metrics": unavailable,
+                      "reason": "source_limit" if unavailable else None},
+            warnings=warns or None,
+            extra={"source": "SEC XBRL companyconcept + submissions"},
+        ),
+    }
+    return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+
+
 @mcp.tool()
 @safe_us_tool
 @track_metrics("get_us_liquidity")
@@ -7186,9 +7406,16 @@ async def get_us_liquidity(ticker: str) -> str:
     # 보고기간 후 자금조달성 공시(요구 2). 해석하지 않고 연결만 한다.
     post_rows: list[dict] = []
     post_error = None
+    fin_notice = None
     if base_date:
         try:
             subs = await sec.get_submissions(cik)
+            _sic = subs.get("sic")
+            if _sic and str(_sic).isdigit() and 6000 <= int(_sic) <= 6799:
+                fin_notice = (
+                    f"SIC {_sic}({subs.get('sic_description')}) 금융회사입니다 - "
+                    "제조업형 유동성 원장·런웨이가 성립하지 않습니다. "
+                    "get_financial_soundness 로 규제자본 경로를 보세요.")
             for row in subs.get("rows") or []:
                 fdate = str(row.get("filing_date") or "")
                 if not fdate or fdate <= base_date:
@@ -7244,6 +7471,8 @@ async def get_us_liquidity(ticker: str) -> str:
         warns.append("공식 런웨이 승격 불가 - 확인 불가 재료: " + ", ".join(missing))
     if post_error:
         warns.append(f"보고기간 후 공시 목록 조회 실패: {post_error}")
+    if fin_notice:
+        warns.append(fin_notice)
 
     has_gap = bool(missing or fetch_errors or not cash or excluded or post_error)
     coverage = {

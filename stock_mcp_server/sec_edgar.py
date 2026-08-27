@@ -147,6 +147,8 @@ async def get_submissions(cik: int) -> dict:
     return {
         "name": data.get("name"),
         "tickers": data.get("tickers") or [],
+        "sic": data.get("sic"),
+        "sic_description": data.get("sicDescription"),
         "rows": rows,
         "recent_count": len(rows),
         # recent 는 최근 1000건까지다. 그보다 오래된 공시는 별도 파일에 있고
