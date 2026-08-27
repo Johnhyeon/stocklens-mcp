@@ -2200,8 +2200,8 @@ async def get_sector_valuation(
     if focus_code:
         lines.append(f"- 기준 종목: **{focus_name}({focus_code})** → 업종 `{sector_name}`")
     if full_scan:
-        lines.append(f"- 집계 대상: **업종 전체 {len(snap)}개** — 표본 편향 없음"
-                     f" (표시는 시총 상위 {top_n}개까지)")
+        lines.append(f"- 집계 대상: **업종 전체 {len(snap)}개** (표본 편향 없음,"
+                     f" 표시는 시총 상위 {top_n}개까지)")
     else:
         lines.append(
             f"- 집계 대상: {len(snap)}개 / 업종 전체 **{universe}개** "
@@ -2303,7 +2303,7 @@ async def get_sector_valuation(
     lines.append("※ 낮은 PER이 곧 저평가는 아닙니다. 이익이 정점이거나 성장이 멈출 것이라는")
     lines.append("  기대가 반영된 결과일 수 있습니다. **왜 그 숫자인지**를 함께 확인하세요.")
     lines.append("※ 적자 기업(PER 음수)은 집계에서 빠져 있습니다 — 위 제외 목록을 보세요.")
-    lines.append("※ top_n 은 표시 개수만 정합니다 — 집계(중앙값)는 바뀌지 않습니다.")
+    lines.append("※ top_n 은 표시 개수만 정합니다. 집계(중앙값)는 바뀌지 않습니다.")
 
     # 중앙값의 실제 분모와 제외 사유(적자·결측)를 메타에 남긴다(SL-11 요구 2).
     per_numeric = sum(1 for s in snap if isinstance(s.get("per"), (int, float)))
