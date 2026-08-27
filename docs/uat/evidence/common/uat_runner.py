@@ -125,9 +125,15 @@ def independent_aggregate(bars_1m, interval_minutes: int, market: str):
 
 
 def independent_check(base_1m, target_ds, interval: str, market: str):
-    """독립 집계와 운영 결과를 비교한다. 불일치 목록 반환."""
+    """독립 집계와 운영 결과를 비교한다.
+
+    (mismatches, compared) 를 돌려준다. compared == 0 은 '비교할 완전
+    버킷이 없었다'는 뜻이며 실패가 아니라 검산 불가(skip)다 - 장중
+    진행 중이거나 저유동으로 상위 버킷이 아직 완성되지 않은 상황을
+    실패로 세면 판정이 왜곡된다 (완결일 재실행이 검산을 채운다).
+    """
     if not base_1m or not base_1m.bars:
-        return ["1m 원천 없음 - 검산 생략"]
+        return (["1m 원천 없음 - 검산 생략"], 0)
     minutes = int(interval.rstrip("m"))
     ours = independent_aggregate(base_1m.bars, minutes, market)
     base_first = base_1m.bars[0].start_at
@@ -150,9 +156,7 @@ def independent_check(base_1m, target_ds, interval: str, market: str):
                 mismatches.append(
                     f"{bar.start_at} {field}: 운영 {getattr(bar, field)}"
                     f" != 독립 {mine[field]}")
-    if compared == 0:
-        mismatches.append("검산 가능한 완전 버킷이 없음")
-    return mismatches
+    return (mismatches, compared)
 
 
 async def _fetch(symbol, market, interval, source, venue, trading_date,
@@ -565,8 +569,11 @@ def _run_inner(provider: str, market: str, out_dir: Path) -> int:
                 continue
             if interval == "1m":
                 base_1m = ds
-            mismatches = ([] if interval == "1m" else
-                          independent_check(base_1m, ds, interval, market))
+            if interval == "1m":
+                mismatches, compared = [], len(ds.bars)
+            else:
+                mismatches, compared = independent_check(
+                    base_1m, ds, interval, market)
             record["intervals"][interval] = {
                 "rows": len(ds.bars),
                 "provider": ds.provider,
@@ -576,6 +583,7 @@ def _run_inner(provider: str, market: str, out_dir: Path) -> int:
                 "selection_reason": meta.get("selection_reason"),
                 "primary_provider": meta.get("primary_provider"),
                 "independent_mismatches": mismatches,
+                "independent_compared": compared,
                 "first": _sanitize(ds.bars[0].start_at) if ds.bars else None,
                 "last": _sanitize(ds.bars[-1].start_at) if ds.bars else None,
             }
@@ -672,7 +680,9 @@ def _run_inner(provider: str, market: str, out_dir: Path) -> int:
     except Exception as exc:  # noqa: BLE001
         summary["error_classification"] = {"error": type(exc).__name__}
     err_cls = summary["error_classification"] or {}
-    if err_cls.get("bad_symbol") != "entity_not_found":
+    # KIS(0.9 기존 계약)는 없는 종목에 빈 결과를 줄 수 있어 관찰 기록만
+    # 남긴다. 신규 공급자는 entity_not_found 분류를 요구한다.
+    if provider != "kis" and err_cls.get("bad_symbol") != "entity_not_found":
         failures += 1
     if err_cls.get("bad_key_auth") not in ("credential_invalid",
                                            "ip_not_allowed"):
