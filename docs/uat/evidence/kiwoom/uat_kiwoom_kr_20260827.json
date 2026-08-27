@@ -2,7 +2,7 @@
  "summary": {
   "provider": "kiwoom",
   "market": "KR",
-  "ran_at": "2026-08-27T22:06:00.858520+09:00",
+  "ran_at": "2026-08-27T22:20:31.499804+09:00",
   "release_gate_opened_for_verification": true,
   "auto_route": {
    "gate_preview": true,
@@ -23,6 +23,13 @@
     "toss",
     "kiwoom"
    ],
+   "ok": true
+  },
+  "pagination_continuation": {
+   "page1_rows": 900,
+   "page2_rows": 900,
+   "cont_yn": "Y",
+   "cursor_progressed": true,
    "ok": true
   },
   "failures": 0
@@ -120,10 +127,13 @@
     "available": true,
     "kis_rows": 381,
     "provider_rows": 381,
-    "common": 380,
-    "only_kis": 1,
-    "only_provider": 1,
+    "common": 381,
+    "only_kis": 0,
+    "only_provider": 0,
+    "only_kis_timestamps": [],
+    "only_provider_timestamps": [],
     "ohlc_diff_minutes": 0,
+    "ohlc_diff_samples": [],
     "volume_ratio_median": 1.0
    }
   },
@@ -219,10 +229,13 @@
     "available": true,
     "kis_rows": 381,
     "provider_rows": 381,
-    "common": 380,
-    "only_kis": 1,
-    "only_provider": 1,
+    "common": 381,
+    "only_kis": 0,
+    "only_provider": 0,
+    "only_kis_timestamps": [],
+    "only_provider_timestamps": [],
     "ohlc_diff_minutes": 0,
+    "ohlc_diff_samples": [],
     "volume_ratio_median": 1.0
    }
   },
@@ -318,10 +331,13 @@
     "available": true,
     "kis_rows": 381,
     "provider_rows": 381,
-    "common": 380,
-    "only_kis": 1,
-    "only_provider": 1,
+    "common": 381,
+    "only_kis": 0,
+    "only_provider": 0,
+    "only_kis_timestamps": [],
+    "only_provider_timestamps": [],
     "ohlc_diff_minutes": 0,
+    "ohlc_diff_samples": [],
     "volume_ratio_median": 1.0
    }
   },
@@ -417,10 +433,13 @@
     "available": true,
     "kis_rows": 381,
     "provider_rows": 381,
-    "common": 380,
-    "only_kis": 1,
-    "only_provider": 1,
+    "common": 381,
+    "only_kis": 0,
+    "only_provider": 0,
+    "only_kis_timestamps": [],
+    "only_provider_timestamps": [],
     "ohlc_diff_minutes": 0,
+    "ohlc_diff_samples": [],
     "volume_ratio_median": 1.0
    }
   },
@@ -516,10 +535,13 @@
     "available": true,
     "kis_rows": 381,
     "provider_rows": 381,
-    "common": 380,
-    "only_kis": 1,
-    "only_provider": 1,
+    "common": 381,
+    "only_kis": 0,
+    "only_provider": 0,
+    "only_kis_timestamps": [],
+    "only_provider_timestamps": [],
     "ohlc_diff_minutes": 0,
+    "ohlc_diff_samples": [],
     "volume_ratio_median": 1.0
    }
   },
@@ -615,10 +637,13 @@
     "available": true,
     "kis_rows": 381,
     "provider_rows": 381,
-    "common": 380,
-    "only_kis": 1,
-    "only_provider": 1,
+    "common": 381,
+    "only_kis": 0,
+    "only_provider": 0,
+    "only_kis_timestamps": [],
+    "only_provider_timestamps": [],
     "ohlc_diff_minutes": 0,
+    "ohlc_diff_samples": [],
     "volume_ratio_median": 1.0
    }
   },
@@ -714,10 +739,13 @@
     "available": true,
     "kis_rows": 122,
     "provider_rows": 122,
-    "common": 121,
-    "only_kis": 1,
-    "only_provider": 1,
+    "common": 122,
+    "only_kis": 0,
+    "only_provider": 0,
+    "only_kis_timestamps": [],
+    "only_provider_timestamps": [],
     "ohlc_diff_minutes": 0,
+    "ohlc_diff_samples": [],
     "volume_ratio_median": 1.0
    }
   },
@@ -813,10 +841,13 @@
     "available": true,
     "kis_rows": 91,
     "provider_rows": 91,
-    "common": 90,
-    "only_kis": 1,
-    "only_provider": 1,
+    "common": 91,
+    "only_kis": 0,
+    "only_provider": 0,
+    "only_kis_timestamps": [],
+    "only_provider_timestamps": [],
     "ohlc_diff_minutes": 0,
+    "ohlc_diff_samples": [],
     "volume_ratio_median": 1.0
    }
   },
@@ -912,10 +943,13 @@
     "available": true,
     "kis_rows": 103,
     "provider_rows": 103,
-    "common": 102,
-    "only_kis": 1,
-    "only_provider": 1,
+    "common": 103,
+    "only_kis": 0,
+    "only_provider": 0,
+    "only_kis_timestamps": [],
+    "only_provider_timestamps": [],
     "ohlc_diff_minutes": 0,
+    "ohlc_diff_samples": [],
     "volume_ratio_median": 1.0
    }
   },
@@ -1011,10 +1045,13 @@
     "available": true,
     "kis_rows": 381,
     "provider_rows": 381,
-    "common": 380,
-    "only_kis": 1,
-    "only_provider": 1,
+    "common": 381,
+    "only_kis": 0,
+    "only_provider": 0,
+    "only_kis_timestamps": [],
+    "only_provider_timestamps": [],
     "ohlc_diff_minutes": 0,
+    "ohlc_diff_samples": [],
     "volume_ratio_median": 1.0
    }
   },
@@ -1110,10 +1147,13 @@
     "available": true,
     "kis_rows": 313,
     "provider_rows": 313,
-    "common": 312,
-    "only_kis": 1,
-    "only_provider": 1,
+    "common": 313,
+    "only_kis": 0,
+    "only_provider": 0,
+    "only_kis_timestamps": [],
+    "only_provider_timestamps": [],
     "ohlc_diff_minutes": 0,
+    "ohlc_diff_samples": [],
     "volume_ratio_median": 1.0
    }
   },
@@ -1209,10 +1249,13 @@
     "available": true,
     "kis_rows": 381,
     "provider_rows": 381,
-    "common": 380,
-    "only_kis": 1,
-    "only_provider": 1,
+    "common": 381,
+    "only_kis": 0,
+    "only_provider": 0,
+    "only_kis_timestamps": [],
+    "only_provider_timestamps": [],
     "ohlc_diff_minutes": 0,
+    "ohlc_diff_samples": [],
     "volume_ratio_median": 1.0
    }
   },
@@ -1308,10 +1351,13 @@
     "available": true,
     "kis_rows": 381,
     "provider_rows": 381,
-    "common": 380,
-    "only_kis": 1,
-    "only_provider": 1,
+    "common": 381,
+    "only_kis": 0,
+    "only_provider": 0,
+    "only_kis_timestamps": [],
+    "only_provider_timestamps": [],
     "ohlc_diff_minutes": 0,
+    "ohlc_diff_samples": [],
     "volume_ratio_median": 1.0
    }
   },
@@ -1407,10 +1453,13 @@
     "available": true,
     "kis_rows": 381,
     "provider_rows": 381,
-    "common": 380,
-    "only_kis": 1,
-    "only_provider": 1,
+    "common": 381,
+    "only_kis": 0,
+    "only_provider": 0,
+    "only_kis_timestamps": [],
+    "only_provider_timestamps": [],
     "ohlc_diff_minutes": 0,
+    "ohlc_diff_samples": [],
     "volume_ratio_median": 1.0
    }
   },
@@ -1506,10 +1555,13 @@
     "available": true,
     "kis_rows": 351,
     "provider_rows": 351,
-    "common": 350,
-    "only_kis": 1,
-    "only_provider": 1,
+    "common": 351,
+    "only_kis": 0,
+    "only_provider": 0,
+    "only_kis_timestamps": [],
+    "only_provider_timestamps": [],
     "ohlc_diff_minutes": 0,
+    "ohlc_diff_samples": [],
     "volume_ratio_median": 1.0
    }
   }

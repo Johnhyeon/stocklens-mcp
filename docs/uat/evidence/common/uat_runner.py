@@ -240,6 +240,52 @@ def _direct_fetch_1m(provider, market, symbol, venue, trading_date,
                                  type(exc).__name__))
 
 
+def _continuation_probe(provider: str, symbol: str) -> dict:
+    """키움 연속조회 실측: 하루(381행)가 페이지 크기(실측 900행)보다
+    작아 단일 거래일 조회로는 다페이지가 구조적으로 불가능하다. 대신
+    raw 연속 헤더 왕복으로 커서 진행을 직접 증명한다."""
+    from stock_mcp_server.market_data.credential_store import (
+        CredentialStore,
+    )
+    from stock_mcp_server.market_data.kiwoom_client import KiwoomClient
+
+    key = ("kiwoom", "None")
+    client = _DIRECT_CLIENTS.get(key)
+    if client is None:
+        payload = CredentialStore().load_active("kiwoom", "real")
+        if payload is None:
+            return {"error": "no_credentials"}
+        client = KiwoomClient(payload, "real")
+        _DIRECT_CLIENTS[key] = client
+
+    async def go():
+        body = {"stk_cd": symbol, "tic_scope": "1",
+                "upd_stkpc_tp": "0",
+                "base_dt": dt.date.today().strftime("%Y%m%d")}
+        r1 = await client.request("kr_chart", api_id="ka10080", body=body)
+        rows1 = r1.payload.get("stk_min_pole_chart_qry") or []
+        if r1.cont_yn != "Y" or not r1.next_key:
+            return {"page1_rows": len(rows1), "cont_yn": r1.cont_yn,
+                    "ok": False, "reason": "연속 헤더 없음"}
+        r2 = await client.request("kr_chart", api_id="ka10080", body=body,
+                                  cont_yn="Y", next_key=r1.next_key)
+        rows2 = r2.payload.get("stk_min_pole_chart_qry") or []
+        first1 = str(rows1[0].get("cntr_tm")) if rows1 else ""
+        first2 = str(rows2[0].get("cntr_tm")) if rows2 else ""
+        progressed = bool(first1 and first2 and first2 < first1)
+        return {
+            "page1_rows": len(rows1), "page2_rows": len(rows2),
+            "cont_yn": r1.cont_yn, "cursor_progressed": progressed,
+            "ok": progressed and len(rows2) > 0,
+        }
+
+    try:
+        return asyncio.run(go())
+    except Exception as exc:  # noqa: BLE001
+        return {"error": str(getattr(exc, "provider_status",
+                                     type(exc).__name__)), "ok": False}
+
+
 class _CountingProviders:
     """공급자 fetch 호출 수를 세는 프록시 (캐시 2회차 0건 증명용)."""
 
@@ -389,13 +435,17 @@ def _primary_switch_leg(provider):
                 "ok": False, "error": type(exc).__name__}
 
 
-def _kis_cross_check(market, symbol, venue, base_1m):
+def _kis_cross_check(market, symbol, venue, provider_direct_ds):
     """실사용 홈 자격 증명의 KIS 를 기준으로 같은 날·종목 1m 을 직접
-    받아와 대조한다 (전 종목). KIS 는 공식가 대조로 검증된 기준선이다."""
-    if not base_1m or not base_1m.bars:
+    받아와 raw-vs-raw 로 대조한다 (전 종목). 서버 리샘플을 거치지 않은
+    어댑터 원본끼리 비교해야 라벨 규칙 차이가 끼어들지 않는다.
+
+    양쪽에만 있는 타임스탬프는 정확히 기록하고, KR 은 어떤 비대칭도
+    실패다 (정당한 예외가 발견되면 규칙으로 고정한 뒤에만 허용).
+    """
+    if not provider_direct_ds or not provider_direct_ds.bars:
         return None
-    # 다일 이력 보충으로 첫 봉이 전일일 수 있다. 요청 거래일 = 마지막 봉.
-    target_day = base_1m.bars[-1].start_at.date()
+    target_day = provider_direct_ds.bars[-1].start_at.date()
     kis_ds, err = _direct_fetch_1m(
         "kis", market, symbol, venue, target_day,
         home=Path.home() / ".stocklens")
@@ -403,18 +453,25 @@ def _kis_cross_check(market, symbol, venue, base_1m):
         return {"available": False, "error": err}
     kis = {b.start_at.isoformat(): b for b in kis_ds.bars
            if b.start_at.date() == target_day}
-    mine = {b.start_at.isoformat(): b for b in base_1m.bars
+    mine = {b.start_at.isoformat(): b for b in provider_direct_ds.bars
             if b.start_at.date() == target_day}
     if not kis:
         return {"available": False, "error": "kis_empty"}
     common = sorted(set(kis) & set(mine))
+    only_kis = sorted(set(kis) - set(mine))
+    only_provider = sorted(set(mine) - set(kis))
     diffs = 0
+    diff_samples = []
     ratios = []
     for t in common:
         a, b = kis[t], mine[t]
         for f in ("open", "high", "low", "close"):
             if getattr(a, f) != getattr(b, f):
                 diffs += 1
+                if len(diff_samples) < 5:
+                    diff_samples.append(
+                        f"{t} {f}: kis {getattr(a, f)} != "
+                        f"{getattr(b, f)}")
                 break
         if a.volume:
             ratios.append(b.volume / a.volume)
@@ -423,9 +480,13 @@ def _kis_cross_check(market, symbol, venue, base_1m):
         "available": True,
         "kis_rows": len(kis), "provider_rows": len(mine),
         "common": len(common),
-        "only_kis": len(set(kis) - set(mine)),
-        "only_provider": len(set(mine) - set(kis)),
+        "only_kis": len(only_kis),
+        "only_provider": len(only_provider),
+        # 비대칭의 정확한 시각을 남긴다 (최대 10개).
+        "only_kis_timestamps": only_kis[:10],
+        "only_provider_timestamps": only_provider[:10],
         "ohlc_diff_minutes": diffs,
+        "ohlc_diff_samples": diff_samples,
         "volume_ratio_median": (
             round(ratios[len(ratios) // 2], 4) if ratios else None),
     }
@@ -499,9 +560,9 @@ def _run_inner(provider: str, market: str, out_dir: Path) -> int:
             }
             if mismatches:
                 failures += 1
-        # 페이지네이션 증거: 서버 캐시를 우회한 직접 어댑터 조회의
-        # coverage (pages·complete). 캐시 적중 시 pages 가 비는 문제를
-        # 이 leg 가 대신 증명한다.
+        # 직접 어댑터 raw 조회: 페이지네이션 증거 + KIS 교차 대조의
+        # provider 쪽 원본. 서버 캐시·리샘플을 거치지 않는다.
+        direct_ds = None
         if base_1m and base_1m.bars:
             direct_ds, direct_err = _direct_fetch_1m(
                 provider, market, symbol, venue,
@@ -512,7 +573,12 @@ def _run_inner(provider: str, market: str, out_dir: Path) -> int:
                     "rows": len(direct_ds.bars),
                     "complete": direct_ds.coverage.get("complete"),
                 }
-                if not direct_ds.coverage.get("pages"):
+                # 공급자별 기준: 키움은 페이지 크기(실측 900행) > 하루
+                # (381행)라 단일 거래일 조회로 다페이지가 불가능하다.
+                # 키움은 별도 연속조회 leg 로 증명하고, kis(100행/页)·
+                # 토스(200행/页)는 실제 pages >= 2 를 요구한다.
+                pages = direct_ds.coverage.get("pages")
+                if provider != "kiwoom" and (not pages or pages < 2):
                     failures += 1
             else:
                 record["pagination"] = {"error": direct_err}
@@ -532,14 +598,18 @@ def _run_inner(provider: str, market: str, out_dir: Path) -> int:
                     "error": type(exc).__name__}
                 failures += 1
         if provider != "kis":
-            cross = _kis_cross_check(market, symbol, venue, base_1m)
+            cross = _kis_cross_check(market, symbol, venue, direct_ds)
             record["kis_cross_check"] = cross
             if cross and cross.get("available"):
-                # KR 은 KRX 단일 기준이라 OHLC·거래량이 KIS 와 일치해야
-                # 한다. US 는 거래소·테이프 기준 차이가 있어 관찰 기록.
+                # KR 은 KRX 단일 기준: 타임스탬프 집합·OHLC·거래량이
+                # KIS 와 정확히 일치해야 한다. 비대칭도 실패다.
+                # US 는 거래소·테이프 기준 차이가 있어 관찰 기록.
                 if market == "KR":
                     ratio = cross.get("volume_ratio_median")
                     if cross.get("ohlc_diff_minutes", 0) > 0:
+                        failures += 1
+                    if cross.get("only_kis", 0) or \
+                            cross.get("only_provider", 0):
                         failures += 1
                     if ratio is None or abs(ratio - 1.0) > 0.01:
                         failures += 1
@@ -589,6 +659,12 @@ def _run_inner(provider: str, market: str, out_dir: Path) -> int:
     switch = summary["primary_switch"] or {}
     if not switch.get("ok") and not switch.get("skipped"):
         failures += 1
+    # 키움 전용: 연속조회(cont-yn/next-key) 커서 진행을 raw 로 증명한다.
+    if provider == "kiwoom" and market == "KR":
+        summary["pagination_continuation"] = _continuation_probe(
+            provider, symbols[0][0])
+        if not summary["pagination_continuation"].get("ok"):
+            failures += 1
     summary["failures"] = failures
 
     out_file = out_dir / (
