@@ -91,6 +91,12 @@ broker-first, and legacy (zero KIS calls, identical to pre-connection
 behavior). Sources are never mixed inside one response; the meta always
 records `provider` and `fallback_used`.
 
+US intraday volume basis (measured): KIS US minute volume counts only
+the listing exchange's trades (NYSE/NASDAQ), while Yahoo reports the
+consolidated tape (9-31% vs consolidated in our measurement). Prices
+match. Interpret volume indicators only within one source; never compare
+volume numbers across the two sources.
+
 #### `get_intraday_chart`
 Intraday OHLCV series.
 - `symbol`, `market` (`KR|US`), `interval` (default `5m`), `date`,
