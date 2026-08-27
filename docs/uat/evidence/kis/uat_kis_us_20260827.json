@@ -1,0 +1,1620 @@
+{
+ "summary": {
+  "provider": "kis",
+  "market": "US",
+  "ran_at": "2026-08-27T23:50:06.034878+09:00",
+  "release_gate_opened_for_verification": true,
+  "auto_route": {
+   "gate_preview": true,
+   "selected_provider": "kis",
+   "primary_provider": "kis",
+   "selection_reason": "broker_connected_and_intraday_supported",
+   "rows": 200,
+   "provider_matches": true
+  },
+  "error_classification": {
+   "bad_symbol": "no_error(데이터 없음일 수 있음)",
+   "bad_key_auth": "credential_invalid"
+  },
+  "primary_switch": {
+   "before": "kis",
+   "via": "kiwoom",
+   "steps": [
+    "kiwoom",
+    "kis"
+   ],
+   "ok": true
+  },
+  "failures": 1
+ },
+ "symbols": [
+  {
+   "symbol": "AAPL",
+   "venue": "NAS",
+   "trading_date": "latest",
+   "intervals": {
+    "1m": {
+     "rows": 498,
+     "provider": "kis",
+     "complete": true,
+     "pages": 11,
+     "warnings": [
+      "정규장 세션 밖 행 776개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kis_strict",
+     "primary_provider": "kis",
+     "independent_mismatches": [],
+     "independent_compared": 498,
+     "first": "2026-08-25T14:12:00-04:00",
+     "last": "2026-08-26T15:59:00-04:00"
+    },
+    "5m": {
+     "rows": 200,
+     "provider": "kis",
+     "complete": true,
+     "pages": 20,
+     "warnings": [
+      "정규장 세션 밖 행 1337개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kis_strict",
+     "primary_provider": "kis",
+     "independent_mismatches": [],
+     "independent_compared": 99,
+     "first": "2026-08-24T12:20:00-04:00",
+     "last": "2026-08-26T15:55:00-04:00"
+    },
+    "15m": {
+     "rows": 104,
+     "provider": "kis",
+     "complete": false,
+     "pages": 30,
+     "warnings": [
+      "페이지 예산(30)을 소진해 중단했습니다.",
+      "정규장 세션 밖 행 2036개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kis_strict",
+     "primary_provider": "kis",
+     "independent_mismatches": [],
+     "independent_compared": 33,
+     "first": "2026-08-21T09:30:00-04:00",
+     "last": "2026-08-26T15:45:00-04:00"
+    },
+    "60m": {
+     "rows": 28,
+     "provider": "kis",
+     "complete": false,
+     "pages": 30,
+     "warnings": [
+      "페이지 예산(30)을 소진해 중단했습니다.",
+      "정규장 세션 밖 행 2036개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kis_strict",
+     "primary_provider": "kis",
+     "independent_mismatches": [],
+     "independent_compared": 9,
+     "first": "2026-08-21T09:30:00-04:00",
+     "last": "2026-08-26T15:30:00-04:00"
+    },
+    "120m": {
+     "rows": 16,
+     "provider": "kis",
+     "complete": false,
+     "pages": 30,
+     "warnings": [
+      "페이지 예산(30)을 소진해 중단했습니다.",
+      "정규장 세션 밖 행 2036개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kis_strict",
+     "primary_provider": "kis",
+     "independent_mismatches": [],
+     "independent_compared": 5,
+     "first": "2026-08-21T09:30:00-04:00",
+     "last": "2026-08-26T15:30:00-04:00"
+    },
+    "240m": {
+     "rows": 8,
+     "provider": "kis",
+     "complete": false,
+     "pages": 30,
+     "warnings": [
+      "페이지 예산(30)을 소진해 중단했습니다.",
+      "정규장 세션 밖 행 2036개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kis_strict",
+     "primary_provider": "kis",
+     "independent_mismatches": [],
+     "independent_compared": 2,
+     "first": "2026-08-21T09:30:00-04:00",
+     "last": "2026-08-26T13:30:00-04:00"
+    }
+   },
+   "pagination": {
+    "error": "rate_limited"
+   }
+  },
+  {
+   "symbol": "MSFT",
+   "venue": "NAS",
+   "trading_date": "latest",
+   "intervals": {
+    "1m": {
+     "rows": 498,
+     "provider": "kis",
+     "complete": true,
+     "pages": 11,
+     "warnings": [
+      "정규장 세션 밖 행 764개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kis_strict",
+     "primary_provider": "kis",
+     "independent_mismatches": [],
+     "independent_compared": 498,
+     "first": "2026-08-25T14:12:00-04:00",
+     "last": "2026-08-26T15:59:00-04:00"
+    },
+    "5m": {
+     "rows": 200,
+     "provider": "kis",
+     "complete": true,
+     "pages": 20,
+     "warnings": [
+      "정규장 세션 밖 행 1292개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kis_strict",
+     "primary_provider": "kis",
+     "independent_mismatches": [],
+     "independent_compared": 99,
+     "first": "2026-08-24T12:20:00-04:00",
+     "last": "2026-08-26T15:55:00-04:00"
+    },
+    "15m": {
+     "rows": 104,
+     "provider": "kis",
+     "complete": false,
+     "pages": 30,
+     "warnings": [
+      "페이지 예산(30)을 소진해 중단했습니다.",
+      "정규장 세션 밖 행 2036개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kis_strict",
+     "primary_provider": "kis",
+     "independent_mismatches": [],
+     "independent_compared": 33,
+     "first": "2026-08-21T09:30:00-04:00",
+     "last": "2026-08-26T15:45:00-04:00"
+    },
+    "60m": {
+     "rows": 28,
+     "provider": "kis",
+     "complete": false,
+     "pages": 30,
+     "warnings": [
+      "페이지 예산(30)을 소진해 중단했습니다.",
+      "정규장 세션 밖 행 2036개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kis_strict",
+     "primary_provider": "kis",
+     "independent_mismatches": [],
+     "independent_compared": 9,
+     "first": "2026-08-21T09:30:00-04:00",
+     "last": "2026-08-26T15:30:00-04:00"
+    },
+    "120m": {
+     "rows": 16,
+     "provider": "kis",
+     "complete": false,
+     "pages": 30,
+     "warnings": [
+      "페이지 예산(30)을 소진해 중단했습니다.",
+      "정규장 세션 밖 행 2036개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kis_strict",
+     "primary_provider": "kis",
+     "independent_mismatches": [],
+     "independent_compared": 5,
+     "first": "2026-08-21T09:30:00-04:00",
+     "last": "2026-08-26T15:30:00-04:00"
+    },
+    "240m": {
+     "rows": 8,
+     "provider": "kis",
+     "complete": false,
+     "pages": 30,
+     "warnings": [
+      "페이지 예산(30)을 소진해 중단했습니다.",
+      "정규장 세션 밖 행 2036개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kis_strict",
+     "primary_provider": "kis",
+     "independent_mismatches": [],
+     "independent_compared": 2,
+     "first": "2026-08-21T09:30:00-04:00",
+     "last": "2026-08-26T13:30:00-04:00"
+    }
+   },
+   "pagination": {
+    "pages": 11,
+    "rows": 500,
+    "complete": true
+   }
+  },
+  {
+   "symbol": "NVDA",
+   "venue": "NAS",
+   "trading_date": "latest",
+   "intervals": {
+    "1m": {
+     "rows": 498,
+     "provider": "kis",
+     "complete": true,
+     "pages": 11,
+     "warnings": [
+      "정규장 세션 밖 행 808개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kis_strict",
+     "primary_provider": "kis",
+     "independent_mismatches": [],
+     "independent_compared": 498,
+     "first": "2026-08-25T14:12:00-04:00",
+     "last": "2026-08-26T15:59:00-04:00"
+    },
+    "5m": {
+     "rows": 200,
+     "provider": "kis",
+     "complete": true,
+     "pages": 20,
+     "warnings": [
+      "정규장 세션 밖 행 1377개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kis_strict",
+     "primary_provider": "kis",
+     "independent_mismatches": [],
+     "independent_compared": 99,
+     "first": "2026-08-24T12:20:00-04:00",
+     "last": "2026-08-26T15:55:00-04:00"
+    },
+    "15m": {
+     "rows": 104,
+     "provider": "kis",
+     "complete": false,
+     "pages": 30,
+     "warnings": [
+      "페이지 예산(30)을 소진해 중단했습니다.",
+      "정규장 세션 밖 행 2036개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kis_strict",
+     "primary_provider": "kis",
+     "independent_mismatches": [],
+     "independent_compared": 33,
+     "first": "2026-08-21T09:30:00-04:00",
+     "last": "2026-08-26T15:45:00-04:00"
+    },
+    "60m": {
+     "rows": 28,
+     "provider": "kis",
+     "complete": false,
+     "pages": 30,
+     "warnings": [
+      "페이지 예산(30)을 소진해 중단했습니다.",
+      "정규장 세션 밖 행 2036개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kis_strict",
+     "primary_provider": "kis",
+     "independent_mismatches": [],
+     "independent_compared": 9,
+     "first": "2026-08-21T09:30:00-04:00",
+     "last": "2026-08-26T15:30:00-04:00"
+    },
+    "120m": {
+     "rows": 16,
+     "provider": "kis",
+     "complete": false,
+     "pages": 30,
+     "warnings": [
+      "페이지 예산(30)을 소진해 중단했습니다.",
+      "정규장 세션 밖 행 2036개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kis_strict",
+     "primary_provider": "kis",
+     "independent_mismatches": [],
+     "independent_compared": 5,
+     "first": "2026-08-21T09:30:00-04:00",
+     "last": "2026-08-26T15:30:00-04:00"
+    },
+    "240m": {
+     "rows": 8,
+     "provider": "kis",
+     "complete": false,
+     "pages": 30,
+     "warnings": [
+      "페이지 예산(30)을 소진해 중단했습니다.",
+      "정규장 세션 밖 행 2036개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kis_strict",
+     "primary_provider": "kis",
+     "independent_mismatches": [],
+     "independent_compared": 2,
+     "first": "2026-08-21T09:30:00-04:00",
+     "last": "2026-08-26T13:30:00-04:00"
+    }
+   },
+   "pagination": {
+    "pages": 11,
+    "rows": 500,
+    "complete": true
+   }
+  },
+  {
+   "symbol": "TSLA",
+   "venue": "NAS",
+   "trading_date": "latest",
+   "intervals": {
+    "1m": {
+     "rows": 498,
+     "provider": "kis",
+     "complete": true,
+     "pages": 11,
+     "warnings": [
+      "정규장 세션 밖 행 800개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kis_strict",
+     "primary_provider": "kis",
+     "independent_mismatches": [],
+     "independent_compared": 498,
+     "first": "2026-08-25T14:12:00-04:00",
+     "last": "2026-08-26T15:59:00-04:00"
+    },
+    "5m": {
+     "rows": 200,
+     "provider": "kis",
+     "complete": true,
+     "pages": 20,
+     "warnings": [
+      "정규장 세션 밖 행 1369개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kis_strict",
+     "primary_provider": "kis",
+     "independent_mismatches": [],
+     "independent_compared": 99,
+     "first": "2026-08-24T12:20:00-04:00",
+     "last": "2026-08-26T15:55:00-04:00"
+    },
+    "15m": {
+     "rows": 104,
+     "provider": "kis",
+     "complete": false,
+     "pages": 30,
+     "warnings": [
+      "페이지 예산(30)을 소진해 중단했습니다.",
+      "정규장 세션 밖 행 2036개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kis_strict",
+     "primary_provider": "kis",
+     "independent_mismatches": [],
+     "independent_compared": 33,
+     "first": "2026-08-21T09:30:00-04:00",
+     "last": "2026-08-26T15:45:00-04:00"
+    },
+    "60m": {
+     "rows": 28,
+     "provider": "kis",
+     "complete": false,
+     "pages": 30,
+     "warnings": [
+      "페이지 예산(30)을 소진해 중단했습니다.",
+      "정규장 세션 밖 행 2036개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kis_strict",
+     "primary_provider": "kis",
+     "independent_mismatches": [],
+     "independent_compared": 9,
+     "first": "2026-08-21T09:30:00-04:00",
+     "last": "2026-08-26T15:30:00-04:00"
+    },
+    "120m": {
+     "rows": 16,
+     "provider": "kis",
+     "complete": false,
+     "pages": 30,
+     "warnings": [
+      "페이지 예산(30)을 소진해 중단했습니다.",
+      "정규장 세션 밖 행 2036개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kis_strict",
+     "primary_provider": "kis",
+     "independent_mismatches": [],
+     "independent_compared": 5,
+     "first": "2026-08-21T09:30:00-04:00",
+     "last": "2026-08-26T15:30:00-04:00"
+    },
+    "240m": {
+     "rows": 8,
+     "provider": "kis",
+     "complete": false,
+     "pages": 30,
+     "warnings": [
+      "페이지 예산(30)을 소진해 중단했습니다.",
+      "정규장 세션 밖 행 2036개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kis_strict",
+     "primary_provider": "kis",
+     "independent_mismatches": [],
+     "independent_compared": 2,
+     "first": "2026-08-21T09:30:00-04:00",
+     "last": "2026-08-26T13:30:00-04:00"
+    }
+   },
+   "pagination": {
+    "pages": 11,
+    "rows": 500,
+    "complete": true
+   }
+  },
+  {
+   "symbol": "IBM",
+   "venue": "NYS",
+   "trading_date": "latest",
+   "intervals": {
+    "1m": {
+     "rows": 498,
+     "provider": "kis",
+     "complete": true,
+     "pages": 8,
+     "warnings": [
+      "정규장 세션 밖 행 419개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kis_strict",
+     "primary_provider": "kis",
+     "independent_mismatches": [],
+     "independent_compared": 498,
+     "first": "2026-08-25T14:12:00-04:00",
+     "last": "2026-08-26T15:59:00-04:00"
+    },
+    "5m": {
+     "rows": 200,
+     "provider": "kis",
+     "complete": true,
+     "pages": 15,
+     "warnings": [
+      "정규장 세션 밖 행 771개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kis_strict",
+     "primary_provider": "kis",
+     "independent_mismatches": [],
+     "independent_compared": 99,
+     "first": "2026-08-24T12:20:00-04:00",
+     "last": "2026-08-26T15:55:00-04:00"
+    },
+    "15m": {
+     "rows": 130,
+     "provider": "kis",
+     "complete": false,
+     "pages": 30,
+     "warnings": [
+      "페이지 예산(30)을 소진해 중단했습니다.",
+      "정규장 세션 밖 행 1645개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kis_strict",
+     "primary_provider": "kis",
+     "independent_mismatches": [],
+     "independent_compared": 33,
+     "first": "2026-08-20T09:30:00-04:00",
+     "last": "2026-08-26T15:45:00-04:00"
+    },
+    "60m": {
+     "rows": 35,
+     "provider": "kis",
+     "complete": false,
+     "pages": 30,
+     "warnings": [
+      "페이지 예산(30)을 소진해 중단했습니다.",
+      "정규장 세션 밖 행 1645개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kis_strict",
+     "primary_provider": "kis",
+     "independent_mismatches": [],
+     "independent_compared": 9,
+     "first": "2026-08-20T09:30:00-04:00",
+     "last": "2026-08-26T15:30:00-04:00"
+    },
+    "120m": {
+     "rows": 20,
+     "provider": "kis",
+     "complete": false,
+     "pages": 30,
+     "warnings": [
+      "페이지 예산(30)을 소진해 중단했습니다.",
+      "정규장 세션 밖 행 1645개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kis_strict",
+     "primary_provider": "kis",
+     "independent_mismatches": [],
+     "independent_compared": 5,
+     "first": "2026-08-20T09:30:00-04:00",
+     "last": "2026-08-26T15:30:00-04:00"
+    },
+    "240m": {
+     "rows": 10,
+     "provider": "kis",
+     "complete": false,
+     "pages": 30,
+     "warnings": [
+      "페이지 예산(30)을 소진해 중단했습니다.",
+      "정규장 세션 밖 행 1645개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kis_strict",
+     "primary_provider": "kis",
+     "independent_mismatches": [],
+     "independent_compared": 2,
+     "first": "2026-08-20T09:30:00-04:00",
+     "last": "2026-08-26T13:30:00-04:00"
+    }
+   },
+   "pagination": {
+    "pages": 8,
+    "rows": 500,
+    "complete": true
+   }
+  },
+  {
+   "symbol": "KO",
+   "venue": "NYS",
+   "trading_date": "latest",
+   "intervals": {
+    "1m": {
+     "rows": 498,
+     "provider": "kis",
+     "complete": true,
+     "pages": 10,
+     "warnings": [
+      "정규장 세션 밖 행 600개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kis_strict",
+     "primary_provider": "kis",
+     "independent_mismatches": [],
+     "independent_compared": 498,
+     "first": "2026-08-25T14:12:00-04:00",
+     "last": "2026-08-26T15:59:00-04:00"
+    },
+    "5m": {
+     "rows": 200,
+     "provider": "kis",
+     "complete": true,
+     "pages": 18,
+     "warnings": [
+      "정규장 세션 밖 행 1070개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kis_strict",
+     "primary_provider": "kis",
+     "independent_mismatches": [],
+     "independent_compared": 99,
+     "first": "2026-08-24T12:20:00-04:00",
+     "last": "2026-08-26T15:55:00-04:00"
+    },
+    "15m": {
+     "rows": 109,
+     "provider": "kis",
+     "complete": false,
+     "pages": 30,
+     "warnings": [
+      "페이지 예산(30)을 소진해 중단했습니다.",
+      "정규장 세션 밖 행 1973개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kis_strict",
+     "primary_provider": "kis",
+     "independent_mismatches": [],
+     "independent_compared": 33,
+     "first": "2026-08-20T14:45:00-04:00",
+     "last": "2026-08-26T15:45:00-04:00"
+    },
+    "60m": {
+     "rows": 30,
+     "provider": "kis",
+     "complete": false,
+     "pages": 30,
+     "warnings": [
+      "페이지 예산(30)을 소진해 중단했습니다.",
+      "정규장 세션 밖 행 1973개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kis_strict",
+     "primary_provider": "kis",
+     "independent_mismatches": [],
+     "independent_compared": 9,
+     "first": "2026-08-20T14:30:00-04:00",
+     "last": "2026-08-26T15:30:00-04:00"
+    },
+    "120m": {
+     "rows": 18,
+     "provider": "kis",
+     "complete": false,
+     "pages": 30,
+     "warnings": [
+      "페이지 예산(30)을 소진해 중단했습니다.",
+      "정규장 세션 밖 행 1973개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kis_strict",
+     "primary_provider": "kis",
+     "independent_mismatches": [],
+     "independent_compared": 5,
+     "first": "2026-08-20T13:30:00-04:00",
+     "last": "2026-08-26T15:30:00-04:00"
+    },
+    "240m": {
+     "rows": 9,
+     "provider": "kis",
+     "complete": false,
+     "pages": 30,
+     "warnings": [
+      "페이지 예산(30)을 소진해 중단했습니다.",
+      "정규장 세션 밖 행 1973개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kis_strict",
+     "primary_provider": "kis",
+     "independent_mismatches": [],
+     "independent_compared": 2,
+     "first": "2026-08-20T13:30:00-04:00",
+     "last": "2026-08-26T13:30:00-04:00"
+    }
+   },
+   "pagination": {
+    "pages": 10,
+    "rows": 500,
+    "complete": true
+   }
+  },
+  {
+   "symbol": "JPM",
+   "venue": "NYS",
+   "trading_date": "latest",
+   "intervals": {
+    "1m": {
+     "rows": 498,
+     "provider": "kis",
+     "complete": true,
+     "pages": 7,
+     "warnings": [
+      "정규장 세션 밖 행 269개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kis_strict",
+     "primary_provider": "kis",
+     "independent_mismatches": [],
+     "independent_compared": 498,
+     "first": "2026-08-25T14:12:00-04:00",
+     "last": "2026-08-26T15:59:00-04:00"
+    },
+    "5m": {
+     "rows": 200,
+     "provider": "kis",
+     "complete": true,
+     "pages": 13,
+     "warnings": [
+      "정규장 세션 밖 행 500개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kis_strict",
+     "primary_provider": "kis",
+     "independent_mismatches": [],
+     "independent_compared": 99,
+     "first": "2026-08-24T12:20:00-04:00",
+     "last": "2026-08-26T15:55:00-04:00"
+    },
+    "15m": {
+     "rows": 154,
+     "provider": "kis",
+     "complete": false,
+     "pages": 30,
+     "warnings": [
+      "페이지 예산(30)을 소진해 중단했습니다.",
+      "정규장 세션 밖 행 1290개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kis_strict",
+     "primary_provider": "kis",
+     "independent_mismatches": [],
+     "independent_compared": 33,
+     "first": "2026-08-19T10:00:00-04:00",
+     "last": "2026-08-26T15:45:00-04:00"
+    },
+    "60m": {
+     "rows": 42,
+     "provider": "kis",
+     "complete": false,
+     "pages": 30,
+     "warnings": [
+      "페이지 예산(30)을 소진해 중단했습니다.",
+      "정규장 세션 밖 행 1290개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kis_strict",
+     "primary_provider": "kis",
+     "independent_mismatches": [],
+     "independent_compared": 9,
+     "first": "2026-08-19T09:30:00-04:00",
+     "last": "2026-08-26T15:30:00-04:00"
+    },
+    "120m": {
+     "rows": 24,
+     "provider": "kis",
+     "complete": false,
+     "pages": 30,
+     "warnings": [
+      "페이지 예산(30)을 소진해 중단했습니다.",
+      "정규장 세션 밖 행 1290개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kis_strict",
+     "primary_provider": "kis",
+     "independent_mismatches": [],
+     "independent_compared": 5,
+     "first": "2026-08-19T09:30:00-04:00",
+     "last": "2026-08-26T15:30:00-04:00"
+    },
+    "240m": {
+     "rows": 12,
+     "provider": "kis",
+     "complete": false,
+     "pages": 30,
+     "warnings": [
+      "페이지 예산(30)을 소진해 중단했습니다.",
+      "정규장 세션 밖 행 1290개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kis_strict",
+     "primary_provider": "kis",
+     "independent_mismatches": [],
+     "independent_compared": 2,
+     "first": "2026-08-19T09:30:00-04:00",
+     "last": "2026-08-26T13:30:00-04:00"
+    }
+   },
+   "pagination": {
+    "pages": 7,
+    "rows": 500,
+    "complete": true
+   }
+  },
+  {
+   "symbol": "QQQ",
+   "venue": "NAS",
+   "trading_date": "latest",
+   "intervals": {
+    "1m": {
+     "rows": 498,
+     "provider": "kis",
+     "complete": true,
+     "pages": 11,
+     "warnings": [
+      "정규장 세션 밖 행 796개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kis_strict",
+     "primary_provider": "kis",
+     "independent_mismatches": [],
+     "independent_compared": 498,
+     "first": "2026-08-25T14:12:00-04:00",
+     "last": "2026-08-26T15:59:00-04:00"
+    },
+    "5m": {
+     "rows": 200,
+     "provider": "kis",
+     "complete": true,
+     "pages": 20,
+     "warnings": [
+      "정규장 세션 밖 행 1362개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kis_strict",
+     "primary_provider": "kis",
+     "independent_mismatches": [],
+     "independent_compared": 99,
+     "first": "2026-08-24T12:20:00-04:00",
+     "last": "2026-08-26T15:55:00-04:00"
+    },
+    "15m": {
+     "rows": 104,
+     "provider": "kis",
+     "complete": false,
+     "pages": 30,
+     "warnings": [
+      "페이지 예산(30)을 소진해 중단했습니다.",
+      "정규장 세션 밖 행 2036개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kis_strict",
+     "primary_provider": "kis",
+     "independent_mismatches": [],
+     "independent_compared": 33,
+     "first": "2026-08-21T09:30:00-04:00",
+     "last": "2026-08-26T15:45:00-04:00"
+    },
+    "60m": {
+     "rows": 28,
+     "provider": "kis",
+     "complete": false,
+     "pages": 30,
+     "warnings": [
+      "페이지 예산(30)을 소진해 중단했습니다.",
+      "정규장 세션 밖 행 2036개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kis_strict",
+     "primary_provider": "kis",
+     "independent_mismatches": [],
+     "independent_compared": 9,
+     "first": "2026-08-21T09:30:00-04:00",
+     "last": "2026-08-26T15:30:00-04:00"
+    },
+    "120m": {
+     "rows": 16,
+     "provider": "kis",
+     "complete": false,
+     "pages": 30,
+     "warnings": [
+      "페이지 예산(30)을 소진해 중단했습니다.",
+      "정규장 세션 밖 행 2036개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kis_strict",
+     "primary_provider": "kis",
+     "independent_mismatches": [],
+     "independent_compared": 5,
+     "first": "2026-08-21T09:30:00-04:00",
+     "last": "2026-08-26T15:30:00-04:00"
+    },
+    "240m": {
+     "rows": 8,
+     "provider": "kis",
+     "complete": false,
+     "pages": 30,
+     "warnings": [
+      "페이지 예산(30)을 소진해 중단했습니다.",
+      "정규장 세션 밖 행 2036개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kis_strict",
+     "primary_provider": "kis",
+     "independent_mismatches": [],
+     "independent_compared": 2,
+     "first": "2026-08-21T09:30:00-04:00",
+     "last": "2026-08-26T13:30:00-04:00"
+    }
+   },
+   "pagination": {
+    "pages": 11,
+    "rows": 500,
+    "complete": true
+   }
+  },
+  {
+   "symbol": "SPY",
+   "venue": "AMS",
+   "trading_date": "latest",
+   "intervals": {
+    "1m": {
+     "rows": 498,
+     "provider": "kis",
+     "complete": true,
+     "pages": 11,
+     "warnings": [
+      "정규장 세션 밖 행 744개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kis_strict",
+     "primary_provider": "kis",
+     "independent_mismatches": [],
+     "independent_compared": 498,
+     "first": "2026-08-25T14:12:00-04:00",
+     "last": "2026-08-26T15:59:00-04:00"
+    },
+    "5m": {
+     "rows": 200,
+     "provider": "kis",
+     "complete": true,
+     "pages": 19,
+     "warnings": [
+      "정규장 세션 밖 행 1276개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kis_strict",
+     "primary_provider": "kis",
+     "independent_mismatches": [],
+     "independent_compared": 99,
+     "first": "2026-08-24T12:20:00-04:00",
+     "last": "2026-08-26T15:55:00-04:00"
+    },
+    "15m": {
+     "rows": 104,
+     "provider": "kis",
+     "complete": false,
+     "pages": 30,
+     "warnings": [
+      "페이지 예산(30)을 소진해 중단했습니다.",
+      "정규장 세션 밖 행 2036개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kis_strict",
+     "primary_provider": "kis",
+     "independent_mismatches": [],
+     "independent_compared": 33,
+     "first": "2026-08-21T09:30:00-04:00",
+     "last": "2026-08-26T15:45:00-04:00"
+    },
+    "60m": {
+     "rows": 28,
+     "provider": "kis",
+     "complete": false,
+     "pages": 30,
+     "warnings": [
+      "페이지 예산(30)을 소진해 중단했습니다.",
+      "정규장 세션 밖 행 2036개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kis_strict",
+     "primary_provider": "kis",
+     "independent_mismatches": [],
+     "independent_compared": 9,
+     "first": "2026-08-21T09:30:00-04:00",
+     "last": "2026-08-26T15:30:00-04:00"
+    },
+    "120m": {
+     "rows": 16,
+     "provider": "kis",
+     "complete": false,
+     "pages": 30,
+     "warnings": [
+      "페이지 예산(30)을 소진해 중단했습니다.",
+      "정규장 세션 밖 행 2036개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kis_strict",
+     "primary_provider": "kis",
+     "independent_mismatches": [],
+     "independent_compared": 5,
+     "first": "2026-08-21T09:30:00-04:00",
+     "last": "2026-08-26T15:30:00-04:00"
+    },
+    "240m": {
+     "rows": 8,
+     "provider": "kis",
+     "complete": false,
+     "pages": 30,
+     "warnings": [
+      "페이지 예산(30)을 소진해 중단했습니다.",
+      "정규장 세션 밖 행 2036개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kis_strict",
+     "primary_provider": "kis",
+     "independent_mismatches": [],
+     "independent_compared": 2,
+     "first": "2026-08-21T09:30:00-04:00",
+     "last": "2026-08-26T13:30:00-04:00"
+    }
+   },
+   "pagination": {
+    "pages": 11,
+    "rows": 500,
+    "complete": true
+   }
+  },
+  {
+   "symbol": "IWM",
+   "venue": "AMS",
+   "trading_date": "latest",
+   "intervals": {
+    "1m": {
+     "rows": 498,
+     "provider": "kis",
+     "complete": true,
+     "pages": 8,
+     "warnings": [
+      "정규장 세션 밖 행 373개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kis_strict",
+     "primary_provider": "kis",
+     "independent_mismatches": [],
+     "independent_compared": 498,
+     "first": "2026-08-25T14:12:00-04:00",
+     "last": "2026-08-26T15:59:00-04:00"
+    },
+    "5m": {
+     "rows": 200,
+     "provider": "kis",
+     "complete": true,
+     "pages": 14,
+     "warnings": [
+      "정규장 세션 밖 행 657개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kis_strict",
+     "primary_provider": "kis",
+     "independent_mismatches": [],
+     "independent_compared": 99,
+     "first": "2026-08-24T12:20:00-04:00",
+     "last": "2026-08-26T15:55:00-04:00"
+    },
+    "15m": {
+     "rows": 137,
+     "provider": "kis",
+     "complete": false,
+     "pages": 30,
+     "warnings": [
+      "페이지 예산(30)을 소진해 중단했습니다.",
+      "정규장 세션 밖 행 1545개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kis_strict",
+     "primary_provider": "kis",
+     "independent_mismatches": [],
+     "independent_compared": 33,
+     "first": "2026-08-19T14:15:00-04:00",
+     "last": "2026-08-26T15:45:00-04:00"
+    },
+    "60m": {
+     "rows": 38,
+     "provider": "kis",
+     "complete": false,
+     "pages": 30,
+     "warnings": [
+      "페이지 예산(30)을 소진해 중단했습니다.",
+      "정규장 세션 밖 행 1545개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kis_strict",
+     "primary_provider": "kis",
+     "independent_mismatches": [],
+     "independent_compared": 9,
+     "first": "2026-08-19T13:30:00-04:00",
+     "last": "2026-08-26T15:30:00-04:00"
+    },
+    "120m": {
+     "rows": 22,
+     "provider": "kis",
+     "complete": false,
+     "pages": 30,
+     "warnings": [
+      "페이지 예산(30)을 소진해 중단했습니다.",
+      "정규장 세션 밖 행 1545개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kis_strict",
+     "primary_provider": "kis",
+     "independent_mismatches": [],
+     "independent_compared": 5,
+     "first": "2026-08-19T13:30:00-04:00",
+     "last": "2026-08-26T15:30:00-04:00"
+    },
+    "240m": {
+     "rows": 11,
+     "provider": "kis",
+     "complete": false,
+     "pages": 30,
+     "warnings": [
+      "페이지 예산(30)을 소진해 중단했습니다.",
+      "정규장 세션 밖 행 1545개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kis_strict",
+     "primary_provider": "kis",
+     "independent_mismatches": [],
+     "independent_compared": 2,
+     "first": "2026-08-19T13:30:00-04:00",
+     "last": "2026-08-26T13:30:00-04:00"
+    }
+   },
+   "pagination": {
+    "pages": 8,
+    "rows": 500,
+    "complete": true
+   }
+  },
+  {
+   "symbol": "PLTR",
+   "venue": "NAS",
+   "trading_date": "latest",
+   "intervals": {
+    "1m": {
+     "rows": 498,
+     "provider": "kis",
+     "complete": true,
+     "pages": 11,
+     "warnings": [
+      "정규장 세션 밖 행 804개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kis_strict",
+     "primary_provider": "kis",
+     "independent_mismatches": [],
+     "independent_compared": 498,
+     "first": "2026-08-25T14:12:00-04:00",
+     "last": "2026-08-26T15:59:00-04:00"
+    },
+    "5m": {
+     "rows": 200,
+     "provider": "kis",
+     "complete": true,
+     "pages": 20,
+     "warnings": [
+      "정규장 세션 밖 행 1349개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kis_strict",
+     "primary_provider": "kis",
+     "independent_mismatches": [],
+     "independent_compared": 99,
+     "first": "2026-08-24T12:20:00-04:00",
+     "last": "2026-08-26T15:55:00-04:00"
+    },
+    "15m": {
+     "rows": 104,
+     "provider": "kis",
+     "complete": false,
+     "pages": 30,
+     "warnings": [
+      "페이지 예산(30)을 소진해 중단했습니다.",
+      "정규장 세션 밖 행 2036개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kis_strict",
+     "primary_provider": "kis",
+     "independent_mismatches": [],
+     "independent_compared": 33,
+     "first": "2026-08-21T09:30:00-04:00",
+     "last": "2026-08-26T15:45:00-04:00"
+    },
+    "60m": {
+     "rows": 28,
+     "provider": "kis",
+     "complete": false,
+     "pages": 30,
+     "warnings": [
+      "페이지 예산(30)을 소진해 중단했습니다.",
+      "정규장 세션 밖 행 2036개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kis_strict",
+     "primary_provider": "kis",
+     "independent_mismatches": [],
+     "independent_compared": 9,
+     "first": "2026-08-21T09:30:00-04:00",
+     "last": "2026-08-26T15:30:00-04:00"
+    },
+    "120m": {
+     "rows": 16,
+     "provider": "kis",
+     "complete": false,
+     "pages": 30,
+     "warnings": [
+      "페이지 예산(30)을 소진해 중단했습니다.",
+      "정규장 세션 밖 행 2036개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kis_strict",
+     "primary_provider": "kis",
+     "independent_mismatches": [],
+     "independent_compared": 5,
+     "first": "2026-08-21T09:30:00-04:00",
+     "last": "2026-08-26T15:30:00-04:00"
+    },
+    "240m": {
+     "rows": 8,
+     "provider": "kis",
+     "complete": false,
+     "pages": 30,
+     "warnings": [
+      "페이지 예산(30)을 소진해 중단했습니다.",
+      "정규장 세션 밖 행 2036개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kis_strict",
+     "primary_provider": "kis",
+     "independent_mismatches": [],
+     "independent_compared": 2,
+     "first": "2026-08-21T09:30:00-04:00",
+     "last": "2026-08-26T13:30:00-04:00"
+    }
+   },
+   "pagination": {
+    "pages": 11,
+    "rows": 500,
+    "complete": true
+   }
+  },
+  {
+   "symbol": "SOFI",
+   "venue": "NAS",
+   "trading_date": "latest",
+   "intervals": {
+    "1m": {
+     "rows": 498,
+     "provider": "kis",
+     "complete": true,
+     "pages": 11,
+     "warnings": [
+      "정규장 세션 밖 행 736개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kis_strict",
+     "primary_provider": "kis",
+     "independent_mismatches": [],
+     "independent_compared": 498,
+     "first": "2026-08-25T14:12:00-04:00",
+     "last": "2026-08-26T15:59:00-04:00"
+    },
+    "5m": {
+     "rows": 200,
+     "provider": "kis",
+     "complete": true,
+     "pages": 19,
+     "warnings": [
+      "정규장 세션 밖 행 1213개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kis_strict",
+     "primary_provider": "kis",
+     "independent_mismatches": [],
+     "independent_compared": 99,
+     "first": "2026-08-24T12:20:00-04:00",
+     "last": "2026-08-26T15:55:00-04:00"
+    },
+    "15m": {
+     "rows": 104,
+     "provider": "kis",
+     "complete": false,
+     "pages": 30,
+     "warnings": [
+      "페이지 예산(30)을 소진해 중단했습니다.",
+      "정규장 세션 밖 행 2036개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kis_strict",
+     "primary_provider": "kis",
+     "independent_mismatches": [],
+     "independent_compared": 33,
+     "first": "2026-08-21T09:30:00-04:00",
+     "last": "2026-08-26T15:45:00-04:00"
+    },
+    "60m": {
+     "rows": 28,
+     "provider": "kis",
+     "complete": false,
+     "pages": 30,
+     "warnings": [
+      "페이지 예산(30)을 소진해 중단했습니다.",
+      "정규장 세션 밖 행 2036개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kis_strict",
+     "primary_provider": "kis",
+     "independent_mismatches": [],
+     "independent_compared": 9,
+     "first": "2026-08-21T09:30:00-04:00",
+     "last": "2026-08-26T15:30:00-04:00"
+    },
+    "120m": {
+     "rows": 16,
+     "provider": "kis",
+     "complete": false,
+     "pages": 30,
+     "warnings": [
+      "페이지 예산(30)을 소진해 중단했습니다.",
+      "정규장 세션 밖 행 2036개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kis_strict",
+     "primary_provider": "kis",
+     "independent_mismatches": [],
+     "independent_compared": 5,
+     "first": "2026-08-21T09:30:00-04:00",
+     "last": "2026-08-26T15:30:00-04:00"
+    },
+    "240m": {
+     "rows": 8,
+     "provider": "kis",
+     "complete": false,
+     "pages": 30,
+     "warnings": [
+      "페이지 예산(30)을 소진해 중단했습니다.",
+      "정규장 세션 밖 행 2036개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kis_strict",
+     "primary_provider": "kis",
+     "independent_mismatches": [],
+     "independent_compared": 2,
+     "first": "2026-08-21T09:30:00-04:00",
+     "last": "2026-08-26T13:30:00-04:00"
+    }
+   },
+   "pagination": {
+    "pages": 11,
+    "rows": 500,
+    "complete": true
+   }
+  },
+  {
+   "symbol": "BRK/B",
+   "venue": "NYS",
+   "trading_date": "latest",
+   "intervals": {
+    "1m": {
+     "rows": 498,
+     "provider": "kis",
+     "complete": true,
+     "pages": 8,
+     "warnings": [
+      "정규장 세션 밖 행 417개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kis_strict",
+     "primary_provider": "kis",
+     "independent_mismatches": [],
+     "independent_compared": 498,
+     "first": "2026-08-25T14:12:00-04:00",
+     "last": "2026-08-26T15:59:00-04:00"
+    },
+    "5m": {
+     "rows": 200,
+     "provider": "kis",
+     "complete": true,
+     "pages": 15,
+     "warnings": [
+      "정규장 세션 밖 행 776개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kis_strict",
+     "primary_provider": "kis",
+     "independent_mismatches": [],
+     "independent_compared": 99,
+     "first": "2026-08-24T12:20:00-04:00",
+     "last": "2026-08-26T15:55:00-04:00"
+    },
+    "15m": {
+     "rows": 130,
+     "provider": "kis",
+     "complete": false,
+     "pages": 30,
+     "warnings": [
+      "페이지 예산(30)을 소진해 중단했습니다.",
+      "정규장 세션 밖 행 1645개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kis_strict",
+     "primary_provider": "kis",
+     "independent_mismatches": [],
+     "independent_compared": 33,
+     "first": "2026-08-20T09:30:00-04:00",
+     "last": "2026-08-26T15:45:00-04:00"
+    },
+    "60m": {
+     "rows": 35,
+     "provider": "kis",
+     "complete": false,
+     "pages": 30,
+     "warnings": [
+      "페이지 예산(30)을 소진해 중단했습니다.",
+      "정규장 세션 밖 행 1645개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kis_strict",
+     "primary_provider": "kis",
+     "independent_mismatches": [],
+     "independent_compared": 9,
+     "first": "2026-08-20T09:30:00-04:00",
+     "last": "2026-08-26T15:30:00-04:00"
+    },
+    "120m": {
+     "rows": 20,
+     "provider": "kis",
+     "complete": false,
+     "pages": 30,
+     "warnings": [
+      "페이지 예산(30)을 소진해 중단했습니다.",
+      "정규장 세션 밖 행 1645개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kis_strict",
+     "primary_provider": "kis",
+     "independent_mismatches": [],
+     "independent_compared": 5,
+     "first": "2026-08-20T09:30:00-04:00",
+     "last": "2026-08-26T15:30:00-04:00"
+    },
+    "240m": {
+     "rows": 10,
+     "provider": "kis",
+     "complete": false,
+     "pages": 30,
+     "warnings": [
+      "페이지 예산(30)을 소진해 중단했습니다.",
+      "정규장 세션 밖 행 1645개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kis_strict",
+     "primary_provider": "kis",
+     "independent_mismatches": [],
+     "independent_compared": 2,
+     "first": "2026-08-20T09:30:00-04:00",
+     "last": "2026-08-26T13:30:00-04:00"
+    }
+   },
+   "pagination": {
+    "pages": 8,
+    "rows": 500,
+    "complete": true
+   }
+  },
+  {
+   "symbol": "AAPL",
+   "venue": "NAS",
+   "trading_date": "2026-08-20",
+   "intervals": {
+    "1m": {
+     "rows": 498,
+     "provider": "kis",
+     "complete": true,
+     "pages": 11,
+     "warnings": [
+      "정규장 세션 밖 행 795개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kis_strict",
+     "primary_provider": "kis",
+     "independent_mismatches": [],
+     "independent_compared": 498,
+     "first": "2026-08-19T14:12:00-04:00",
+     "last": "2026-08-20T15:59:00-04:00"
+    },
+    "5m": {
+     "rows": 200,
+     "provider": "kis",
+     "complete": true,
+     "pages": 20,
+     "warnings": [
+      "정규장 세션 밖 행 1357개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kis_strict",
+     "primary_provider": "kis",
+     "independent_mismatches": [],
+     "independent_compared": 99,
+     "first": "2026-08-18T12:20:00-04:00",
+     "last": "2026-08-20T15:55:00-04:00"
+    },
+    "15m": {
+     "rows": 104,
+     "provider": "kis",
+     "complete": false,
+     "pages": 30,
+     "warnings": [
+      "페이지 예산(30)을 소진해 중단했습니다.",
+      "정규장 세션 밖 행 2036개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kis_strict",
+     "primary_provider": "kis",
+     "independent_mismatches": [],
+     "independent_compared": 33,
+     "first": "2026-08-17T09:30:00-04:00",
+     "last": "2026-08-20T15:45:00-04:00"
+    },
+    "60m": {
+     "rows": 28,
+     "provider": "kis",
+     "complete": false,
+     "pages": 30,
+     "warnings": [
+      "페이지 예산(30)을 소진해 중단했습니다.",
+      "정규장 세션 밖 행 2036개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kis_strict",
+     "primary_provider": "kis",
+     "independent_mismatches": [],
+     "independent_compared": 9,
+     "first": "2026-08-17T09:30:00-04:00",
+     "last": "2026-08-20T15:30:00-04:00"
+    },
+    "120m": {
+     "rows": 16,
+     "provider": "kis",
+     "complete": false,
+     "pages": 30,
+     "warnings": [
+      "페이지 예산(30)을 소진해 중단했습니다.",
+      "정규장 세션 밖 행 2036개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kis_strict",
+     "primary_provider": "kis",
+     "independent_mismatches": [],
+     "independent_compared": 5,
+     "first": "2026-08-17T09:30:00-04:00",
+     "last": "2026-08-20T15:30:00-04:00"
+    },
+    "240m": {
+     "rows": 8,
+     "provider": "kis",
+     "complete": false,
+     "pages": 30,
+     "warnings": [
+      "페이지 예산(30)을 소진해 중단했습니다.",
+      "정규장 세션 밖 행 2036개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kis_strict",
+     "primary_provider": "kis",
+     "independent_mismatches": [],
+     "independent_compared": 2,
+     "first": "2026-08-17T09:30:00-04:00",
+     "last": "2026-08-20T13:30:00-04:00"
+    }
+   },
+   "pagination": {
+    "pages": 11,
+    "rows": 500,
+    "complete": true
+   }
+  },
+  {
+   "symbol": "AAPL",
+   "venue": "NAS",
+   "trading_date": "2026-07-30",
+   "intervals": {
+    "1m": {
+     "rows": 498,
+     "provider": "kis",
+     "complete": true,
+     "pages": 11,
+     "warnings": [
+      "정규장 세션 밖 행 808개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kis_strict",
+     "primary_provider": "kis",
+     "independent_mismatches": [],
+     "independent_compared": 498,
+     "first": "2026-07-29T14:12:00-04:00",
+     "last": "2026-07-30T15:59:00-04:00"
+    },
+    "5m": {
+     "rows": 200,
+     "provider": "kis",
+     "complete": true,
+     "pages": 20,
+     "warnings": [
+      "정규장 세션 밖 행 1370개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kis_strict",
+     "primary_provider": "kis",
+     "independent_mismatches": [],
+     "independent_compared": 99,
+     "first": "2026-07-28T12:20:00-04:00",
+     "last": "2026-07-30T15:55:00-04:00"
+    },
+    "15m": {
+     "rows": 104,
+     "provider": "kis",
+     "complete": false,
+     "pages": 30,
+     "warnings": [
+      "페이지 예산(30)을 소진해 중단했습니다.",
+      "정규장 세션 밖 행 2036개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kis_strict",
+     "primary_provider": "kis",
+     "independent_mismatches": [],
+     "independent_compared": 33,
+     "first": "2026-07-27T09:30:00-04:00",
+     "last": "2026-07-30T15:45:00-04:00"
+    },
+    "60m": {
+     "rows": 28,
+     "provider": "kis",
+     "complete": false,
+     "pages": 30,
+     "warnings": [
+      "페이지 예산(30)을 소진해 중단했습니다.",
+      "정규장 세션 밖 행 2036개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kis_strict",
+     "primary_provider": "kis",
+     "independent_mismatches": [],
+     "independent_compared": 9,
+     "first": "2026-07-27T09:30:00-04:00",
+     "last": "2026-07-30T15:30:00-04:00"
+    },
+    "120m": {
+     "rows": 16,
+     "provider": "kis",
+     "complete": false,
+     "pages": 30,
+     "warnings": [
+      "페이지 예산(30)을 소진해 중단했습니다.",
+      "정규장 세션 밖 행 2036개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kis_strict",
+     "primary_provider": "kis",
+     "independent_mismatches": [],
+     "independent_compared": 5,
+     "first": "2026-07-27T09:30:00-04:00",
+     "last": "2026-07-30T15:30:00-04:00"
+    },
+    "240m": {
+     "rows": 8,
+     "provider": "kis",
+     "complete": false,
+     "pages": 30,
+     "warnings": [
+      "페이지 예산(30)을 소진해 중단했습니다.",
+      "정규장 세션 밖 행 2036개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kis_strict",
+     "primary_provider": "kis",
+     "independent_mismatches": [],
+     "independent_compared": 2,
+     "first": "2026-07-27T09:30:00-04:00",
+     "last": "2026-07-30T13:30:00-04:00"
+    }
+   },
+   "pagination": {
+    "pages": 11,
+    "rows": 500,
+    "complete": true
+   }
+  }
+ ]
+}

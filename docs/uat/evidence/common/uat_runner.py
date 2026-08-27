@@ -53,6 +53,19 @@ US_SYMBOLS = [
     ("AAPL", "NAS", -5), ("AAPL", "NAS", -20),
 ]
 
+# 공급자별 실측 표기 차이 (2026-08-27 실측, probe_ams_brkb):
+# - KIS EXCD: NYSE Arca 상장 ETF(SPY·IWM)는 AMS 로만 조회된다.
+#   NYS 로는 빈 결과(kis_empty)가 온다. (AMS 199행 실수신 확인)
+# - KIS SYMB: BRK.B 는 "BRK/B" 슬래시 표기다. "BRKB"/"BRK.B" 는 빈 결과.
+# 키움·토스 항목은 기존 표기를 유지한다 (키움 BRK.B 는 구조화 오류가 정답).
+US_OVERRIDES = {
+    "kis": {
+        ("SPY", "NYS"): ("SPY", "AMS"),
+        ("IWM", "NYS"): ("IWM", "AMS"),
+        ("BRK.B", "NYS"): ("BRK/B", "NYS"),
+    },
+}
+
 INTERVALS = ("1m", "5m", "15m", "60m", "120m", "240m")
 
 # 독립 검산용 세션 명세 (설계 14절에서 독립 기술. 운영 코드 미참조)
@@ -240,12 +253,22 @@ def _direct_fetch_1m(provider, market, symbol, venue, trading_date,
         venue=("KRX" if market == "KR" else (venue or "NAS")),
         session="regular", adjustment="unadjusted", completed_only=True,
         source=provider)
-    try:
-        ds = asyncio.run(adapter.fetch_bars(request))
-        return ds, None
-    except Exception as exc:  # noqa: BLE001
-        return None, str(getattr(exc, "provider_status",
-                                 type(exc).__name__))
+    last_err = None
+    for attempt in range(2):
+        try:
+            ds = asyncio.run(adapter.fetch_bars(request))
+            return ds, None
+        except Exception as exc:  # noqa: BLE001
+            last_err = str(getattr(exc, "provider_status",
+                                   type(exc).__name__))
+            # KIS tokenP 는 1분 1회 제한이다. 러너 본체 런타임이 방금
+            # 토큰을 발급했으면 직접 클라이언트의 첫 발급이 여기 걸린다.
+            # 판정 대상 계약이 아니므로 1회만 대기 후 재시도한다.
+            if last_err == "rate_limited" and attempt == 0:
+                time.sleep(70)
+                continue
+            break
+    return None, last_err
 
 
 def _continuation_probe(provider: str, market: str, symbol: str,
@@ -548,6 +571,8 @@ def _run_inner(provider: str, market: str, out_dir: Path) -> int:
             venue = None
         else:
             symbol, venue, offset = entry
+            symbol, venue = US_OVERRIDES.get(provider, {}).get(
+                (symbol, venue), (symbol, venue))
         trading_date = _shift_trading_day(market, offset)
         record = {"symbol": symbol, "venue": venue,
                   "trading_date": str(trading_date) if trading_date
