@@ -106,6 +106,17 @@ class UsSoundnessTests(unittest.IsolatedAsyncioTestCase):
         self.assertGreater(t1["last_fact"]["days_behind_base"], 400)
         self.assertTrue(t1["required_reports"])
 
+    async def test_followup_guidance_uses_real_tool_args(self):
+        """실측: 존재하지 않는 form·keyword 인자를 안내하면 후속 호출이 실패한다."""
+        out = await self._run(_JPM_FACTS)
+        for key in ("cet1_ratio", "lcr"):
+            how = out["metrics"][key]["how"]
+            self.assertNotIn("form=", how, key)
+            self.assertNotIn("keyword=", how, key)
+            self.assertIn("get_us_filings", how, key)      # 접수번호를 먼저 얻는 경로
+            self.assertIn("accession", how, key)
+            self.assertIn("find=", how, key)               # 실제 인자명
+
     async def test_non_financial_company_is_flagged(self):
         out = await self._run(_JPM_FACTS,
                               subs=_subs(sic="3711", desc="Motor Vehicles"))

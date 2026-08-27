@@ -7212,9 +7212,10 @@ async def get_financial_soundness(symbol: str) -> str:
     metrics: dict[str, dict] = {}
     for key in _SOUND_RATIO_CONCEPTS:
         f = facts[key]
-        how = (f"get_us_filing_detail('{sym}', form='10-Q', "
-               f"keyword='{'LCR' if key in ('lcr', 'nsfr') else 'CET1'}') 로 "
-               "최신 분기 원문에서 해당 표를 바로 찾을 수 있습니다.")
+        kw = "LCR" if key in ("lcr", "nsfr") else "CET1"
+        how = (f"get_us_filings('{sym}', forms=['10-Q','10-K']) 로 최신 접수번호"
+               f"(accession)를 얻은 뒤 get_us_filing_detail('{sym}', "
+               f"accession_no=..., find='{kw}') 로 원문에서 해당 표를 찾으세요.")
         if "value" not in f:
             metrics[key] = {"status": f.get("status", "not_in_xbrl"),
                             **({"detail": f["detail"]} if f.get("detail") else {}),
@@ -7461,7 +7462,8 @@ async def get_us_liquidity(ticker: str) -> str:
                                      if cash else None),
         "official_runway": official,
         "note": "런웨이 개월 = 기반액 / 월 소진액(burn). burn 은 "
-                "get_us_financial_statement(cash_flow)의 영업현금흐름으로 정하세요.",
+                "get_us_financial_statement(ticker, statement_type='cash_flow', "
+                "period='quarterly')의 영업현금흐름으로 정하세요.",
     }
 
     not_reported = sorted(n for n, f in facts.items() if f.get("status") == "not_reported")
