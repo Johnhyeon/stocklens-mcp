@@ -61,11 +61,12 @@ def _verify(scenario: Scenario) -> dict:
 
 
 class KiwoomVerifierTests(unittest.TestCase):
-    def test_all_available(self):
+    def test_kr_available_us_fixed_unavailable(self):
+        # US 는 실측 계약 불일치(2026-08-27)로 probe 없이 unavailable.
         result = _verify(Scenario())
         self.assertEqual(result["auth"], "ok")
         self.assertEqual(result["kr_intraday"], "available")
-        self.assertEqual(result["us_intraday"], "available")
+        self.assertEqual(result["us_intraday"], "unavailable")
 
     def test_invalid_credentials_short_circuits(self):
         result = _verify(Scenario(
@@ -82,8 +83,8 @@ class KiwoomVerifierTests(unittest.TestCase):
 
     def test_permission_denied_is_unavailable(self):
         result = _verify(Scenario(
-            us=httpx.Response(403, json={})))
-        self.assertEqual(result["us_intraday"], "unavailable")
+            kr=httpx.Response(403, json={})))
+        self.assertEqual(result["kr_intraday"], "unavailable")
 
     def test_body_error_code_is_unavailable(self):
         result = _verify(Scenario(

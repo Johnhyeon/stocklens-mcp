@@ -44,15 +44,9 @@ class KiwoomVerifier:
 
         result["auth"] = "ok"
         result["kr_intraday"] = kr
-
-        us = await self._probe(client, "us_chart", "usa06011", {
-            "stex_tp": "ND",
-            "stk_cd": "AAPL",
-            "tic_scope": "1",
-            "upd_stkpc_tp": "0",
-            "exrt_appl_tp": "0",
-        })
-        result["us_intraday"] = us
+        # US 는 실측 계약 불일치(가격·거래량·커버리지, 2026-08-27)로
+        # 코드 차단 상태다. probe 없이 unavailable 로 고정한다.
+        result["us_intraday"] = "unavailable"
         return result
 
     async def _probe(self, client: KiwoomClient, endpoint_id: str,

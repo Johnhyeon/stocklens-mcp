@@ -232,56 +232,9 @@ def _kiwoom_kr_error():
     return run(provider.fetch_bars(_request("KR")))
 
 
-def _kiwoom_us_rows(times, day="20260826"):
-    """실측 semantics: cntr_tm 은 KST 라벨, bus_dt 가 미국 영업일자.
-
-    ET 시각(HHMMSS) 목록을 받아 KST 라벨(cntr_tm)로 변환해 만든다
-    (EDT = KST-13시간, 2026-08 기준).
-    """
-    import datetime as _dt
-    from zoneinfo import ZoneInfo as _Z
-
-    rows = []
-    bus = _dt.datetime.strptime(day, "%Y%m%d").date()
-    for t in times:
-        et = _dt.datetime(
-            bus.year, bus.month, bus.day,
-            int(t[:2]), int(t[2:4]), int(t[4:6]),
-            tzinfo=_Z("America/New_York"))
-        kst = et.astimezone(_Z("Asia/Seoul"))
-        rows.append({
-            "cntr_tm": kst.strftime("%Y%m%d%H%M%S"), "bus_dt": day,
-            "cur_prc": "230.4000", "open_pric": "230.1000",
-            "high_pric": "230.5500", "low_pric": "229.9000",
-            "trde_qty": "1200"})
-    return rows
-
-
-def _kiwoom_us(pages):
-    handler = _kiwoom_pages("/api/us/chart", pages)
-    client = KiwoomClient(_secret("kiwoom"), "real",
-                          transport=httpx.MockTransport(handler))
-    return KiwoomOverseasProvider(client, "real")
-
-
-def _kiwoom_us_single():
-    page = {"return_code": 0, "result_list":
-            _kiwoom_us_rows(["093500", "093400"])
-            + _kiwoom_us_rows(["093400"], day="20260825")}
-    return run(_kiwoom_us([(page, None, None)]).fetch_bars(_request("US")))
-
-
-def _kiwoom_us_partial():
-    page = {"return_code": 0,
-            "result_list": _kiwoom_us_rows(["093500", "093400"])}
-    provider = _kiwoom_us([
-        (page, "Y", "k1"), (httpx.Response(500, json={}), None, None)])
-    return run(provider.fetch_bars(_request("US")))
-
-
-def _kiwoom_us_error():
-    provider = _kiwoom_us([(httpx.Response(500, json={}), None, None)])
-    return run(provider.fetch_bars(_request("US")))
+# 키움 US 케이스 없음: 실계좌 실측(2026-08-27, AAPL 완결일 전수 +
+# 야후·KIS 이중 기준 대조)에서 가격·거래량·커버리지 계약 불일치가
+# 확정되어 어댑터가 US 요청을 차단한다.
 
 
 # --- Toss ---
@@ -345,8 +298,7 @@ ALL_PROVIDER_CASES = (
          _kis_us_single, _kis_us_partial, _kis_us_error),
     Case("kiwoom_kr", "kiwoom", "KR", "Asia/Seoul",
          _kiwoom_kr_single, _kiwoom_kr_partial, _kiwoom_kr_error),
-    Case("kiwoom_us", "kiwoom", "US", "America/New_York",
-         _kiwoom_us_single, _kiwoom_us_partial, _kiwoom_us_error),
+    # kiwoom_us 케이스 없음: 계약 불일치 차단 (위 주석 참조)
     # toss_kr 케이스 없음: 실계좌 실측(2026-08-27)에서 정규장 계약
     # 불일치가 확정되어 어댑터가 KR 요청을 차단한다.
     Case("toss_us", "toss", "US", "America/New_York",

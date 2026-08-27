@@ -131,6 +131,13 @@ class KiwoomOverseasProvider:
         if request.market != "US":
             raise ValueError(
                 f"kiwoom_overseas는 US 전용입니다: {request.market}")
+        # 2026-08-27 실계좌 실측 (AAPL 완결일 08-26 전수 + 야후·KIS 이중
+        # 기준): 공통 82분 전부 종가 불일치, 과거일 시가 불일치(야후
+        # 317.46 = KIS 317.46 vs 키움 311.84), 거래량 비율 0.0004~0.002
+        # (주수 아님), 커버리지 ET ~11:00 절단. 계약이 규명·검증되기
+        # 전까지 US 분봉은 제공하지 않는다. 키 문제가 아니므로
+        # unsupported 로 거부한다.
+        raise KiwoomApiError("unsupported")
         if request.session != "regular":
             raise ValueError(
                 f"검증되지 않은 session: {request.session} "

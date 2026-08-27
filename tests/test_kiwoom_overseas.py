@@ -117,138 +117,47 @@ class SymbolMappingTests(unittest.TestCase):
                 validate_ticker(bad)
 
 
-class KiwoomOverseasTests(unittest.TestCase):
-    def test_kst_labels_converted_to_eastern(self):
-        # cntr_tm 20260827050000(KST) = ET 2026-08-26 16:00 마감 print.
-        server = PageServer([(_PAGE_1, None, None)])
-        ds = _run(_provider(server).fetch_bars(_request()))
+class KiwoomUsBlockedTests(unittest.TestCase):
+    """2026-08-27 실계좌 실측: 키움 US 분봉은 데이터 계약 불일치.
 
-        self.assertEqual(ds.provider, "kiwoom")
-        self.assertEqual(ds.venue, "NAS")
-        self.assertEqual(ds.timezone, "America/New_York")
-        self.assertEqual(ds.source_endpoint, "kiwoom_us_minute")
-        times = [b.start_at.strftime("%H%M") for b in ds.bars]
-        self.assertEqual(times, ["1558", "1559", "1600"])
-        self.assertEqual(
-            ds.bars[-1].start_at,
-            datetime(2026, 8, 26, 16, 0, tzinfo=NY))
-        # 여름(EDT): UTC-4.
-        self.assertEqual(
-            ds.bars[0].start_at.utcoffset().total_seconds(), -4 * 3600)
-        self.assertEqual(ds.bars[-1].close, Decimal("225.4400"))
+    AAPL 완결일(08-26) 전수 대조에서:
+    - 공통 82분 전부 종가 불일치 (예 09:31 KIS 309.39 vs 키움 310.99)
+    - 과거일(08-20) 시가: 야후 317.46 = KIS 317.46, 키움만 311.84
+      (독립 기준 2개가 일치, 키움만 반증됨)
+    - 거래량 비율 0.0004~0.002 (주수 단위가 아님, 26일 09:30 KIS
+      491,063주 vs 키움 171)
+    - 커버리지가 ET ~11:00 에서 절단 (완결일 82/391분)
+    계약이 규명·검증되기 전까지 US 요청은 거부한다. 추측 보정 금지.
+    """
 
-        body = json.loads(server.chart_requests[0].content)
-        self.assertEqual(body["stex_tp"], "ND")
-        self.assertEqual(body["stk_cd"], "AAPL")
-        # 실측: strt_dt 는 KST 달력 날짜다. 미국 영업일 26일의 세션
-        # 후반은 KST 27일에 있으므로 27일로 anchoring 한다.
-        self.assertEqual(body["strt_dt"], "20260827")
-        self.assertEqual(body["tic_scope"], "1")
-        self.assertEqual(body["upd_stkpc_tp"], "0")
-        self.assertEqual(
-            server.chart_requests[0].headers["api-id"], "usa06011")
-
-    def test_pagination_stops_at_prior_bus_dt(self):
-        server = PageServer([
-            (_PAGE_1, "Y", "us-key-1"),
-            (_PAGE_2, "Y", "us-key-2"),
-        ])
-        ds = _run(_provider(server).fetch_bars(_request()))
-        second = server.chart_requests[1]
-        self.assertEqual(second.headers["next-key"], "us-key-1")
-        dates = {b.start_at.date().isoformat() for b in ds.bars}
-        self.assertEqual(dates, {"2026-08-26"})
-        times = [b.start_at.strftime("%H%M") for b in ds.bars]
-        self.assertEqual(times, ["1557", "1558", "1559", "1600"])
-        self.assertEqual(server.pages, [])
-
-    def test_bus_dt_filter_rejects_other_business_days(self):
-        # 과거일 요청에 최신 영업일 행이 섞여 와도 채택하지 않는다.
-        server = PageServer([(_PAGE_1, None, None)])
-        ds = _run(_provider(server).fetch_bars(
-            _request(trading_date=date(2026, 8, 20))))
-        self.assertEqual(ds.bars, ())
-        self.assertTrue(any("기준일" in w for w in ds.warnings))
-
-    def test_session_filter_drops_premarket_and_afterhours(self):
-        page = json.loads(json.dumps(_PAGE_1))
-        # 애프터마켓: KST 27일 05:10 = ET 26일 16:10
-        page["result_list"].insert(0, {
-            "cntr_tm": "20260827051000", "bus_dt": "20260826",
-            "cur_prc": "225.5000", "open_pric": "225.5000",
-            "high_pric": "225.5000", "low_pric": "225.5000",
-            "trde_qty": "100", "upd_stkpc_tp": "0"})
-        # 프리장: KST 26일 22:15 = ET 26일 09:15
-        page["result_list"].append({
-            "cntr_tm": "20260826221500", "bus_dt": "20260826",
-            "cur_prc": "224.0000", "open_pric": "224.0000",
-            "high_pric": "224.0000", "low_pric": "224.0000",
-            "trde_qty": "100", "upd_stkpc_tp": "0"})
-        server = PageServer([(page, None, None)])
-        ds = _run(_provider(server).fetch_bars(_request()))
-        times = [b.start_at.strftime("%H%M") for b in ds.bars]
-        self.assertNotIn("1610", times)
-        self.assertNotIn("0915", times)
-        self.assertIn("1600", times)  # 마감 체결 print 는 포함한다
-
-    def test_winter_date_uses_est_offset(self):
-        # 겨울(EST, UTC-5): ET 2026-01-15 15:58 = KST 2026-01-16 05:58.
-        page = json.loads(json.dumps(_PAGE_1))
-        for row, kst in zip(page["result_list"],
-                            ("20260116060000", "20260116055900",
-                             "20260116055800")):
-            row["cntr_tm"] = kst
-            row["bus_dt"] = "20260115"
-        server = PageServer([(page, None, None)])
-        ds = _run(_provider(server).fetch_bars(
-            _request(trading_date=date(2026, 1, 15))))
-        body = json.loads(server.chart_requests[0].content)
-        self.assertEqual(body["strt_dt"], "20260116")
-        self.assertEqual(
-            ds.bars[0].start_at.utcoffset().total_seconds(), -5 * 3600)
-        times = [b.start_at.strftime("%H%M") for b in ds.bars]
-        self.assertEqual(times, ["1558", "1559", "1600"])
-
-    def test_partial_on_page_error(self):
-        server = PageServer([
-            (_PAGE_1, "Y", "us-key-1"),
-            (httpx.Response(500, json={}), None, None),
-        ])
-        ds = _run(_provider(server).fetch_bars(_request()))
-        self.assertEqual(len(ds.bars), 3)
-        self.assertFalse(ds.coverage["complete"])
-        self.assertEqual(ds.coverage["resume_cursor"], "us-key-1")
-
-    def test_unknown_symbol_empty_field_row_is_entity_not_found(self):
+    def test_us_fetch_is_rejected_as_unsupported(self):
         from stock_mcp_server.market_data.kiwoom_client import KiwoomApiError
-        page = {"return_code": 0, "result_list": [{
-            "cur_prc": "", "trde_qty": "", "cntr_tm": "", "bus_dt": "",
-            "open_pric": "", "high_pric": "", "low_pric": ""}]}
-        server = PageServer([(page, None, None)])
+        server = PageServer([])
         with self.assertRaises(KiwoomApiError) as ctx:
             _run(_provider(server).fetch_bars(_request()))
-        self.assertEqual(ctx.exception.provider_status, "entity_not_found")
-
-    def test_unknown_venue_and_class_shares_error(self):
-        server = PageServer([])
-        provider = _provider(server)
-        with self.assertRaises(KiwoomSymbolMappingError):
-            _run(provider.fetch_bars(_request(venue="LSE")))
-        with self.assertRaises(KiwoomSymbolMappingError):
-            _run(provider.fetch_bars(_request(symbol="BRK.B")))
+        self.assertEqual(ctx.exception.provider_status, "unsupported")
         self.assertEqual(server.chart_requests, [])
 
-    def test_contract_guards(self):
-        server = PageServer([])
-        provider = _provider(server)
-        with self.assertRaisesRegex(ValueError, "1m"):
-            _run(provider.fetch_bars(_request(interval="5m")))
-        with self.assertRaisesRegex(ValueError, "US"):
-            _run(provider.fetch_bars(_request(market="KR", venue="KRX")))
-        with self.assertRaisesRegex(ValueError, "session"):
-            _run(provider.fetch_bars(_request(session="daytime")))
-        with self.assertRaisesRegex(ValueError, "trading_date"):
-            _run(provider.fetch_bars(_request(trading_date=None)))
+    def test_verifier_reports_us_unavailable_without_probe(self):
+        from stock_mcp_server.market_data.kiwoom_verifier import (
+            KiwoomVerifier,
+        )
+        seen_paths = []
+
+        def handler(request):
+            seen_paths.append(request.url.path)
+            if request.url.path == "/oauth2/token":
+                return httpx.Response(200, json=_TOKEN)
+            return httpx.Response(200, json={
+                "return_code": 0,
+                "stk_min_pole_chart_qry": [{"cur_prc": "+70000",
+                                            "cntr_tm": "20260827100000"}]})
+
+        verifier = KiwoomVerifier(transport=httpx.MockTransport(handler))
+        result = _run(verifier.verify(_payload(), "real"))
+        self.assertEqual(result["auth"], "ok")
+        self.assertEqual(result["us_intraday"], "unavailable")
+        self.assertNotIn("/api/us/chart", seen_paths)
 
 
 if __name__ == "__main__":
