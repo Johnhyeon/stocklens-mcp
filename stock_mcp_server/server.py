@@ -5726,7 +5726,7 @@ async def get_us_short(ticker: str) -> str:
 @safe_us_tool
 @track_metrics("get_us_filings")
 async def get_us_filings(ticker: str, limit: int = 15, forms: list[str] | None = None,
-                         page: str | None = None) -> str:
+                         page: str | None = None, offset: int = 0) -> str:
     """US SEC filings — SEC EDGAR 공시 목록 (accession number·원문 URL 포함).
 
     "AAPL 10-K", "RIVN latest filings", "8-K", "SEC filing" 같은 질문에 사용합니다.
@@ -5734,8 +5734,11 @@ async def get_us_filings(ticker: str, limit: int = 15, forms: list[str] | None =
 
     기본 조회는 SEC 의 최근 구간(최대 1000건)입니다. 그보다 오래된 공시는
     구간 파일로 나뉘어 있고, 결과 메타의 coverage.older_pages 에 구간 목록
-    (이름·기간·건수)이 옵니다. `page=` 에 그 이름을 넣어 순회하세요 -
-    older_pages 가 빌 때까지 돌면 완전한 검색이 끝난 것입니다.
+    (이름·기간·건수)이 옵니다. `page=` 에 그 이름을 넣어 구간을 옮기고, 한
+    구간이 limit 보다 크면 coverage.next_offset 을 `offset=` 에 넣어 이어서
+    조회하세요. **완전한 검색의 종료 조건은 coverage_complete=true** (현재
+    구간을 끝까지 봤고 older_pages 도 없음)이지, older_pages 가 비었다는
+    것만이 아닙니다.
 
     SEC 는 발행사를 티커가 아니라 CIK 로 식별합니다. GOOGL/GOOG 같은 클래스주는
     같은 발행사로 정규화되어 같은 공시 집합이 나오고, 요청 티커는 메타에 보존됩니다.
@@ -5745,8 +5748,10 @@ async def get_us_filings(ticker: str, limit: int = 15, forms: list[str] | None =
         limit: 표시할 공시 건수 (기본 15, 최대 100)
         forms: 공시 유형 필터 (예: ["10-Q", "8-K"]). 비우면 전체.
         page: 구간 파일 이름 (coverage.older_pages[].name). 비우면 최근 구간.
+        offset: 현재 구간 안에서 건너뛸 건수 (coverage.next_offset 값). 기본 0.
     """
     limit = max(1, min(int(limit), 100))
+    offset = max(0, int(offset))
     requested_forms = [str(f).upper() for f in (forms or [])] or None
 
     def _fail(reason_text: str, warn: str) -> str:
@@ -5812,7 +5817,10 @@ async def get_us_filings(ticker: str, limit: int = 15, forms: list[str] | None =
     if requested_forms:
         rows = [r for r in rows if str(r.get("form") or "").upper() in requested_forms]
     total_matching = len(rows)
-    shown = rows[:limit]
+    shown = rows[offset:offset + limit]
+    # 구간 내부 커서: limit 에 걸려 못 보여준 나머지를 이어서 요청하는 값.
+    # 이게 없으면 1,240건짜리 구간에서 101번째 이후를 볼 방법이 없다(실측 AAPL).
+    next_offset = offset + len(shown) if offset + len(shown) < total_matching else None
     has_older = bool(older_pages)
 
     issuer_line = (
@@ -5846,8 +5854,10 @@ async def get_us_filings(ticker: str, limit: int = 15, forms: list[str] | None =
             ),
         )
 
-    lines = [f"**{issuer['requested_ticker']}** SEC 공시 · {page_label} (표시 {len(shown)}건"
-             + (f" / 이 구간 {total_matching}건" if total_matching > len(shown) else "")
+    lines = [f"**{issuer['requested_ticker']}** SEC 공시 · {page_label} (표시 "
+             + (f"{offset + 1}~{offset + len(shown)}번째" if offset else f"{len(shown)}건")
+             + (f" / 이 구간 {total_matching}건" if total_matching > len(shown) or offset
+                else "")
              + ")", issuer_line, ""]
     lines.append("접수일 | 유형 | 보고서 기준일 | accession | 원문")
     lines.append("---|---|---|---|---")
@@ -5860,14 +5870,22 @@ async def get_us_filings(ticker: str, limit: int = 15, forms: list[str] | None =
         )
     lines.append("")
     lines.append("_본문·exhibit 검색: `get_us_filing_detail(ticker, accession_no, find=...)`_")
+    if next_offset is not None:
+        lines.append(
+            f"_이 구간에 {total_matching - offset - len(shown)}건이 더 남아 있습니다. "
+            f"`offset={next_offset}` 로 이어서 조회하세요._")
     if has_older:
         nxt = older_pages[0]
         lines.append(
             f"_더 오래된 구간 {len(older_pages)}개가 남아 있습니다. 다음: "
             f"`page=\"{nxt['name']}\"` ({nxt['filing_from']}~{nxt['filing_to']}, "
-            f"{nxt['count']}건). older_pages 가 빌 때까지 돌면 전체 순회가 끝납니다._")
+            f"{nxt['count']}건)._")
+    if next_offset is not None or has_older:
+        lines.append(
+            "_완전한 검색의 종료 조건은 coverage_complete=true 입니다 - "
+            "truncated=false 이고 older_pages 가 빌 때까지 순회하세요._")
 
-    truncated = len(shown) < total_matching
+    truncated = next_offset is not None
     incomplete = truncated or has_older
     return _append_result_meta(
         "\n".join(lines),
@@ -5882,6 +5900,8 @@ async def get_us_filings(ticker: str, limit: int = 15, forms: list[str] | None =
                 "truncated": truncated,
                 "coverage_complete": not incomplete,
                 "page": page,
+                "offset": offset,
+                "next_offset": next_offset,
                 "older_pages": older_pages,
                 "reason": ("server_cap" if truncated
                            else "source_limit" if has_older else None),

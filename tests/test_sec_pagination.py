@@ -127,6 +127,41 @@ class FilingsToolPagingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(meta["coverage"]["page"],
                          "CIK0001874178-submissions-001.json")
 
+    async def test_within_page_offset_cursor(self):
+        """출시 차단 2: 구간 파일 1,240건을 limit 100으로도 끝까지 순회할 수 있다.
+
+        실측(AAPL): 구간 조회가 truncated=true 인데 older_pages=[] 라서
+        101번째 이후를 요청할 방법이 없었고, 안내문은 순회가 끝났다고 말했다.
+        """
+        text = await self._run(page="CIK0001874178-submissions-001.json", limit=1)
+        meta = self._meta(text)
+        cov = meta["coverage"]
+        self.assertTrue(cov["truncated"])
+        self.assertFalse(cov["coverage_complete"])       # 구간 내부가 남았다
+        self.assertEqual(cov["next_offset"], 1)
+        body = text.split(rmeta.MARKER_START)[0]
+        self.assertIn("offset=1", body)                  # 이어서 조회하는 방법 안내
+        self.assertIn("2021-10-01", body)
+        self.assertNotIn("2021-11-01", body)
+        # 커서로 다음 조각
+        text2 = await self._run(page="CIK0001874178-submissions-001.json",
+                                limit=1, offset=1)
+        body2 = text2.split(rmeta.MARKER_START)[0]
+        self.assertIn("2021-11-01", body2)
+        self.assertNotIn("2021-10-01", body2)
+        meta2 = self._meta(text2)
+        self.assertFalse(meta2["coverage"]["truncated"])
+        self.assertIsNone(meta2["coverage"]["next_offset"])
+        self.assertTrue(meta2["coverage"]["coverage_complete"])
+        self.assertEqual(meta2["coverage"]["offset"], 1)
+
+    async def test_recent_truncation_also_gets_offset(self):
+        """recent 구간도 같은 커서를 쓴다 - limit 에 걸리면 next_offset."""
+        text = await self._run(limit=1)
+        meta = self._meta(text)
+        self.assertEqual(meta["coverage"]["next_offset"], 1)
+        self.assertFalse(meta["coverage"]["coverage_complete"])
+
     async def test_last_page_without_older_is_complete(self):
         """마지막 구간까지 소진하면 완전한 검색이 끝났다고 말할 수 있어야 한다."""
         text = await self._run(page="CIK0001874178-submissions-001.json")
