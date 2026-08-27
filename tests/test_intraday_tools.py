@@ -289,6 +289,29 @@ class FetchPipelineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(ds.bars), 2)
         self.assertEqual(ds.bars[-1].start_at.strftime("%H%M"), "0925")
 
+    async def test_us_kis_provider_called_once_no_multiday_loop(self):
+        # 해외 endpoint 는 날짜 인자 없이 KEYB 로만 페이지네이션한다.
+        # 다일 루프를 돌리면 같은 호출만 반복된다 (2026-08-27 실측).
+        raw = _dataset(
+            _minute_bars(datetime(2026, 8, 26, 9, 30, tzinfo=NY), 10),
+            market="US", interval="1m")
+        providers = self._fake_providers(kis_result=raw)
+        caps = {"connected": True, "kr_intraday": True, "us_intraday": True,
+                "kr_daily": False, "us_daily": False}
+        with patch.object(server, "_intraday_providers",
+                          return_value=providers), \
+             patch.object(server, "_broker_capabilities", return_value=caps), \
+             patch.object(server, "_broker_state", return_value={
+                 "data_source_mode": "auto", "active_profile": "real",
+                 "active_provider": "kis", "connection_generation": 1}):
+            await server._fetch_intraday_dataset(
+                symbol="AAPL", market="US", interval="60m",
+                trading_date=date(2026, 8, 26), row_limit=100,
+                venue="NAS", session="regular", completed_only=False,
+                source="auto",
+                now=datetime(2026, 8, 26, 17, 0, tzinfo=NY))
+        self.assertEqual(providers["kis"].calls, 1)
+
     async def test_legacy_mode_makes_zero_kis_calls(self):
         yahoo_ds = _dataset(
             _minute_bars(datetime(2026, 8, 26, 9, 30, tzinfo=NY), 10),
@@ -311,6 +334,43 @@ class FetchPipelineTests(unittest.IsolatedAsyncioTestCase):
                 now=datetime(2026, 8, 26, 17, 0, tzinfo=NY))
         self.assertEqual(providers["kis"].calls, 0)
         self.assertEqual(meta["selected_provider"], "yahoo")
+
+
+class KisClientReuseTests(unittest.TestCase):
+    """도구 호출마다 토큰을 재발급하면 KIS 1분 제한에 걸린다 (실측).
+    같은 (profile, generation) 이면 프로세스 안에서 클라이언트를 재사용한다."""
+
+    def _fake_store(self):
+        class FakeStore:
+            def load_profile(self, profile):
+                from stock_mcp_server.market_data.broker_profiles import (
+                    BrokerCredentials,
+                )
+                return BrokerCredentials(app_key="k", app_secret="s")
+        return FakeStore()
+
+    def test_same_generation_reuses_client(self):
+        server._KIS_CLIENT_CACHE.clear()
+        state = {"connection_generation": 5, "active_profile": "real",
+                 "active_provider": "kis", "data_source_mode": "auto"}
+        with patch.object(server, "_BrokerProfileStore",
+                          return_value=self._fake_store()), \
+             patch.object(server, "_broker_load_state", return_value=state):
+            p1 = server._intraday_providers("KR", "real")
+            p2 = server._intraday_providers("US", "real")
+        self.assertIs(p1["kis"]._client, p2["kis"]._client)
+
+    def test_generation_change_builds_new_client(self):
+        server._KIS_CLIENT_CACHE.clear()
+        state = {"connection_generation": 5, "active_profile": "real",
+                 "active_provider": "kis", "data_source_mode": "auto"}
+        with patch.object(server, "_BrokerProfileStore",
+                          return_value=self._fake_store()), \
+             patch.object(server, "_broker_load_state", return_value=state):
+            p1 = server._intraday_providers("KR", "real")
+            state["connection_generation"] = 6
+            p2 = server._intraday_providers("KR", "real")
+        self.assertIsNot(p1["kis"]._client, p2["kis"]._client)
 
 
 if __name__ == "__main__":

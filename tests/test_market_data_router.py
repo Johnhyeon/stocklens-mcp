@@ -211,6 +211,34 @@ class FailoverTests(unittest.TestCase):
                 _request(market="US", venue="NAS", source="kis")))
         self.assertEqual(yahoo.calls, 0)
 
+    def test_empty_dataset_restarts_on_fallback(self):
+        # 예외가 아니어도 봉 0개면 "유효한 봉을 하나도 채택하지 않은" 상태다.
+        # 설계 규칙 1: 이때만 요청 전체 재시작이 허용된다 (2026-08-27 실측:
+        # 미국 야간에 KIS 가 세션 밖 행만 돌려줘 빈 결과가 나왔다).
+        kis = FakeProvider("kis", result=_dataset("kis", []))
+        yahoo = FakeProvider("yahoo", result=_dataset("yahoo", [_bar(0)]))
+        res = resolve_source(
+            mode="auto", market="US", interval="5m",
+            requested_source="auto", capabilities=_caps())
+        ds, meta = _run(fetch_with_failover(
+            res, {"kis": kis, "yahoo": yahoo},
+            _request(market="US", venue="NAS")))
+        self.assertEqual(ds.provider, "yahoo")
+        self.assertTrue(meta["fallback_used"])
+
+    def test_strict_kis_empty_dataset_returned_as_is(self):
+        kis = FakeProvider("kis", result=_dataset("kis", []))
+        yahoo = FakeProvider("yahoo", result=_dataset("yahoo", [_bar(0)]))
+        res = resolve_source(
+            mode="auto", market="US", interval="5m",
+            requested_source="kis", capabilities=_caps())
+        ds, meta = _run(fetch_with_failover(
+            res, {"kis": kis, "yahoo": yahoo},
+            _request(market="US", venue="NAS", source="kis")))
+        self.assertEqual(ds.provider, "kis")
+        self.assertEqual(ds.bars, ())
+        self.assertEqual(yahoo.calls, 0)
+
     def test_fallback_failure_also_propagates(self):
         kis = FakeProvider("kis", error=KisApiError("provider_unavailable"))
         yahoo = FakeProvider("yahoo", error=RuntimeError("yahoo down"))

@@ -194,20 +194,31 @@ async def fetch_with_failover(
         "fallback_used": False,
         "fallback_from": None,
     }
-    try:
-        dataset = await primary.fetch_bars(request)
-        return dataset, meta
-    except Exception:
-        # 예외 = 봉 0개 채택. 공급자는 봉을 하나라도 채택했으면 partial
-        # dataset 을 반환하지 예외를 던지지 않는다 (kis_domestic 참고).
-        if not resolution.fallback_allowed_before_first_bar or \
-                resolution.fallback_provider is None:
-            raise
+    fallback_possible = (resolution.fallback_allowed_before_first_bar
+                         and resolution.fallback_provider is not None)
+
+    async def _restart_on_fallback():
         fallback = providers[resolution.fallback_provider]
-        dataset = await fallback.fetch_bars(request)
+        ds = await fallback.fetch_bars(request)
         meta.update({
             "selected_provider": resolution.fallback_provider,
             "fallback_used": True,
             "fallback_from": resolution.selected_provider,
         })
-        return dataset, meta
+        return ds, meta
+
+    try:
+        dataset = await primary.fetch_bars(request)
+    except Exception:
+        # 예외 = 봉 0개 채택. 공급자는 봉을 하나라도 채택했으면 partial
+        # dataset 을 반환하지 예외를 던지지 않는다 (kis_domestic 참고).
+        if not fallback_possible:
+            raise
+        return await _restart_on_fallback()
+
+    # 빈 dataset 도 "유효한 봉을 하나도 채택하지 않은" 상태다. 이때만
+    # 요청 전체 재시작이 허용된다 (2026-08-27 실측: 미국 야간에 KIS 가
+    # 정규장 밖 행만 돌려줘 빈 결과가 나왔다).
+    if not dataset.bars and fallback_possible:
+        return await _restart_on_fallback()
+    return dataset, meta

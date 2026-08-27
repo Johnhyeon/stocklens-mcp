@@ -7405,19 +7405,38 @@ def _broker_capabilities(state: dict) -> dict:
     }
 
 
+# (profile, generation) -> KisClient. 호출마다 새 클라이언트를 만들면 매번
+# 토큰을 재발급하는데, KIS 는 토큰 발급을 1분당 1회로 제한한다 (실측).
+# generation 이 바뀌면 자격 증명이 바뀌었을 수 있으므로 새로 만든다.
+_KIS_CLIENT_CACHE: dict = {}
+
+
+def _get_kis_client(profile: str):
+    generation = _broker_load_state()["connection_generation"]
+    key = (profile, generation)
+    cached = _KIS_CLIENT_CACHE.get("client")
+    if cached is not None and cached[0] == key:
+        return cached[1]
+    store = _BrokerProfileStore()
+    creds = store.load_profile(profile)
+    if creds is None:
+        return None
+    client = _KisClient(
+        creds, profile,
+        generation_provider=lambda: _broker_load_state()[
+            "connection_generation"])
+    _KIS_CLIENT_CACHE["client"] = (key, client)
+    return client
+
+
 def _intraday_providers(market: str, profile: str | None) -> dict:
     providers: dict = {
         "yahoo": _YahooBarProvider(),
         "naver": _NaverBarProvider(),
     }
     if profile:
-        store = _BrokerProfileStore()
-        creds = store.load_profile(profile)
-        if creds is not None:
-            client = _KisClient(
-                creds, profile,
-                generation_provider=lambda: _broker_load_state()[
-                    "connection_generation"])
+        client = _get_kis_client(profile)
+        if client is not None:
             if market == "KR":
                 providers["kis"] = _KisDomesticProvider(client, profile)
             else:
@@ -7487,12 +7506,15 @@ async def _fetch_intraday_dataset(
     dataset, route_meta = await _fetch_with_failover(
         resolution, providers, _make_request(trading_date))
 
-    # KIS 1m 원천은 하루 단위 endpoint 다. 필요한 이력이 부족하면 예산
+    # KIS 국내 1m 원천은 하루 단위 endpoint 다. 필요한 이력이 부족하면 예산
     # 안에서 이전 거래일을 이어 붙인다. 공급원은 바꾸지 않는다.
+    # 해외 endpoint 는 날짜 인자 없이 KEYB 로만 페이지네이션하므로 다일
+    # 루프를 돌리면 같은 호출만 반복된다 (2026-08-27 실측) - KR 전용.
     needed_rows = row_limit * (
         target_minutes // _INTRADAY_INTERVALS[dataset.source_interval]
         if dataset.source_interval in _INTRADAY_INTERVALS else 1)
-    if dataset.provider == "kis" and len(dataset.bars) < needed_rows:
+    if dataset.provider == "kis" and market == "KR" and \
+            len(dataset.bars) < needed_rows:
         merged = list(dataset.bars)
         warnings = list(dataset.warnings)
         day = trading_date
