@@ -70,7 +70,10 @@ from stock_mcp_server._metrics import (
 from stock_mcp_server._indicators import (
     split_valid_bars,
     compute_indicators,
+    compute_ma_cross,
+    compute_rsi,
     AVAILABLE_INDICATORS,
+    _to_df as _ind_to_df,
 )
 from stock_mcp_server._chart_html import render_chart_html, render_multi_chart_html
 from stock_mcp_server.market_clock import (  # noqa: E402
@@ -7032,6 +7035,236 @@ async def get_us_multi_price(tickers: list[str]) -> str:
             warnings=warns or None,
         ),
     )
+
+
+@mcp.tool()
+@safe_us_tool
+@track_metrics("get_us_multi_diagnosis")
+async def get_us_multi_diagnosis(
+    tickers: list[str],
+    include: list[str] | None = None,
+) -> str:
+    """US multi diagnosis — 미국 다종목 차트 통계·완성 봉 기술 상태 배치 (JSON).
+
+    "고정 15종목 단계 진단", "관심종목 기술 상태 일괄 점검" 같은 반복 판정에
+    사용합니다. 종목당 get_us_chart + 지표 계산을 반복 호출하는 대신 한 번에:
+    차트 통계(완성 봉 종가·5/20/60일 수익률·52주 위치·평균 거래량)와 기술
+    상태(MA20/60·20-60 크로스·RSI14)를 **완성 봉 기준**으로 돌려줍니다.
+
+    이 도구는 종목을 단일 점수로 압축하지 않습니다. 판정 재료(원값)를 그대로
+    보존하고, 확인 불가는 unavailable 로 남깁니다 - 등급·점수·순위를 만들어
+    붙이는 것은 읽는 쪽의 몫이고, 그때도 근거 수치가 함께 있어야 합니다.
+
+    Args:
+        tickers: US 티커 리스트 (최대 20개)
+        include: 선택 결합 섹션. "estimates"(애널리스트 EPS 추정 변화),
+            "earnings"(최근 실적 서프라이즈), "short"(공매도 지표+보고 최신성).
+            기본 None = 차트·기술 상태만.
+    """
+    if not tickers:
+        return "티커 리스트가 비어있습니다."
+    requested_entities = len(tickers)
+    tickers = [str(t).strip().upper() for t in tickers if str(t).strip()][:20]
+    truncated = requested_entities > len(tickers)
+
+    valid_sections = ("estimates", "earnings", "short")
+    sections = [s for s in (include or []) if s in valid_sections]
+    bad_sections = [s for s in (include or []) if s not in valid_sections]
+
+    async def _one(t: str) -> tuple[str, dict, str | None]:
+        """(ticker, entry, last_completed_day). 실패는 entry 에 이유로 남긴다."""
+        try:
+            raw = await us.get_history(t, period="1y", interval="1d")
+        except Exception as e:
+            return t, {"status": "unavailable",
+                       "reason": f"history_error:{type(e).__name__}"}, None
+        valid, _excl = split_valid_bars(raw or [])
+        if not valid:
+            return t, {"status": "unavailable", "reason": "no_history"}, None
+
+        # 완성 봉 기준(SL-13 요구 1). 진행 중 봉이 섞인 채 계산한 MA·RSI 는
+        # 장 마감에 값이 바뀌는데, 배치 표에서는 그 사실이 특히 안 보인다.
+        state = _bar_state(timeframe="day", rows=valid,
+                           market_calendar=us_calendar())
+        rows = valid
+        dropped = None
+        basis = "completed_bars"
+        if state and state.get("calculation_includes_incomplete") is True:
+            dropped = state.get("last_bar_date")
+            rows = valid[:-1]
+        elif not state or state.get("last_bar_complete") is None:
+            basis = "unknown_last_bar"
+        if not rows:
+            return t, {"status": "unavailable", "reason": "no_completed_bars"}, None
+
+        last = rows[-1]
+        last_day = rmeta.normalize_day(last.get("date"))
+
+        def _ret(n: int):
+            if len(rows) <= n:
+                return None
+            past = rows[-1 - n].get("close")
+            cur = last.get("close")
+            if not past or cur is None:
+                return None
+            return round((cur / past - 1) * 100, 2)
+
+        w52 = rows[-252:]
+        hi = max((r.get("high") or 0) for r in w52)
+        lo_vals = [r.get("low") for r in w52 if r.get("low")]
+        lo = min(lo_vals) if lo_vals else None
+        cur_close = last.get("close")
+        vol20 = [r.get("volume") for r in rows[-20:] if r.get("volume") is not None]
+        chart = {
+            "last_completed_bar": last_day,
+            "last_close": cur_close,
+            "bars": len(rows),
+            "returns_pct": {"5d": _ret(5), "20d": _ret(20), "60d": _ret(60)},
+            "52w": {
+                "high": hi or None,
+                "low": lo,
+                "off_high_pct": (round((cur_close / hi - 1) * 100, 2)
+                                 if cur_close and hi else None),
+                "above_low_pct": (round((cur_close / lo - 1) * 100, 2)
+                                  if cur_close and lo else None),
+            },
+            "avg_volume_20d": (round(sum(vol20) / len(vol20)) if vol20 else None),
+        }
+
+        df = _ind_to_df(rows)
+
+        def _ma(n: int):
+            if len(df) < n:
+                return None
+            return round(float(df["close"].rolling(n).mean().iloc[-1]), 2)
+
+        ma20, ma60 = _ma(20), _ma(60)
+
+        def _vs(ma):
+            if ma is None or cur_close is None:
+                return None
+            return "above" if cur_close > ma else "below" if cur_close < ma else "at"
+
+        technicals = {
+            "basis": basis,
+            **({"dropped_in_progress_bar": dropped} if dropped else {}),
+            "ma": {"ma20": ma20, "ma60": ma60,
+                   "price_vs_ma20": _vs(ma20), "price_vs_ma60": _vs(ma60)},
+            "cross_20_60": compute_ma_cross(df),
+            "rsi14": compute_rsi(df),
+        }
+        entry: dict = {"chart": chart, "technicals": technicals}
+
+        if "estimates" in sections:
+            try:
+                est = await us.get_analyst_estimates(t)
+            except Exception:
+                est = None
+            if not est:
+                entry["estimates"] = {"status": "unavailable"}
+            else:
+                near = lambda rows_: [r for r in (rows_ or [])
+                                      if str(r.get("period")) in ("0q", "+1q")]
+                entry["estimates"] = {
+                    "currency": est.get("financial_currency") or est.get("currency"),
+                    "eps_trend": near(est.get("eps_trend")),
+                    "eps_revisions": near(est.get("eps_revisions")),
+                }
+        if "earnings" in sections:
+            try:
+                ev = await us.get_earnings_events(t)
+            except Exception:
+                ev = None
+            events = (ev or {}).get("events") or []
+            reported = [e for e in events if e.get("eps_actual") is not None
+                        and e.get("date")]
+            if not reported:
+                entry["earnings"] = {"status": "unavailable"}
+            else:
+                last_rep = max(reported, key=lambda e: str(e["date"]))
+                entry["earnings"] = {"last_reported": {
+                    "date": str(last_rep.get("date")),
+                    "eps_estimate": last_rep.get("eps_estimate"),
+                    "eps_actual": last_rep.get("eps_actual"),
+                    "eps_surprise_pct": last_rep.get("eps_surprise_pct"),
+                }}
+        if "short" in sections:
+            try:
+                sh = await us.get_short_interest(t)
+            except Exception:
+                sh = None
+            report_day = us._epoch_day((sh or {}).get("date_short_interest"))
+            if not sh or not report_day:
+                entry["short"] = {"status": "unavailable"}
+            else:
+                age = (_now_kst().date() - _dt.date.fromisoformat(report_day)).days
+                entry["short"] = {
+                    "short_percent_of_float": sh.get("short_percent_of_float"),
+                    "days_to_cover": sh.get("short_ratio"),
+                    "shares_short": sh.get("shares_short"),
+                    "shares_short_prior_month": sh.get("shares_short_prior_month"),
+                    "report_date": report_day,
+                    "age_days": age,
+                    # FINRA bi-monthly - 통상 주기(2~4주)를 넘으면 stale
+                    "stale": age > 35,
+                }
+        return t, entry, last_day
+
+    results = await asyncio.gather(*(_one(t) for t in tickers))
+
+    entries: dict[str, dict] = {}
+    per_entity_as_of: dict[str, str] = {}
+    failed: list[str] = []
+    section_gaps: list[str] = []
+    for t, entry, day in results:
+        entries[t] = entry
+        if entry.get("status") == "unavailable":
+            failed.append(t)
+            continue
+        if day:
+            per_entity_as_of[t] = day
+        for s in sections:
+            if (entry.get(s) or {}).get("status") == "unavailable":
+                section_gaps.append(f"{t}.{s}")
+
+    has_gap = bool(failed or truncated or section_gaps)
+    coverage = {
+        "requested_entities": requested_entities,
+        "returned_entities": len(entries) - len(failed),
+        "failed_entities": sorted(failed),
+        "unavailable_sections": sorted(section_gaps),
+        "truncated": truncated,
+        "coverage_complete": not has_gap,
+        "reason": ("server_cap" if truncated
+                   else "source_limit" if has_gap else None),
+    }
+    warns: list[str] = []
+    if truncated:
+        warns.append(f"{requested_entities}티커 요청 중 앞 {len(tickers)}개만 조회했습니다(상한 20).")
+    if failed:
+        warns.append("조회 실패 티커: " + ", ".join(sorted(failed)))
+    if section_gaps:
+        warns.append("확인 불가 섹션(값이 없는 것이지 0이 아닙니다): "
+                     + ", ".join(sorted(section_gaps)))
+    if bad_sections:
+        warns.append(f"알 수 없는 include 섹션 {bad_sections} - 유효: {list(valid_sections)}")
+
+    payload = {
+        "tickers": entries,
+        "note": ("기술 상태는 완성 봉 기준입니다. 이 도구는 점수·등급을 만들지 "
+                 "않습니다 - 판정은 원값을 근거로 읽는 쪽이 합니다."),
+        "_meta": _us_meta(
+            kind="bars",
+            data_as_of=(max(per_entity_as_of.values()) if per_entity_as_of else None),
+            data_completeness=rmeta.PARTIAL if has_gap else rmeta.COMPLETE,
+            coverage=coverage,
+            price_adjustment=price_adjustment_meta(),
+            extra={"per_entity_data_as_of": per_entity_as_of,
+                   "sections": sections or None},
+            warnings=warns or None,
+        ),
+    }
+    return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
 
 
 @mcp.tool()
