@@ -4553,10 +4553,46 @@ async def get_us_analyst(ticker: str) -> str:
                 f"{r.get('hold', 0)} | {r.get('sell', 0)} | {r.get('strongSell', 0)}"
             )
 
+    # 하위 표마다 기준 시점이 다르다(요구 2·3). 목표가·분포·추정치는 조회
+    # 시점 스냅샷인데, 업·다운그레이드 표본은 공급자가 갱신을 멈춘 채 몇 년
+    # 전에 끝나 있기도 하다(실측 META: 2024-09-30). 각 표의 기준을 따로 적고,
+    # 오래된 이력이 섞이면 응답 전체를 complete 로 내지 않는다.
+    section_coverage: dict = {}
+    if targets:
+        section_coverage["price_targets"] = {"basis": "snapshot"}
+    if rec_key or rec_mean:
+        section_coverage["recommendation"] = {"basis": "snapshot"}
+    if rec_monthly:
+        section_coverage["recommendation_trend"] = {"basis": "relative_months"}
+
     updown = data.get("recent_upgrades_downgrades") or []
+    updown_latest = None
+    updown_stale = False
+    if updown:
+        dates = sorted(str(u.get("GradeDate", ""))[:10] for u in updown
+                       if str(u.get("GradeDate", ""))[:10])
+        if dates:
+            updown_latest = dates[-1]
+            try:
+                age = (_now_kst().date()
+                       - _dt.date.fromisoformat(updown_latest)).days
+            except ValueError:
+                age = None
+            updown_stale = age is not None and age > 90
+            section_coverage["upgrades_downgrades"] = {
+                "latest": updown_latest,
+                "age_days": age,
+                "stale": updown_stale,
+            }
     if updown:
         lines.append("")
-        lines.append("## 🔄 최근 업·다운그레이드")
+        lines.append("## 🔄 최근 업·다운그레이드"
+                     + (f" (표본 마지막: {updown_latest})" if updown_latest else ""))
+        if updown_stale:
+            lines.append(
+                f"⚠️ 이 표본은 {updown_latest} 에서 멈춰 있습니다. 위의 목표가·분포"
+                "(조회 시점 스냅샷)와 기준 시점이 달라 나란히 읽으면 안 됩니다."
+            )
         for u in updown[:6]:
             date = str(u.get("GradeDate", ""))[:10]
             firm = u.get("Firm", "-")
@@ -4646,7 +4682,20 @@ async def get_us_analyst(ticker: str) -> str:
                     f"{e.get('downLast30days') or e.get('downlast30days') or 0}"
                 )
 
-    return _append_result_meta("\n".join(lines), _us_meta(kind="filing", ticker=ticker))
+    return _append_result_meta(
+        "\n".join(lines),
+        _us_meta(
+            kind="filing", ticker=ticker,
+            data_completeness=rmeta.PARTIAL if updown_stale else rmeta.COMPLETE,
+            coverage=({"truncated": False, "coverage_complete": False,
+                       "reason": "source_limit"} if updown_stale else None),
+            extra={"section_coverage": section_coverage},
+            warnings=([
+                f"업·다운그레이드 이력이 {updown_latest} 에서 멈춰 있습니다"
+                "(공급자 표본 한계). 현재 목표가·분포와 기준 시점이 다릅니다."
+            ] if updown_stale else None),
+        ),
+    )
 
 
 @mcp.tool()
@@ -4967,6 +5016,30 @@ async def get_us_short(ticker: str) -> str:
             return datetime.utcfromtimestamp(v).strftime("%Y-%m-%d")
         return "-"
 
+    # 본문은 보고일과 지연 경고를 이미 보여주는데 메타는 data_as_of=null 에
+    # complete 였다(실측 CRSP). 이 숫자의 기준일은 조회일이 아니라 FINRA
+    # 보고일이고, 격주 공시라 원래 몇 주 뒤처진 값이다 - 그 나이를 구조화한다.
+    report_day = us._epoch_day(data.get("date_short_interest"))
+    staleness = None
+    short_warns: list[str] = []
+    if report_day:
+        age_days = max(0, (_now_kst().date()
+                           - _dt.date.fromisoformat(report_day)).days)
+        # 격주 공시 + 공표 지연을 감안해도 35일이 넘으면 한 사이클 이상 밀린 것
+        stale = age_days > 35
+        staleness = {"report_date": report_day, "age_days": age_days,
+                     "cadence": "FINRA bi-monthly", "stale": stale}
+        if stale:
+            short_warns.append(
+                f"공매도 보고일({report_day})이 {age_days}일 전입니다 - "
+                "통상 주기(2~4주)보다 오래됐습니다(stale). 최신 수치가 아닐 수 있습니다."
+            )
+    else:
+        short_warns.append(
+            "공매도 수치의 기준일(FINRA 보고일)을 확인하지 못했습니다. "
+            "언제 것인지 모르는 값입니다."
+        )
+
     lines = [f"**{data['ticker']}** 공매도 지표"]
     lines.append("")
     lines.append(f"⚠️ 보고 기준일: **{_ts(data.get('date_short_interest'))}** (FINRA bi-monthly — 최대 2~4주 stale)")
@@ -4994,7 +5067,19 @@ async def get_us_short(ticker: str) -> str:
         lines.append(f"- 전월 ({_ts(prior_date)}): {prior:,.0f}")
         lines.append(f"- 변동: {change:+,.0f} ({pct:+.2f}%)")
 
-    return _append_result_meta("\n".join(lines), _us_meta(kind="filing", ticker=ticker))
+    return _append_result_meta(
+        "\n".join(lines),
+        _us_meta(
+            kind="filing", ticker=ticker,
+            data_as_of=report_day,
+            data_completeness=rmeta.COMPLETE if report_day else rmeta.PARTIAL,
+            coverage=(None if report_day else
+                      {"truncated": False, "coverage_complete": False,
+                       "reason": "unknown"}),
+            extra=({"staleness": staleness} if staleness else None),
+            warnings=short_warns or None,
+        ),
+    )
 
 
 @mcp.tool()
