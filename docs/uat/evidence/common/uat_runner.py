@@ -20,7 +20,7 @@ import time
 from decimal import Decimal
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[3]
+ROOT = Path(__file__).resolve().parents[4]
 sys.path.insert(0, str(ROOT))
 
 from stock_mcp_server import server  # noqa: E402
@@ -73,7 +73,8 @@ def _shift_trading_day(market: str, offset: int | None):
     return day
 
 
-async def _fetch(symbol, market, interval, source, venue, trading_date):
+async def _fetch(symbol, market, interval, source, venue, trading_date,
+                 row_limit=200):
     if trading_date is None:
         err, trading_date = server._validate_intraday_args(
             market, interval, source, None)
@@ -81,7 +82,7 @@ async def _fetch(symbol, market, interval, source, venue, trading_date):
             raise RuntimeError(err)
     return await server._fetch_intraday_dataset(
         symbol=symbol, market=market, interval=interval,
-        trading_date=trading_date, row_limit=200,
+        trading_date=trading_date, row_limit=row_limit,
         venue=venue, session="regular", completed_only=True,
         source=source)
 
@@ -90,9 +91,17 @@ def _recompute_check(base_1m, target_ds, interval, market):
     """1m 원천을 독립 집계해 대상 간격과 비교한다. 불일치 목록 반환."""
     if not base_1m or not base_1m.bars:
         return ["1m 원천 없음 - 재계산 생략"]
-    resampled = resample_intraday(base_1m, interval)
+    from zoneinfo import ZoneInfo
+    tz = ZoneInfo("Asia/Seoul" if market == "KR" else "America/New_York")
+    resampled = resample_intraday(base_1m, interval,
+                                  now=dt.datetime.now(tz))
+    # 베이스 1m 범위를 완전히 덮는 버킷만 비교한다. 경계에 걸친 부분
+    # 버킷은 러너 쪽 집계가 원천 부족으로 틀릴 수밖에 없다.
+    base_first = base_1m.bars[0].start_at
+    base_last_end = base_1m.bars[-1].end_at
     ours = {b.start_at.isoformat(): b for b in resampled.bars
-            if b.complete}
+            if b.complete and b.start_at >= base_first
+            and b.end_at <= base_last_end}
     theirs = {b.start_at.isoformat(): b for b in target_ds.bars
               if b.complete}
     mismatches = []
@@ -125,9 +134,11 @@ def run(provider: str, market: str, out_dir: Path) -> int:
         for interval in INTERVALS:
             time.sleep(0.6)  # 호출 제한 보호
             try:
+                # 1m 은 재계산 베이스라 하루 세션 전체(<=500)를 받는다.
                 ds, meta = asyncio.run(_fetch(
                     symbol, market, interval, provider, venue,
-                    trading_date))
+                    trading_date,
+                    row_limit=500 if interval == "1m" else 200))
             except Exception as exc:  # noqa: BLE001
                 status = getattr(exc, "provider_status",
                                  type(exc).__name__)

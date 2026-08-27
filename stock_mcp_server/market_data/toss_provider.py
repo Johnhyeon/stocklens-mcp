@@ -10,10 +10,15 @@
 
 해석 규칙:
 - 요청 거래일의 행만 채택한다. 그 이전 날짜 행에 닿으면 깨끗이 멈춘다.
-- 정규장(KR 09:00~15:30, US 09:30~16:00, 마감 print 포함) 밖 행은
-  버리고 개수를 경고로 남긴다. 문서가 침묵하는 세션 범위를 추측하지
-  않는다 - 실계좌 UAT 검증 전까지 capability 는 unverified 다.
+- 정규장 밖 행은 버리고 개수를 경고로 남긴다.
 - currency 가 시장과 어긋나는 행은 채택하지 않는다 (라벨-값 계약).
+
+KR 차단 (2026-08-27 실계좌 실측, 005930 KIS 381분 교차 대조):
+- timestamp 가 문서("봉 시작")와 달리 봉 끝 라벨로 동작
+  (toss[t+1] OHLC == kis[t] 210/381분, 09:00 bar 거래량 0)
+- 거래량이 KRX 단독 기준이 아님 (일치 구간 중앙값 1.37배, 통합 추정)
+- 15:30 마감 동시호가 print 미포함 (마지막 종가 != 공식 종가)
+계약 불일치가 해소·검증되기 전까지 KR 요청은 거부한다. 추측 보정 금지.
 """
 
 from __future__ import annotations
@@ -100,13 +105,13 @@ class TossBarProvider:
         self._max_pages = max_pages
 
     async def capabilities(self, profile: str) -> ProviderCapabilities:
-        # 세션·시장 범위 실측 검증 전까지 추측 활성화하지 않는다.
+        # KR 은 실측 계약 불일치로 차단 상태다 (모듈 docstring 참조).
         verified = ("1m",) if profile == "real" else ()
         return ProviderCapabilities(
             provider=self.provider_id,
             contract_version=1,
-            markets=("KR", "US"),
-            venues=("KRX", "NYS", "NAS", "AMS"),
+            markets=("US",),
+            venues=("NYS", "NAS", "AMS"),
             native_intervals=("1m",),
             verified_intervals=verified,
             sessions=("regular",),
@@ -120,6 +125,9 @@ class TossBarProvider:
             raise ValueError(
                 f"toss_provider는 1m 원천만 반환합니다. 요청 interval: "
                 f"{request.interval}")
+        if request.market == "KR":
+            # 실측 계약 불일치 (2026-08-27). 조용한 보정 대신 명시 거부.
+            raise TossApiError("not_configured")
         market_cfg = _MARKETS.get(request.market)
         if market_cfg is None:
             raise ValueError(

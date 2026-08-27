@@ -296,26 +296,6 @@ def _toss(pages):
     return TossBarProvider(client, "real")
 
 
-def _toss_kr_single():
-    page = {"result": {"candles":
-            _toss_candles(["15:30:00", "15:29:00"])
-            + _toss_candles(["15:29:00"], day="2026-08-26"),
-            "nextBefore": None}}
-    return run(_toss([page]).fetch_bars(_request("KR")))
-
-
-def _toss_kr_partial():
-    page = {"result": {"candles": _toss_candles(["15:30:00", "15:29:00"]),
-                       "nextBefore": "2026-08-27T15:29:00+09:00"}}
-    provider = _toss([page, httpx.Response(500, json={})])
-    return run(provider.fetch_bars(_request("KR")))
-
-
-def _toss_kr_error():
-    provider = _toss([httpx.Response(500, json={})])
-    return run(provider.fetch_bars(_request("KR")))
-
-
 def _toss_us_single():
     page = {"result": {"candles":
             _toss_candles(["09:35:00", "09:34:00"], day="2026-08-26",
@@ -348,8 +328,8 @@ ALL_PROVIDER_CASES = (
          _kiwoom_kr_single, _kiwoom_kr_partial, _kiwoom_kr_error),
     Case("kiwoom_us", "kiwoom", "US", "America/New_York",
          _kiwoom_us_single, _kiwoom_us_partial, _kiwoom_us_error),
-    Case("toss_kr", "toss", "KR", "Asia/Seoul",
-         _toss_kr_single, _toss_kr_partial, _toss_kr_error),
+    # toss_kr 케이스 없음: 실계좌 실측(2026-08-27)에서 정규장 계약
+    # 불일치가 확정되어 어댑터가 KR 요청을 차단한다.
     Case("toss_us", "toss", "US", "America/New_York",
          _toss_us_single, _toss_us_partial, _toss_us_error),
 )

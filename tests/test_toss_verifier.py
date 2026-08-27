@@ -66,12 +66,16 @@ def _verify(scenario: Scenario) -> dict:
 
 
 class TossVerifierTests(unittest.TestCase):
-    def test_all_available_with_unadjusted_probe(self):
+    def test_us_available_kr_fixed_unavailable(self):
+        # KR 은 실측 계약 불일치(2026-08-27)로 probe 없이 unavailable.
         scenario = Scenario()
         result = _verify(scenario)
         self.assertEqual(result["auth"], "ok")
-        self.assertEqual(result["kr_intraday"], "available")
+        self.assertEqual(result["kr_intraday"], "unavailable")
         self.assertEqual(result["us_intraday"], "available")
+        symbols = {req.url.params.get("symbol")
+                   for req in scenario.candle_requests}
+        self.assertNotIn("005930", symbols)
         for req in scenario.candle_requests:
             self.assertEqual(req.url.params.get("interval"), "1m")
             self.assertEqual(req.url.params.get("adjusted"), "false")
@@ -80,7 +84,7 @@ class TossVerifierTests(unittest.TestCase):
         result = _verify(Scenario(
             token=httpx.Response(401, json=_TOKEN_FAILURE)))
         self.assertEqual(result["auth"], "credential_invalid")
-        self.assertEqual(result["kr_intraday"], "unverified")
+        self.assertEqual(result["us_intraday"], "unverified")
 
     def test_ip_not_allowed(self):
         result = _verify(Scenario(token=httpx.Response(403, json={
@@ -91,10 +95,11 @@ class TossVerifierTests(unittest.TestCase):
         self.assertEqual(result["us_intraday"], "unverified")
 
     def test_rate_limited_probe_is_unverified(self):
-        result = _verify(Scenario(kr=httpx.Response(
+        # 토큰 발급은 성공했으므로 auth 는 ok, 능력 판정만 보류한다.
+        result = _verify(Scenario(us=httpx.Response(
             429, json={"error": {"code": "rate-limit-exceeded"}})))
         self.assertEqual(result["auth"], "ok")
-        self.assertEqual(result["kr_intraday"], "unverified")
+        self.assertEqual(result["us_intraday"], "unverified")
 
     def test_not_found_probe_is_unavailable(self):
         result = _verify(Scenario(us=httpx.Response(404, json={
@@ -103,9 +108,9 @@ class TossVerifierTests(unittest.TestCase):
 
     def test_empty_candles_is_available(self):
         # 휴장 시간대의 빈 결과도 "권한 있음"의 증거다.
-        result = _verify(Scenario(kr=httpx.Response(200, json={
+        result = _verify(Scenario(us=httpx.Response(200, json={
             "result": {"candles": [], "nextBefore": None}})))
-        self.assertEqual(result["kr_intraday"], "available")
+        self.assertEqual(result["us_intraday"], "available")
 
 
 if __name__ == "__main__":

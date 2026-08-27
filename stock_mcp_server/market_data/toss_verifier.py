@@ -29,17 +29,20 @@ class TossVerifier:
             "us_intraday": "unverified",
         }
 
-        kr = await self._probe(client, "005930")
-        if kr in _AUTH_FAILURES:
+        # 인증 probe 는 미국 종목으로만 한다. KR 은 실측 계약 불일치
+        # (봉 라벨 시프트·통합 거래량·마감 동시호가 부재, 2026-08-27)로
+        # 코드에서 차단 상태라 probe 없이 unavailable 로 고정한다.
+        us = await self._probe(client, "AAPL")
+        if us in _AUTH_FAILURES:
             result["auth"] = "credential_invalid"
             return result
-        if kr == "ip_not_allowed":
+        if us == "ip_not_allowed":
             result["auth"] = "ip_not_allowed"
             return result
 
         result["auth"] = "ok"
-        result["kr_intraday"] = kr
-        result["us_intraday"] = await self._probe(client, "AAPL")
+        result["kr_intraday"] = "unavailable"
+        result["us_intraday"] = us
         return result
 
     async def _probe(self, client: TossClient, symbol: str) -> str:
