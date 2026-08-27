@@ -39,7 +39,14 @@ def _bucketize(
     buckets: dict[int, list[NormalizedBar]] = {}
     for bar in bars:
         offset = int((bar.start_at - window.open_at).total_seconds() // 60)
-        buckets.setdefault(offset // minutes, []).append(bar)
+        if offset == window.minutes:
+            # 마감 정각 체결(마감 동시호가) - 이 행의 종가가 공식 종가다
+            # (실측 2026-08-27: KIS 15:30 행 = 일봉 종가·대량 거래량).
+            # 자기만의 0분 버킷을 만들지 않고 마지막 세션 버킷에 귀속한다.
+            index = (offset - 1) // minutes
+        else:
+            index = offset // minutes
+        buckets.setdefault(index, []).append(bar)
 
     out: list[NormalizedBar] = []
     for index in sorted(buckets):
@@ -114,7 +121,9 @@ def resample_intraday(
         if window is None:
             dropped_non_trading += 1
             continue
-        if bar.start_at < window.open_at or bar.start_at >= window.close_at:
+        # 마감 정각(== close_at) 행은 포함한다 - 마감 동시호가 체결이다.
+        # 그보다 뒤(시간외 등)는 제외.
+        if bar.start_at < window.open_at or bar.start_at > window.close_at:
             dropped_out_of_session += 1
             continue
         by_day.setdefault(day, []).append(bar)

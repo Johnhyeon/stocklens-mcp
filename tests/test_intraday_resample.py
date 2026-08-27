@@ -178,6 +178,62 @@ class CompletenessTests(unittest.TestCase):
         self.assertEqual(ds.bars, ())
 
 
+class ClosingAuctionTests(unittest.TestCase):
+    """실측(2026-08-27): KIS 는 15:30 마감 동시호가 행을 준다. 이 행의
+    종가가 공식 일봉 종가이고 거래량도 크다(삼성전자 169만주 실측).
+    세션 창에서 버리면 꼬리 봉이 공식 종가와 어긋난다 - 마지막 세션
+    버킷에 귀속시킨다."""
+
+    def _kr_with_auction(self):
+        bars = _one_minute_bars(
+            datetime(2026, 8, 27, 9, 0, tzinfo=KST), 390)
+        auction_start = datetime(2026, 8, 27, 15, 30, tzinfo=KST)
+        auction = NormalizedBar(
+            start_at=auction_start,
+            end_at=auction_start + timedelta(minutes=1),
+            open=Decimal(9000), high=Decimal(9000), low=Decimal(9000),
+            close=Decimal(9000), volume=1_690_790,
+            interval="1m", session="regular", complete=True,
+            session_tail=False, expected_minutes=1, actual_minutes=1,
+            data_integrity="complete", source_gap_status="none")
+        return _dataset(bars + [auction])
+
+    def test_240m_tail_includes_closing_auction(self):
+        ds = resample_intraday(self._kr_with_auction(), "240m",
+                               now=_KR_AFTER_CLOSE)
+        tail = ds.bars[-1]
+        self.assertTrue(tail.session_tail)
+        # 종가 = 동시호가 체결가, 거래량에 동시호가 포함
+        self.assertEqual(tail.close, Decimal(9000))
+        expected_vol = sum(10 + i for i in range(240, 390)) + 1_690_790
+        self.assertEqual(tail.volume, expected_vol)
+
+    def test_5m_last_bucket_includes_closing_auction(self):
+        ds = resample_intraday(self._kr_with_auction(), "5m",
+                               now=_KR_AFTER_CLOSE)
+        last = ds.bars[-1]
+        # 15:25~15:30 버킷이 마지막이고 동시호가가 여기 귀속된다.
+        self.assertEqual(last.start_at.strftime("%H%M"), "1525")
+        self.assertEqual(last.close, Decimal(9000))
+
+    def test_rows_after_close_still_dropped(self):
+        # 마감 "정각" 체결만 포함한다. 그 뒤(시간외 등)는 여전히 제외.
+        bars = _one_minute_bars(
+            datetime(2026, 8, 27, 9, 0, tzinfo=KST), 390)
+        after_start = datetime(2026, 8, 27, 16, 0, tzinfo=KST)
+        after = NormalizedBar(
+            start_at=after_start, end_at=after_start + timedelta(minutes=1),
+            open=Decimal(1), high=Decimal(1), low=Decimal(1),
+            close=Decimal(1), volume=5, interval="1m", session="regular",
+            complete=True, session_tail=False, expected_minutes=1,
+            actual_minutes=1, data_integrity="complete",
+            source_gap_status="none")
+        ds = resample_intraday(_dataset(bars + [after]), "60m",
+                               now=_KR_AFTER_CLOSE)
+        self.assertTrue(all(b.end_at.hour < 16 for b in ds.bars))
+        self.assertTrue(any("세션 밖" in w for w in ds.warnings))
+
+
 class InvalidInputTests(unittest.TestCase):
     def test_target_must_be_multiple_of_source(self):
         with self.assertRaises(ValueError):

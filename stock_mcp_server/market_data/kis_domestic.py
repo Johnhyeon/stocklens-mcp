@@ -156,7 +156,15 @@ class KisDomesticProvider:
                 break
 
             page_bars: list[NormalizedBar] = []
+            other_day = 0
             for row in rows:
+                # 요청한 거래일의 행만 채택한다. 실측(2026-08-27): 페이지가
+                # 09:00 을 지나면 KIS 가 전일 오후 행을 이어서 돌려준다 -
+                # 걸러내지 않으면 전일 행 1페이지가 결과에 혼입된다.
+                row_date = str(row.get("stck_bsop_date") or trading_date_str)
+                if row_date != trading_date_str:
+                    other_day += 1
+                    continue
                 bar = _parse_row(row, trading_date_str)
                 if bar is None:
                     dropped += 1
@@ -164,6 +172,9 @@ class KisDomesticProvider:
                 page_bars.append(bar)
 
             if not page_bars:
+                if other_day and not dropped:
+                    # 전일 행에 도달했다 = 요청일 구간을 다 받았다. 정상 종료.
+                    break
                 # 행은 있는데 하나도 못 읽었다. 형식이 바뀐 것이다.
                 if not bars:
                     raise KisApiError("source_parse_error")

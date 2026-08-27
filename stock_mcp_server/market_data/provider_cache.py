@@ -22,7 +22,9 @@ import time
 from pathlib import Path
 
 SCHEMA_VERSION = 1
-PARSE_VERSION = 1
+# 2: kis_domestic 이 요청 거래일 밖 행(전일 오후 페이지)을 혼입하던 버그
+#    수정(2026-08-27 실측). 혼입 행이 저장된 v1 entry 를 무효화한다.
+PARSE_VERSION = 2
 
 # 기본 총량 상한. 구현 상수로 분리한다 (설계 21절).
 DEFAULT_MAX_TOTAL_BYTES = 200 * 1024 * 1024

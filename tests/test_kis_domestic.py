@@ -211,6 +211,39 @@ class PaginationSafetyTests(unittest.TestCase):
         self.assertEqual(ctx.exception.provider_status, "rate_limited")
 
 
+class TradingDateBoundaryTests(unittest.TestCase):
+    """실측(2026-08-27): 페이지네이션이 요청일을 지나 전일 오후로 넘어가
+    전일 행 1페이지가 결과에 혼입됐다. 요청한 trading_date 의 행만 채택한다."""
+
+    def test_other_day_rows_are_filtered_out(self):
+        prev_day_page = copy.deepcopy(PAGE_2)
+        for row in prev_day_page["output2"]:
+            row["stck_bsop_date"] = "20260826"  # 전일 행
+        handler = PagedHandler({
+            "153000": PAGE_1,
+            "093200": prev_day_page,
+        })
+        ds = _run(_provider(handler).fetch_bars(_request()))
+        dates = {b.start_at.date().isoformat() for b in ds.bars}
+        self.assertEqual(dates, {"2026-08-27"})
+        # 전일 페이지에 도달하면 그 지점에서 깔끔히 끝난다 (혼입 0).
+        self.assertEqual(len(ds.bars), 3)
+
+    def test_closing_auction_row_at_1530_is_returned(self):
+        # 15:30 마감 동시호가 행은 공식 종가다. provider 는 버리지 않는다.
+        page = copy.deepcopy(PAGE_1)
+        page["output2"].insert(0, {
+            "stck_bsop_date": "20260827", "stck_cntg_hour": "153000",
+            "stck_oprc": "70500", "stck_hgpr": "70500",
+            "stck_lwpr": "70500", "stck_prpr": "70500",
+            "cntg_vol": "999999",
+        })
+        handler = PagedHandler({"153000": page})
+        ds = _run(_provider(handler).fetch_bars(_request()))
+        self.assertEqual(ds.bars[-1].start_at.strftime("%H%M"), "1530")
+        self.assertEqual(ds.bars[-1].volume, 999999)
+
+
 class CapabilityTests(unittest.TestCase):
     def test_real_and_demo_capabilities_differ(self):
         handler = PagedHandler({})
