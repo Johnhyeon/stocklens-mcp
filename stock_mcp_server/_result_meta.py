@@ -79,6 +79,85 @@ COMPLETE = "complete"
 PARTIAL = "partial"
 NONE = "none"
 
+# --- 증권사 선로(provider) 선택 확장 (StockLens 전용, additive) ---
+# 공급자 오류는 coverage reason 이 아니라 provider_status 로만 표현한다.
+# 허용값은 broker-market-data-routing 설계 27절과 동기한다. 이 블록은
+# 선택 필드라 META_VERSION 을 올리지 않는다. DartLens·TelegramLens 사본에는
+# 없어도 규약 위반이 아니다.
+PROVIDER_STATUSES = (
+    "ok", "not_configured", "credential_invalid",
+    "authentication_failed", "permission_denied", "rate_limited",
+    "provider_unavailable", "source_parse_error", "entity_not_found",
+    "no_session", "partial",
+)
+
+PROVIDER_EXTENSION_FIELDS = (
+    "provider", "provider_status", "provider_profile",
+    "requested_source", "selection_reason", "fallback_used",
+    "fallback_from", "venue", "timezone", "requested_interval",
+    "source_interval", "aggregation_method", "adjustment_basis",
+    "data_as_of_timestamp",
+)
+
+
+def provider_extension(
+    *,
+    provider: str,
+    provider_status: str,
+    provider_profile: str | None = None,
+    requested_source: str | None = None,
+    selection_reason: str | None = None,
+    fallback_used: bool = False,
+    fallback_from: str | None = None,
+    venue: str | None = None,
+    timezone: str | None = None,
+    requested_interval: str | None = None,
+    source_interval: str | None = None,
+    aggregation_method: str | None = None,
+    adjustment_basis: str | None = None,
+    data_as_of_timestamp: str | None = None,
+) -> dict:
+    """meta 에 병합할 provider 선택 필드를 검증해 돌려준다.
+
+    data_as_of 는 기존 날짜 계약을 유지하고, 분봉의 정확한 시각은
+    data_as_of_timestamp(offset 포함 ISO)로만 실어 보낸다.
+    """
+    if provider_status not in PROVIDER_STATUSES:
+        raise ValueError(
+            f"provider_status 미정의 값: {provider_status!r} "
+            f"(허용: {PROVIDER_STATUSES})")
+    if data_as_of_timestamp is not None:
+        try:
+            parsed = datetime.fromisoformat(data_as_of_timestamp)
+        except (TypeError, ValueError):
+            raise ValueError(
+                f"data_as_of_timestamp 해석 불가: {data_as_of_timestamp!r}"
+            ) from None
+        if parsed.tzinfo is None or parsed.tzinfo.utcoffset(parsed) is None:
+            raise ValueError(
+                "data_as_of_timestamp 는 offset 포함 ISO 여야 합니다: "
+                f"{data_as_of_timestamp!r}")
+
+    ext = {
+        "provider": provider,
+        "provider_status": provider_status,
+        "requested_source": requested_source,
+        "selection_reason": selection_reason,
+        "fallback_used": bool(fallback_used),
+        "fallback_from": fallback_from,
+        "venue": venue,
+        "timezone": timezone,
+        "requested_interval": requested_interval,
+        "source_interval": source_interval,
+        "aggregation_method": aggregation_method,
+        "adjustment_basis": adjustment_basis,
+    }
+    if provider_profile is not None:
+        ext["provider_profile"] = provider_profile
+    if data_as_of_timestamp is not None:
+        ext["data_as_of_timestamp"] = data_as_of_timestamp
+    return ext
+
 _VALID_COMPLETENESS = {COMPLETE, PARTIAL, NONE}
 
 # coverage.reason - 왜 요청보다 적게 돌려줬는가 (v3)

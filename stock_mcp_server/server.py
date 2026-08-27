@@ -7707,24 +7707,27 @@ async def _fetch_intraday_dataset(
 
 
 def _intraday_meta_extra(dataset, route_meta: dict) -> dict:
-    extra = {
-        "provider": dataset.provider,
-        "provider_status": "ok",
-        "requested_source": route_meta.get("requested_source"),
-        "selection_reason": route_meta.get("selection_reason"),
-        "fallback_used": bool(route_meta.get("fallback_used")),
-        "fallback_from": route_meta.get("fallback_from"),
-        "venue": dataset.venue,
-        "timezone": dataset.timezone,
-        "requested_interval": dataset.requested_interval,
-        "source_interval": dataset.source_interval,
-        "aggregation_method": dataset.aggregation_method,
-        "adjustment_basis": dataset.adjustment_basis,
-    }
-    if dataset.profile:
-        extra["provider_profile"] = dataset.profile
-    if dataset.bars:
-        extra["data_as_of_timestamp"] = dataset.bars[-1].end_at.isoformat()
+    # rmeta.provider_extension 이 값 계약(허용 status, tz 포함 timestamp)을
+    # 검증한다. 계약 위반이면 응답을 내보내기 전에 여기서 죽는 게 맞다.
+    extra = rmeta.provider_extension(
+        provider=dataset.provider,
+        provider_status="ok",
+        provider_profile=dataset.profile,
+        requested_source=route_meta.get("requested_source"),
+        selection_reason=route_meta.get("selection_reason"),
+        fallback_used=bool(route_meta.get("fallback_used")),
+        fallback_from=route_meta.get("fallback_from"),
+        venue=dataset.venue,
+        timezone=dataset.timezone,
+        requested_interval=dataset.requested_interval,
+        source_interval=dataset.source_interval,
+        aggregation_method=dataset.aggregation_method,
+        adjustment_basis=dataset.adjustment_basis,
+        data_as_of_timestamp=(
+            dataset.bars[-1].end_at.isoformat() if dataset.bars else None),
+    )
+    if route_meta.get("cache_hit"):
+        extra["cache_hit"] = True
     return extra
 
 

@@ -170,9 +170,14 @@ class DiagnosticReport:
     checks: list[DiagnosticCheck]
     latest_version: str | None = None
     update_available: bool | None = None
+    # 증권사 연결 확장 (additive). 구 Manager 는 이 키를 몰라도 되고,
+    # 새 Manager 는 capabilities 로 broker UI 지원 여부를 협상한다.
+    # 공통 schema_version 은 올리지 않는다.
+    capabilities: dict | None = None
+    provider_connections: dict | None = None
 
     def to_dict(self) -> dict:
-        return {
+        doc = {
             "schema_version": self.schema_version,
             "product": PRODUCT,
             "package_name": PACKAGE_NAME,
@@ -187,6 +192,11 @@ class DiagnosticReport:
             "targets": self.targets,
             "checks": [c.to_dict() for c in self.checks],
         }
+        if self.capabilities is not None:
+            doc["capabilities"] = self.capabilities
+        if self.provider_connections is not None:
+            doc["provider_connections"] = self.provider_connections
+        return doc
 
     def to_json(self, *, indent: int | None = 2) -> str:
         return json.dumps(self.to_dict(), ensure_ascii=False, indent=indent)
@@ -637,6 +647,67 @@ async def _check_update_check_reachable() -> tuple[DiagnosticCheck, str | None]:
     )
 
 
+def _broker_keyring():
+    """keyring 접근 지점. 테스트가 가짜 keyring 으로 대체한다."""
+    import keyring
+    return keyring
+
+
+_BROKER_PROFILES = ("real", "demo")
+
+
+def _broker_summary() -> tuple[dict, dict]:
+    """(capabilities, provider_connections). 비밀값 없는 요약만 만든다.
+
+    상태 파일이 기본값(미연결)이면 keychain 을 읽지 않는다. doctor 는
+    진단일 뿐이므로 어떤 실패도 전체 상태에 영향을 주지 않는다.
+    """
+    capabilities = {
+        "broker_connection_contract": 1,
+        "market_data_router_contract": 1,
+    }
+    connection: dict = {
+        "status": "not_configured",
+        "active_profile": None,
+        "data_source_mode": "legacy",
+        "profiles": {p: {"configured": False, "verified": False}
+                     for p in _BROKER_PROFILES},
+        "storage": "os-keychain",
+    }
+    try:
+        from stock_mcp_server.market_data.connection_state import load_state
+
+        state = load_state()
+        connection["data_source_mode"] = state.get(
+            "data_source_mode", "legacy")
+        caps_res = state.get("capability_results") or {}
+        if state.get("active_provider") == "kis" or caps_res:
+            from stock_mcp_server.market_data.broker_profiles import (
+                BrokerProfileStore,
+            )
+
+            store = BrokerProfileStore(
+                provider="kis", keyring_module=_broker_keyring())
+            for p in _BROKER_PROFILES:
+                configured = store.has_profile(p)
+                connection["profiles"][p] = {
+                    "configured": configured,
+                    "verified": bool(caps_res.get(p)) and configured,
+                }
+            active = state.get("active_profile")
+            connection["active_profile"] = active
+            if active and connection["profiles"].get(
+                    active, {}).get("configured"):
+                connection["status"] = "connected"
+            elif any(v["configured"]
+                     for v in connection["profiles"].values()):
+                connection["status"] = "configured"
+    except Exception:  # noqa: BLE001
+        # 요약 실패는 진단 실패가 아니다. 보수적 기본값을 유지한다.
+        pass
+    return capabilities, {"kis": connection}
+
+
 async def run_diagnostics_async(*, online: bool = False) -> DiagnosticReport:
     """`run_diagnostics`의 async 코어. 이미 실행 중인 이벤트 루프(예: MCP 도구)
     안에서는 이 쪽을 직접 await 한다 — `run_diagnostics()`는 내부에서
@@ -687,6 +758,13 @@ async def run_diagnostics_async(*, online: bool = False) -> DiagnosticReport:
 
     update_available = _version_gt(latest_version, __version__) if latest_version else None
 
+    try:
+        broker_capabilities, provider_connections = _broker_summary()
+    except Exception:  # noqa: BLE001
+        broker_capabilities, provider_connections = (
+            {"broker_connection_contract": 1,
+             "market_data_router_contract": 1}, None)
+
     overall = _overall_status(checks)
     return DiagnosticReport(
         schema_version=SCHEMA_VERSION,
@@ -701,6 +779,8 @@ async def run_diagnostics_async(*, online: bool = False) -> DiagnosticReport:
         checks=checks,
         latest_version=latest_version,
         update_available=update_available,
+        capabilities=broker_capabilities,
+        provider_connections=provider_connections,
     )
 
 
