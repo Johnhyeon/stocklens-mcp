@@ -382,7 +382,8 @@ def provider_capabilities_v2(state: dict, provider: str) -> dict:
     cleaned = sanitize_v2(state)
     record = cleaned["providers"].get(provider)
     empty = {"connected": False, "kr_intraday": False, "us_intraday": False,
-             "kr_daily": False, "us_daily": False}
+             "kr_daily": False, "us_daily": False,
+             "kr_intraday_state": "unknown", "us_intraday_state": "unknown"}
     if record is None or record["lifecycle"] != "connected":
         return empty
     active = record.get("active_profile")
@@ -395,12 +396,30 @@ def provider_capabilities_v2(state: dict, provider: str) -> dict:
         return caps.get(name) == "available" and \
             is_release_verified(provider, name)
 
+    def _state(name: str) -> str:
+        """라우터 오류 구분용 세부 상태.
+
+        available   두 게이트 모두 통과 (라우팅 가능)
+        verifying   연결 시험은 통과했으나 출시 검증 전
+        unsupported 이 provider 가 해당 시장을 지원하지 않음/계약 불일치
+        unknown     연결 시험 판정 없음
+        """
+        value = caps.get(name)
+        if value == "available":
+            return "available" if is_release_verified(provider, name) \
+                else "verifying"
+        if value == "unavailable":
+            return "unsupported"
+        return "unknown"
+
     return {
         "connected": True,
         "kr_intraday": _on("kr_intraday"),
         "us_intraday": _on("us_intraday"),
         "kr_daily": _on("kr_daily"),
         "us_daily": _on("us_daily"),
+        "kr_intraday_state": _state("kr_intraday"),
+        "us_intraday_state": _state("us_intraday"),
     }
 
 

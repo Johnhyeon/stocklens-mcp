@@ -90,6 +90,40 @@ def _provider_capable(market: str, interval: str,
     return bool(capabilities.get(f"{market.lower()}_intraday"))
 
 
+def _explicit_denied_error(provider: str, market: str, interval: str,
+                           caps: dict | None) -> "RouterError":
+    """명시 source 거부 사유를 구분한다 (리뷰: 미연결·검증 중·미지원).
+
+    키 문제(not_configured)와 지원 문제(unsupported)를 섞으면 사용자가
+    멀쩡한 키를 의심한다.
+    """
+    strict_tail = (f" source={provider}는 strict 모드라 다른 공급원으로 "
+                   "전환하지 않습니다.")
+    if not caps or not caps.get("connected"):
+        return RouterError(
+            "not_configured",
+            f"{provider}가 연결되어 있지 않습니다. 증권사 연결 후 다시 "
+            f"시도하세요.{strict_tail}")
+    kind = _kind(interval)
+    state_key = (f"{market.lower()}_intraday_state" if kind == "intraday"
+                 else None)
+    state = caps.get(state_key) if state_key else None
+    if state == "verifying":
+        return RouterError(
+            "unsupported",
+            f"{provider}의 {market} 분봉은 데이터 계약 검증 중이라 아직 "
+            f"제공하지 않습니다. API 키 문제가 아닙니다.{strict_tail}")
+    if state == "unsupported":
+        return RouterError(
+            "unsupported",
+            f"{provider}는 {market} 분봉을 지원하지 않습니다 (데이터 계약 "
+            f"불일치 확인). API 키 문제가 아닙니다.{strict_tail}")
+    return RouterError(
+        "not_configured",
+        f"{provider}가 이 요청({market} {interval})을 지원하지 "
+        f"않습니다.{strict_tail}")
+
+
 def resolve_source(
     *,
     mode: str,
@@ -128,11 +162,9 @@ def resolve_source(
         # 실패해도 다른 공급원으로 전환하지 않는다.
         if not _provider_capable(market, interval,
                                  capabilities.get(requested_source)):
-            raise RouterError(
-                "not_configured",
-                f"{requested_source}가 연결되어 있지 않거나 이 요청을 "
-                f"지원하지 않습니다. source={requested_source}는 strict "
-                "모드라 다른 공급원으로 전환하지 않습니다.")
+            raise _explicit_denied_error(
+                requested_source, market, interval,
+                capabilities.get(requested_source))
         return _make(requested_source,
                      f"explicit_source_{requested_source}_strict")
 

@@ -62,6 +62,58 @@ class ReleaseGateTableTests(unittest.TestCase):
         self.assertFalse(is_release_verified("kis", "teleport"))
 
 
+class RouterDistinctionTests(unittest.TestCase):
+    """리뷰 잔여 3: 사용자 경로에서 미연결·검증 중·미지원을 구분한다.
+
+    토스 KR 처럼 provider 단계의 unsupported 가 라우터의 not_configured
+    에 가려지면 사용자는 키 문제로 오해한다.
+    """
+
+    def _resolve(self, caps, source):
+        from stock_mcp_server.market_data.router import resolve_source
+        return resolve_source(
+            mode="auto", market="KR", interval="5m",
+            requested_source=source, capabilities={source: caps},
+            primary_provider=None)
+
+    def test_not_connected_stays_not_configured(self):
+        from stock_mcp_server.market_data.router import RouterError
+        with self.assertRaises(RouterError) as ctx:
+            self._resolve({"connected": False, "kr_intraday": False,
+                           "kr_intraday_state": "unknown"}, "toss")
+        self.assertEqual(ctx.exception.provider_status, "not_configured")
+        self.assertIn("연결", str(ctx.exception))
+
+    def test_connected_but_market_unsupported_is_unsupported(self):
+        from stock_mcp_server.market_data.router import RouterError
+        state = _v2_state("toss")
+        state["providers"]["toss"]["profiles"]["real"]["capabilities"][
+            "kr_intraday"] = "unavailable"
+        caps = provider_capabilities_v2(state, "toss")
+        self.assertEqual(caps["kr_intraday_state"], "unsupported")
+        with self.assertRaises(RouterError) as ctx:
+            self._resolve(caps, "toss")
+        self.assertEqual(ctx.exception.provider_status, "unsupported")
+        self.assertIn("지원하지 않", str(ctx.exception))
+        self.assertIn("키 문제가 아닙니다", str(ctx.exception))
+
+    def test_connected_endpoint_ok_but_unverified_is_verifying(self):
+        from stock_mcp_server.market_data.router import RouterError
+        state = _v2_state("kiwoom")
+        caps = provider_capabilities_v2(state, "kiwoom")
+        self.assertEqual(caps["kr_intraday_state"], "verifying")
+        with self.assertRaises(RouterError) as ctx:
+            self._resolve(caps, "kiwoom")
+        self.assertEqual(ctx.exception.provider_status, "unsupported")
+        self.assertIn("검증", str(ctx.exception))
+        self.assertIn("키 문제가 아닙니다", str(ctx.exception))
+
+    def test_fully_verified_state_is_available(self):
+        state = _v2_state("kis")
+        caps = provider_capabilities_v2(state, "kis")
+        self.assertEqual(caps["kr_intraday_state"], "available")
+
+
 class RouterGatingTests(unittest.TestCase):
     def test_endpoint_available_alone_does_not_activate(self):
         # 연결 시험은 통과했지만(available) 출시 검증 전인 능력은
