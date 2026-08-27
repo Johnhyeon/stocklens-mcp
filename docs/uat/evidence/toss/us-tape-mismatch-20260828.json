@@ -1,0 +1,463 @@
+{
+ "title": "토스 US 1.0 시세 계약 미지원 판단 근거 (자체 테이프 + 금요일 보존)",
+ "date": "2026-08-28",
+ "decision": "대표 결정 2026-08-28: 토스 KR/US release gate 는 열지 않는다. 데이터가 틀린 게 아니라 KIS/키움과 다른 종류의 시세(자체 테이프)다. 같은 1분봉 이름으로 섞으면 사용자가 동일 시장 데이터로 오해한다. 연결/인증은 유지, 어댑터 파이프라인은 후속 토스 자체 시세 기능용으로 보존.",
+ "findings": {
+  "retention_rule": "직전 완결 거래일 1일 + 각 주 금요일만 보존. 2026-08 전 거래일 매트릭스에서 08-07/08-14/08-21(금)+08-26(최신 완결일)만 391행, 나머지 전부 0행. 7월(07-10/17/24/31 금 전부 391행, 07-15/29 수 0행), 05-29(금), 03-27(금)까지 확인.",
+  "partial_tape": "08-26 완결일 KIS raw 교차(AAPL/SPY/SOFI): 타임스탬프 391/391 완전 일치, 커버리지 09:30~16:00 완결이나 OHLC 391분 전부 상이. close 델타 최대 AAPL 1.05/SPY 0.61/SOFI 0.175 USD. 거래량 중앙값 비율 AAPL 0.156/SPY 0.382/SOFI 0.146 (KIS 통합 대비 10~40%).",
+  "last_print_vs_kis": "AAPL 313.52 vs KIS 313.45 / SPY 765.97 vs 766.12 / SOFI 18.84 vs 18.85 (마감 print 도 상이)"
+ },
+ "measurements": {
+  "availability": [
+   {
+    "date": "2026-08-03",
+    "rows": 0,
+    "pages": 2,
+    "first": null,
+    "last": null
+   },
+   {
+    "date": "2026-08-04",
+    "rows": 0,
+    "pages": 2,
+    "first": null,
+    "last": null
+   },
+   {
+    "date": "2026-08-05",
+    "rows": 0,
+    "pages": 2,
+    "first": null,
+    "last": null
+   },
+   {
+    "date": "2026-08-06",
+    "rows": 0,
+    "pages": 1,
+    "first": null,
+    "last": null
+   },
+   {
+    "date": "2026-08-07",
+    "rows": 391,
+    "pages": 6,
+    "first": "2026-08-07T09:30:00-04:00",
+    "last": "2026-08-07T16:00:00-04:00"
+   },
+   {
+    "date": "2026-08-10",
+    "rows": 0,
+    "pages": 2,
+    "first": null,
+    "last": null
+   },
+   {
+    "date": "2026-08-11",
+    "rows": 0,
+    "pages": 2,
+    "first": null,
+    "last": null
+   },
+   {
+    "date": "2026-08-12",
+    "rows": 0,
+    "pages": 2,
+    "first": null,
+    "last": null
+   },
+   {
+    "date": "2026-08-13",
+    "rows": 0,
+    "pages": 2,
+    "first": null,
+    "last": null
+   },
+   {
+    "date": "2026-08-14",
+    "rows": 391,
+    "pages": 6,
+    "first": "2026-08-14T09:30:00-04:00",
+    "last": "2026-08-14T16:00:00-04:00"
+   },
+   {
+    "date": "2026-08-17",
+    "rows": 0,
+    "pages": 2,
+    "first": null,
+    "last": null
+   },
+   {
+    "date": "2026-08-18",
+    "rows": 0,
+    "pages": 2,
+    "first": null,
+    "last": null
+   },
+   {
+    "date": "2026-08-19",
+    "rows": 0,
+    "pages": 2,
+    "first": null,
+    "last": null
+   },
+   {
+    "date": "2026-08-20",
+    "rows": 0,
+    "pages": 2,
+    "first": null,
+    "last": null
+   },
+   {
+    "date": "2026-08-21",
+    "rows": 391,
+    "pages": 6,
+    "first": "2026-08-21T09:30:00-04:00",
+    "last": "2026-08-21T16:00:00-04:00"
+   },
+   {
+    "date": "2026-08-24",
+    "rows": 0,
+    "pages": 1,
+    "first": null,
+    "last": null
+   },
+   {
+    "date": "2026-08-25",
+    "rows": 0,
+    "pages": 1,
+    "first": null,
+    "last": null
+   },
+   {
+    "date": "2026-08-26",
+    "rows": 391,
+    "pages": 7,
+    "first": "2026-08-26T09:30:00-04:00",
+    "last": "2026-08-26T16:00:00-04:00"
+   }
+  ],
+  "cross": {
+   "AAPL": {
+    "toss_rows": 391,
+    "kis_rows": 391,
+    "toss_pages": 7,
+    "common": 391,
+    "only_toss": 0,
+    "only_kis": 0,
+    "only_toss_ts": [],
+    "only_kis_ts": [],
+    "toss_first": "2026-08-26T09:30:00-04:00",
+    "toss_last": "2026-08-26T16:00:00-04:00",
+    "kis_first": "2026-08-26T09:30:00-04:00",
+    "kis_last": "2026-08-26T16:00:00-04:00",
+    "toss_last_close": 313.52,
+    "kis_last_close": 313.45,
+    "ohlc_diff_minutes": 391,
+    "ohlc_diff_samples": [
+     {
+      "t": "2026-08-26T09:30:00-04:00",
+      "fields": [
+       "open",
+       "high",
+       "low",
+       "close"
+      ],
+      "close_delta": -0.09
+     },
+     {
+      "t": "2026-08-26T09:31:00-04:00",
+      "fields": [
+       "open",
+       "high",
+       "low",
+       "close"
+      ],
+      "close_delta": 1.05
+     },
+     {
+      "t": "2026-08-26T09:32:00-04:00",
+      "fields": [
+       "open",
+       "high",
+       "low",
+       "close"
+      ],
+      "close_delta": -0.34
+     },
+     {
+      "t": "2026-08-26T09:33:00-04:00",
+      "fields": [
+       "open",
+       "high",
+       "low",
+       "close"
+      ],
+      "close_delta": 0.08
+     },
+     {
+      "t": "2026-08-26T09:34:00-04:00",
+      "fields": [
+       "open",
+       "high",
+       "low",
+       "close"
+      ],
+      "close_delta": 0.13
+     },
+     {
+      "t": "2026-08-26T09:35:00-04:00",
+      "fields": [
+       "open",
+       "high",
+       "low",
+       "close"
+      ],
+      "close_delta": 0.1061
+     },
+     {
+      "t": "2026-08-26T09:36:00-04:00",
+      "fields": [
+       "open",
+       "high",
+       "low",
+       "close"
+      ],
+      "close_delta": -0.6
+     },
+     {
+      "t": "2026-08-26T09:37:00-04:00",
+      "fields": [
+       "open",
+       "high",
+       "low",
+       "close"
+      ],
+      "close_delta": 0.02
+     }
+    ],
+    "close_abs_delta_max": 1.05,
+    "vol_ratio": {
+     "min": 0.0029,
+     "q1": 0.1085,
+     "med": 0.1559,
+     "q3": 0.2105,
+     "max": 0.6774
+    }
+   },
+   "SPY": {
+    "toss_rows": 391,
+    "kis_rows": 391,
+    "toss_pages": 7,
+    "common": 391,
+    "only_toss": 0,
+    "only_kis": 0,
+    "only_toss_ts": [],
+    "only_kis_ts": [],
+    "toss_first": "2026-08-26T09:30:00-04:00",
+    "toss_last": "2026-08-26T16:00:00-04:00",
+    "kis_first": "2026-08-26T09:30:00-04:00",
+    "kis_last": "2026-08-26T16:00:00-04:00",
+    "toss_last_close": 765.97,
+    "kis_last_close": 766.12,
+    "ohlc_diff_minutes": 391,
+    "ohlc_diff_samples": [
+     {
+      "t": "2026-08-26T09:30:00-04:00",
+      "fields": [
+       "open",
+       "high",
+       "low",
+       "close"
+      ],
+      "close_delta": -0.15
+     },
+     {
+      "t": "2026-08-26T09:31:00-04:00",
+      "fields": [
+       "open",
+       "high",
+       "low",
+       "close"
+      ],
+      "close_delta": -0.61
+     },
+     {
+      "t": "2026-08-26T09:32:00-04:00",
+      "fields": [
+       "open",
+       "high",
+       "low",
+       "close"
+      ],
+      "close_delta": 0.235
+     },
+     {
+      "t": "2026-08-26T09:33:00-04:00",
+      "fields": [
+       "open",
+       "high",
+       "low",
+       "close"
+      ],
+      "close_delta": -0.1901
+     },
+     {
+      "t": "2026-08-26T09:34:00-04:00",
+      "fields": [
+       "open",
+       "high",
+       "low",
+       "close"
+      ],
+      "close_delta": -0.22
+     },
+     {
+      "t": "2026-08-26T09:35:00-04:00",
+      "fields": [
+       "open",
+       "high",
+       "low",
+       "close"
+      ],
+      "close_delta": 0.61
+     },
+     {
+      "t": "2026-08-26T09:36:00-04:00",
+      "fields": [
+       "open",
+       "high",
+       "low",
+       "close"
+      ],
+      "close_delta": -0.23
+     },
+     {
+      "t": "2026-08-26T09:37:00-04:00",
+      "fields": [
+       "open",
+       "high",
+       "low",
+       "close"
+      ],
+      "close_delta": -0.33
+     }
+    ],
+    "close_abs_delta_max": 0.61,
+    "vol_ratio": {
+     "min": 0.0313,
+     "q1": 0.2581,
+     "med": 0.3817,
+     "q3": 0.5417,
+     "max": 6.3658
+    }
+   },
+   "SOFI": {
+    "toss_rows": 391,
+    "kis_rows": 391,
+    "toss_pages": 5,
+    "common": 391,
+    "only_toss": 0,
+    "only_kis": 0,
+    "only_toss_ts": [],
+    "only_kis_ts": [],
+    "toss_first": "2026-08-26T09:30:00-04:00",
+    "toss_last": "2026-08-26T16:00:00-04:00",
+    "kis_first": "2026-08-26T09:30:00-04:00",
+    "kis_last": "2026-08-26T16:00:00-04:00",
+    "toss_last_close": 18.84,
+    "kis_last_close": 18.85,
+    "ohlc_diff_minutes": 391,
+    "ohlc_diff_samples": [
+     {
+      "t": "2026-08-26T09:30:00-04:00",
+      "fields": [
+       "open",
+       "high",
+       "low",
+       "close"
+      ],
+      "close_delta": 0.079
+     },
+     {
+      "t": "2026-08-26T09:31:00-04:00",
+      "fields": [
+       "open",
+       "high",
+       "low",
+       "close"
+      ],
+      "close_delta": 0.145
+     },
+     {
+      "t": "2026-08-26T09:32:00-04:00",
+      "fields": [
+       "open",
+       "high",
+       "low",
+       "close"
+      ],
+      "close_delta": -0.0338
+     },
+     {
+      "t": "2026-08-26T09:33:00-04:00",
+      "fields": [
+       "open",
+       "high",
+       "low",
+       "close"
+      ],
+      "close_delta": -0.125
+     },
+     {
+      "t": "2026-08-26T09:34:00-04:00",
+      "fields": [
+       "open",
+       "high",
+       "low",
+       "close"
+      ],
+      "close_delta": -0.175
+     },
+     {
+      "t": "2026-08-26T09:35:00-04:00",
+      "fields": [
+       "open",
+       "high",
+       "low",
+       "close"
+      ],
+      "close_delta": -0.0175
+     },
+     {
+      "t": "2026-08-26T09:36:00-04:00",
+      "fields": [
+       "open",
+       "high",
+       "low",
+       "close"
+      ],
+      "close_delta": 0.0325
+     },
+     {
+      "t": "2026-08-26T09:37:00-04:00",
+      "fields": [
+       "open",
+       "high",
+       "low",
+       "close"
+      ],
+      "close_delta": -0.06
+     }
+    ],
+    "close_abs_delta_max": 0.175,
+    "vol_ratio": {
+     "min": 0.004,
+     "q1": 0.0664,
+     "med": 0.1464,
+     "q3": 0.2636,
+     "max": 2.5527
+    }
+   }
+  }
+ }
+}

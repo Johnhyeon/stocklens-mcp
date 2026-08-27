@@ -141,7 +141,13 @@ class TossKrBlockedTests(unittest.TestCase):
         self.assertEqual(result["kr_intraday"], "unavailable")
         # KR 종목 probe 자체를 하지 않는다 (판정이 코드로 고정됨).
         self.assertNotIn("005930", seen_symbols)
-        self.assertEqual(result["us_intraday"], "available")
+        # US 는 대표 결정(2026-08-28)으로 1.0 시세 계약 미지원이다:
+        # 토스 캔들은 KIS·키움과 다른 자체 테이프(완결일 391분 전부
+        # OHLC 상이, 거래량 10~40%) + 과거일은 금요일만 보존. probe 는
+        # 인증 확인용으로만 쓰고 능력은 unavailable 로 고정한다.
+        # (어댑터 파이프라인은 후속 "토스 자체 시세" 기능용으로 보존)
+        self.assertIn("AAPL", seen_symbols)
+        self.assertEqual(result["us_intraday"], "unavailable")
 
 
 class TossUsTests(unittest.TestCase):

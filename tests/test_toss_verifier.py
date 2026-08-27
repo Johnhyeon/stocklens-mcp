@@ -66,13 +66,15 @@ def _verify(scenario: Scenario) -> dict:
 
 
 class TossVerifierTests(unittest.TestCase):
-    def test_us_available_kr_fixed_unavailable(self):
-        # KR 은 실측 계약 불일치(2026-08-27)로 probe 없이 unavailable.
+    def test_both_markets_pinned_unavailable(self):
+        # KR 은 실측 계약 불일치(2026-08-27), US 는 대표 결정(2026-08-28,
+        # 자체 테이프 = 1.0 시세 계약 미지원)으로 능력을 unavailable 로
+        # 고정한다. probe 는 인증 확인용으로만 쓴다.
         scenario = Scenario()
         result = _verify(scenario)
         self.assertEqual(result["auth"], "ok")
         self.assertEqual(result["kr_intraday"], "unavailable")
-        self.assertEqual(result["us_intraday"], "available")
+        self.assertEqual(result["us_intraday"], "unavailable")
         symbols = {req.url.params.get("symbol")
                    for req in scenario.candle_requests}
         self.assertNotIn("005930", symbols)
@@ -94,23 +96,25 @@ class TossVerifierTests(unittest.TestCase):
         self.assertEqual(result["kr_intraday"], "unverified")
         self.assertEqual(result["us_intraday"], "unverified")
 
-    def test_rate_limited_probe_is_unverified(self):
-        # 토큰 발급은 성공했으므로 auth 는 ok, 능력 판정만 보류한다.
+    def test_rate_limited_probe_stays_pinned(self):
+        # 토큰 발급은 성공했으므로 auth 는 ok. 능력은 정책 고정이라
+        # probe 결과와 무관하게 unavailable 이다.
         result = _verify(Scenario(us=httpx.Response(
             429, json={"error": {"code": "rate-limit-exceeded"}})))
         self.assertEqual(result["auth"], "ok")
-        self.assertEqual(result["us_intraday"], "unverified")
+        self.assertEqual(result["us_intraday"], "unavailable")
 
     def test_not_found_probe_is_unavailable(self):
         result = _verify(Scenario(us=httpx.Response(404, json={
             "error": {"code": "not-found"}})))
         self.assertEqual(result["us_intraday"], "unavailable")
 
-    def test_empty_candles_is_available(self):
-        # 휴장 시간대의 빈 결과도 "권한 있음"의 증거다.
+    def test_empty_candles_auth_ok_capability_pinned(self):
+        # 휴장 시간대의 빈 결과도 "권한 있음"의 증거다 (auth ok).
         result = _verify(Scenario(us=httpx.Response(200, json={
             "result": {"candles": [], "nextBefore": None}})))
-        self.assertEqual(result["us_intraday"], "available")
+        self.assertEqual(result["auth"], "ok")
+        self.assertEqual(result["us_intraday"], "unavailable")
 
 
 if __name__ == "__main__":

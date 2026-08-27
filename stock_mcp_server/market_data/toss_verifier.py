@@ -29,9 +29,16 @@ class TossVerifier:
             "us_intraday": "unverified",
         }
 
-        # 인증 probe 는 미국 종목으로만 한다. KR 은 실측 계약 불일치
-        # (봉 라벨 시프트·통합 거래량·마감 동시호가 부재, 2026-08-27)로
-        # 코드에서 차단 상태라 probe 없이 unavailable 로 고정한다.
+        # 인증 probe 는 미국 종목으로만 한다 (KR 캔들은 차단 상태라
+        # probe 수단이 US 뿐이다). 능력 판정은 probe 결과와 무관하게
+        # 정책으로 고정한다:
+        # - KR: 실측 계약 불일치 (봉 라벨 시프트·통합 거래량·마감
+        #   동시호가 부재, 2026-08-27)
+        # - US: 대표 결정 (2026-08-28) - 토스 캔들은 KIS·키움과 다른
+        #   자체 테이프(완결일 391분 전부 OHLC 상이, 거래량 10~40%,
+        #   과거일은 금요일만 보존)라 1.0 시세 계약 미지원. 연결·인증은
+        #   유지하고, 어댑터 파이프라인은 후속 "토스 자체 시세" 기능용
+        #   으로 보존한다 (evidence/toss/us-tape-mismatch-20260828.json)
         us = await self._probe(client, "AAPL")
         if us in _AUTH_FAILURES:
             result["auth"] = "credential_invalid"
@@ -42,7 +49,7 @@ class TossVerifier:
 
         result["auth"] = "ok"
         result["kr_intraday"] = "unavailable"
-        result["us_intraday"] = us
+        result["us_intraday"] = "unavailable"
         return result
 
     async def _probe(self, client: TossClient, symbol: str) -> str:

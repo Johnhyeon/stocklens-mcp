@@ -98,8 +98,8 @@ class RouterDistinctionTests(unittest.TestCase):
         with self.assertRaises(RouterError) as ctx:
             self._resolve(caps, "toss")
         self.assertEqual(ctx.exception.provider_status, "unsupported")
-        self.assertIn("지원하지 않", str(ctx.exception))
-        self.assertIn("키 문제가 아닙니다", str(ctx.exception))
+        self.assertIn("1.0 시세 계약에서 지원하지 않", str(ctx.exception))
+        self.assertIn("키나 연결 문제가 아닙니다", str(ctx.exception))
 
     def test_connected_endpoint_ok_but_unverified_is_verifying(self):
         from stock_mcp_server.market_data.router import RouterError

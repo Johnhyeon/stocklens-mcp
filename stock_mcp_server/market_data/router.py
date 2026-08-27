@@ -116,8 +116,8 @@ def _explicit_denied_error(provider: str, market: str, interval: str,
     if state == "unsupported":
         return RouterError(
             "unsupported",
-            f"{provider}는 {market} 분봉을 지원하지 않습니다 (데이터 계약 "
-            f"불일치 확인). API 키 문제가 아닙니다.{strict_tail}")
+            f"{provider}는 {market} 분봉을 1.0 시세 계약에서 지원하지 "
+            f"않습니다. 키나 연결 문제가 아닙니다.{strict_tail}")
     return RouterError(
         "not_configured",
         f"{provider}가 이 요청({market} {interval})을 지원하지 "
