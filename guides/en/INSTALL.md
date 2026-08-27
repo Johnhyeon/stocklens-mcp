@@ -150,6 +150,35 @@ Then follow the buyer installation guide. `stocklens-setup` updates the existing
 
 ---
 
+## Broker connection (optional, intraday bars)
+
+Connect your Korea Investment & Securities (KIS) Open API to unlock Korean
+and US intraday bars.
+
+1. Issue a quotation-scope App Key and App Secret at
+   https://apiportal.koreainvestment.com
+2. Open LeetKit Manager and click the broker connection button on the
+   StockLens card
+3. Keep the default live (real) profile, paste the App Key and App Secret,
+   then run the connection test and save
+4. Done when Korean and US intraday availability is shown
+
+Notes:
+
+- No account number or order password is ever requested. This is a
+  quotation-only connection; trading features are not supported
+- Keys are stored only in the OS credential store, never in files
+- Two levels of disconnect: current-profile disconnect removes only the
+  active environment's keys; full provider disconnect removes all keys and
+  the KIS intraday cache. Neither touches the package, license, MCP
+  registrations, or the Naver/Yahoo features
+- Uninstalling the package alone keeps the broker profiles; reinstalling
+  picks them up again. Use the Manager's full cleanup to wipe everything
+- If anything misbehaves, switch the data source mode to legacy in
+  Manager: zero KIS calls, identical to pre-connection behavior
+
+---
+
 ## Still stuck?
 
 Use the support channel included in the buyer guide.

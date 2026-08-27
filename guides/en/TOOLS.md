@@ -66,6 +66,47 @@ Parallel indicators across multiple stocks (core screening tool).
 
 ---
 
+### Intraday bars (2) - broker connection
+
+Connect your Korea Investment & Securities (KIS) Open API in LeetKit Manager
+to unlock Korean and US intraday bars. Only quotation-scope App Key and
+App Secret are used. Account numbers and order features are not supported
+and never will be connected.
+
+- Intervals: `1m` `3m` `5m` `10m` `15m` `30m` `60m` `120m` `240m`
+- Markets: `KR` (KRX regular session 09:00-15:30), `US` (NYSE/NASDAQ/AMEX
+  regular session 09:30-16:00). Regular session only for now
+- KIS data is always aggregated by StockLens from raw 1-minute bars,
+  anchored to the exchange session
+- 120m/240m produce a shorter session-tail bar (e.g. KR 240m = one full
+  09:00-13:00 bar plus a 150-minute 13:00-15:30 tail). Do not compare tail
+  volume directly with full bars
+- In-progress bars are excluded by default (`completed_only=False` to include)
+- Daily/weekly/monthly stay on the existing `get_chart` / `get_us_chart`
+  (Naver/Yahoo). KIS daily history is not offered until adjusted-price
+  handling is verified
+
+Data source modes (chosen in Manager): automatic (recommended),
+broker-first, and legacy (zero KIS calls, identical to pre-connection
+behavior). Sources are never mixed inside one response; the meta always
+records `provider` and `fallback_used`.
+
+#### `get_intraday_chart`
+Intraday OHLCV series.
+- `symbol`, `market` (`KR|US`), `interval` (default `5m`), `date`,
+  `row_limit` (default 120, max 500), `venue` (`NYS|NAS|AMS` required for
+  KIS on US), `completed_only` (default true),
+  `source` (`auto|kis|naver|yahoo`; `kis` is strict with no fallback)
+
+#### `get_intraday_indicators`
+Indicator judgments computed from the same bars as the chart (JSON).
+- `symbol`, `market`, `interval` (default `60m`), `bars` (bar count,
+  default 260), `include`, `completed_only`, `source`
+- Measured in **bars**, not calendar days. Insufficient history is
+  reported as not-computable instead of a silent wrong value
+
+---
+
 ### Screening (7)
 
 #### `list_themes`
