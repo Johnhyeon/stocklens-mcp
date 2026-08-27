@@ -190,11 +190,6 @@ def make_cli_verifier(kis_verifier):
     """
     import asyncio
 
-    from stock_mcp_server.market_data.connection_state import (
-        load_state,
-        save_state,
-    )
-
     def _verifier(*, action, store, profile, credentials):
         result = asyncio.run(kis_verifier.verify(credentials, profile))
 
@@ -207,16 +202,13 @@ def make_cli_verifier(kis_verifier):
         if action == "verify":
             return _ok(action, store, extra={"verification": result})
 
-        # verify_and_save: 저장 후 능력 결과를 비밀 없는 상태 파일에 남긴다.
-        store.save_profile(profile, credentials)
-        state = load_state(store.home)
-        capability_results = dict(state.get("capability_results") or {})
-        capability_results[profile] = {
+        # verify_and_save: keyring·active·capability 를 store 의 단일
+        # 원자 쓰기로 저장한다. 두 번째 상태 쓰기를 여기서 하면 그
+        # 실패가 keyring 원복 범위 밖이 된다 (리뷰 지적).
+        store.save_profile(profile, credentials, capability_results={
             "kr_intraday": result["kr_intraday"],
             "us_intraday": result["us_intraday"],
-        }
-        state["capability_results"] = capability_results
-        save_state(state, store.home)
+        })
         return _ok(action, store, extra={"verification": result})
 
     return _verifier

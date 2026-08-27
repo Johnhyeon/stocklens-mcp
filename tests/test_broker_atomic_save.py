@@ -63,13 +63,13 @@ class VerifyAndSaveTests(unittest.TestCase):
     def tearDown(self):
         self._tmp.cleanup()
 
-    def _handle(self, action, verifier_result, profile="real"):
+    def _handle(self, action, verifier_result, profile="real",
+                key=SENTINEL_KEY, secret=SENTINEL_SECRET):
         verifier = broker_cli.make_cli_verifier(FakeVerifier(verifier_result))
         return broker_cli.handle_request(
             {"contract_version": 1, "action": action, "provider": "kis",
              "profile": profile,
-             "credentials": {"app_key": SENTINEL_KEY,
-                             "app_secret": SENTINEL_SECRET}},
+             "credentials": {"app_key": key, "app_secret": secret}},
             store=self.store, verifier=verifier)
 
     def test_verify_reports_without_saving(self):
@@ -116,6 +116,58 @@ class VerifyAndSaveTests(unittest.TestCase):
         old = self.store.load_profile("real")
         self.assertEqual(old.app_key, "old-key")
         self.assertEqual(load_state(self.home)["connection_generation"], gen)
+
+    def test_no_second_state_write_capability_saved_atomically(self):
+        """리뷰 지적: verify_and_save 가 상태 파일을 두 번 써서, 두 번째
+        (capability) 저장 실패가 keyring 원복 범위 밖이었다.
+
+        수정 후 계약: capability 는 save_profile 의 원자 쓰기에 포함되고
+        CLI 는 connection_state.save_state 를 직접 부르지 않는다. 이
+        테스트는 CLI 경로의 save_state 를 죽여놓고도 저장이 성공하며
+        capability 까지 기록됨을 요구한다 (두 번째 쓰기 부재 증명).
+        """
+        from unittest.mock import patch
+        from stock_mcp_server.market_data import connection_state
+
+        self.store.save_profile("real", BrokerCredentials(
+            app_key="old-key", app_secret="old-secret"))
+
+        # broker_profiles 는 자기 모듈 참조를 쓰므로 영향받지 않고,
+        # CLI 가 두 번째 쓰기를 시도하면 여기서 터진다.
+        with patch.object(connection_state, "save_state",
+                          side_effect=PermissionError("state locked")):
+            resp = self._handle("verify_and_save", {
+                "auth": "ok", "kr_intraday": "available",
+                "us_intraday": "available"},
+                key="new-key", secret="new-secret")
+
+        self.assertTrue(resp["ok"], resp)
+        stored = self.store.load_profile("real")
+        self.assertEqual(stored.app_key, "new-key")
+        state = load_state(self.home)
+        self.assertEqual(
+            state["capability_results"]["real"]["kr_intraday"], "available")
+
+    def test_first_write_failure_still_rolls_back_key(self):
+        # 하나로 합친 뒤에도 그 유일한 쓰기가 실패하면 keyring 원복.
+        from unittest.mock import patch
+        from stock_mcp_server.market_data import broker_profiles
+
+        self.store.save_profile("real", BrokerCredentials(
+            app_key="old-key", app_secret="old-secret"))
+        gen = load_state(self.home)["connection_generation"]
+
+        with patch.object(broker_profiles, "save_state",
+                          side_effect=PermissionError("state locked")):
+            resp = self._handle("verify_and_save", {
+                "auth": "ok", "kr_intraday": "available",
+                "us_intraday": "available"},
+                key="new-key", secret="new-secret")
+
+        self.assertFalse(resp["ok"])
+        self.assertEqual(self.store.load_profile("real").app_key, "old-key")
+        self.assertEqual(load_state(self.home)["connection_generation"], gen)
+        self.assertNotIn("capability_results", load_state(self.home))
 
     def test_limited_demo_is_recorded_as_is(self):
         resp = self._handle("verify_and_save", {

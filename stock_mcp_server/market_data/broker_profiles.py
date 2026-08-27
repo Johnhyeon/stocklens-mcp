@@ -124,12 +124,20 @@ class BrokerProfileStore:
 
     # --- 변경 ---
 
-    def save_profile(self, profile: str, credentials: BrokerCredentials) -> None:
+    def save_profile(
+        self,
+        profile: str,
+        credentials: BrokerCredentials,
+        capability_results: dict | None = None,
+    ) -> None:
         """keyring 저장과 상태 파일 갱신을 한 덩어리로 다룬다.
 
         상태 파일 저장이 실패하면 keyring 을 원복한다 - 안 그러면 새 키가
         남은 채 오류가 보고되어 "실패하면 기존 프로필 유지" 약속이 깨진다
         (리뷰 지적, 2026-08-27).
+
+        capability_results 도 여기서 같은 한 번의 쓰기에 싣는다 - 별도
+        두 번째 쓰기로 두면 그 실패가 원복 범위 밖이 된다 (리뷰 재지적).
         """
         self._check_profile(profile)
         previous = self._get_raw(profile)
@@ -144,6 +152,10 @@ class BrokerProfileStore:
             state = load_state(self._home)
             state["active_provider"] = self.provider
             state["active_profile"] = profile
+            if capability_results is not None:
+                merged = dict(state.get("capability_results") or {})
+                merged[profile] = capability_results
+                state["capability_results"] = merged
             save_state(bump_generation(state), self._home)
         except BaseException:
             # keyring 원복. 원복마저 실패하면 원래 오류를 우선 보고한다.
