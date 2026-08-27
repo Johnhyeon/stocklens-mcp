@@ -130,18 +130,22 @@ def handle_request(
                 # store 가 보는 홈과 같은 홈의 캐시를 지운다. 테스트가 tmp 홈
                 # store 를 주입하면 캐시도 tmp 홈만 본다.
                 cache = ProviderCache(home=store.home)
-            cache_removed = True
-            cache_error: str | None = None
             try:
                 cache.remove_provider(provider)
             except Exception as exc:  # noqa: BLE001
-                # 삭제하지 못한 항목을 삭제했다고 말하지 않는다.
-                cache_removed = False
-                cache_error = type(exc).__name__
-            return _ok(action, store, extra={
-                "cache_removed": cache_removed,
-                **({"cache_error": cache_error} if cache_error else {}),
-            })
+                # 캐시가 남았는데 ok 로 보고하면 Manager 의 완전 정리가
+                # 성공으로 이어진다(리뷰 지적). 자격 증명은 지워졌다는
+                # 사실과 함께 실패로 보고한다 - 재시도는 idempotent 하다.
+                resp = _error(
+                    "cache_cleanup_failed",
+                    "자격 증명은 삭제됐지만 분봉 캐시 삭제에 실패했습니다. "
+                    "다시 시도해주세요.")
+                resp["credentials_removed"] = True
+                resp["cache_removed"] = False
+                resp["cache_error"] = type(exc).__name__
+                resp["status"] = store.status()
+                return resp
+            return _ok(action, store, extra={"cache_removed": True})
 
         if action == "set_data_source_mode":
             mode = request.get("mode")

@@ -205,11 +205,14 @@ class CacheRemovalDeniedTests(unittest.TestCase):
                 {"contract_version": 1, "action": "disconnect_provider",
                  "provider": "kis"},
                 store=store, cache=DenyingCache())
-            # 자격 증명 삭제는 성공했으므로 ok 지만, 캐시가 남았다는
-            # 사실은 숨기지 않는다.
-            self.assertTrue(resp["ok"])
+            # 리뷰 지적(결함 3): Manager 는 ok 만 보고 전체 정리를
+            # 계속한다. 캐시가 남았으면 ok=False 로 멈추게 한다.
+            self.assertFalse(resp["ok"])
+            self.assertEqual(resp["error"]["code"], "cache_cleanup_failed")
             self.assertFalse(resp["cache_removed"])
-            self.assertEqual(resp["cache_error"], "PermissionError")
+            # 자격 증명은 이미 지워졌다는 사실도 함께 전달한다.
+            self.assertTrue(resp["credentials_removed"])
+            self.assertIn("status", resp)
 
 
 if __name__ == "__main__":
