@@ -93,6 +93,7 @@ from stock_mcp_server.event_reaction import (
     reaction_meta_fields,
 )
 from stock_mcp_server.status import build_status, format_status
+from stock_mcp_server import sec_edgar as sec
 from stock_mcp_server import yfinance_source as us
 from stock_mcp_server.licensing import is_licensed, locked_message
 from stock_mcp_server._update_check import get_update_notice
@@ -4999,33 +5000,309 @@ async def get_us_short(ticker: str) -> str:
 @mcp.tool()
 @safe_us_tool
 @track_metrics("get_us_filings")
-async def get_us_filings(ticker: str, limit: int = 15) -> str:
-    """US SEC filings — 10-K, 10-Q, 8-K 공시 목록 + EDGAR URL (US SEC EDGAR filings).
-    "AAPL 10-K", "NVDA latest filings", "8-K", "SEC filing" 같은 질문에 사용합니다.
+async def get_us_filings(ticker: str, limit: int = 15, forms: list[str] | None = None) -> str:
+    """US SEC filings — SEC EDGAR 공시 목록 (accession number·원문 URL 포함).
+
+    "AAPL 10-K", "RIVN latest filings", "8-K", "SEC filing" 같은 질문에 사용합니다.
+    본문·exhibit 를 읽으려면 결과의 accession number 로 `get_us_filing_detail` 을 부르세요.
+
+    SEC 는 발행사를 티커가 아니라 CIK 로 식별합니다. GOOGL/GOOG 같은 클래스주는
+    같은 발행사로 정규화되어 같은 공시 집합이 나오고, 요청 티커는 메타에 보존됩니다.
 
     Args:
         ticker: US 티커
-        limit: 표시할 공시 건수 (기본 15)
+        limit: 표시할 공시 건수 (기본 15, 최대 100)
+        forms: 공시 유형 필터 (예: ["10-Q", "8-K"]). 비우면 전체.
     """
-    data = await us.get_sec_filings(ticker, limit=limit)
-    if data is None:
-        return f"티커 '{ticker}'를 찾을 수 없습니다."
+    limit = max(1, min(int(limit), 100))
+    requested_forms = [str(f).upper() for f in (forms or [])] or None
 
-    filings = data.get("filings") or []
-    if not filings:
-        return f"**{data['ticker']}** — 공시 정보 없음."
+    def _fail(reason_text: str, warn: str) -> str:
+        # 티커 매핑 실패·조회 실패·0건은 서로 다른 상태다(요구 6). 어느 쪽이든
+        # 메타 없이 "공시 정보 없음"으로 끝나면 읽는 쪽이 셋을 구분할 수 없다.
+        return _append_result_meta(
+            reason_text,
+            _us_meta(
+                kind="filing", ticker=ticker,
+                data_completeness=rmeta.NONE,
+                coverage={"requested": {"limit": limit, "forms": requested_forms},
+                          "returned_count": 0, "total_count": None,
+                          "truncated": False, "coverage_complete": False,
+                          "reason": "unknown"},
+                warnings=[warn],
+            ),
+        )
 
-    lines = [f"**{data['ticker']}** SEC 공시 (최근 {len(filings)}건)", ""]
-    lines.append("일자 | 유형 | 제목 | URL")
-    lines.append("---|---|---|---")
-    for f in filings:
-        date = str(f.get("date", ""))[:10]
-        typ = f.get("type") or "-"
-        title = (f.get("title") or "-")[:50]
-        url = f.get("edgar_url") or "-"
-        lines.append(f"{date} | **{typ}** | {title} | [link]({url})")
+    try:
+        issuer = await sec.resolve_issuer(ticker)
+    except sec.SecFetchError as e:
+        return _fail(f"⚠️ SEC 티커 목록을 조회하지 못했습니다 ({e}). 재시도하세요.",
+                     f"SEC 조회 실패: {e}")
+    if issuer is None:
+        return _fail(
+            f"티커 '{ticker}' 를 SEC 발행사에 연결하지 못했습니다. "
+            "티커 철자를 확인하거나 get_us_search 로 먼저 검색하세요.",
+            f"티커 매핑 실패: {ticker}",
+        )
 
-    return _append_result_meta("\n".join(lines), _us_meta(kind="filing", ticker=ticker))
+    try:
+        subs = await sec.get_submissions(issuer["cik"])
+    except sec.SecFetchError as e:
+        return _fail(f"⚠️ SEC 공시 목록 조회에 실패했습니다 ({e}). "
+                     "0건이 아니라 조회 실패이므로 재시도하세요.",
+                     f"SEC 조회 실패: {e}")
+
+    rows = subs["rows"]
+    if requested_forms:
+        rows = [r for r in rows if str(r.get("form") or "").upper() in requested_forms]
+    total_matching = len(rows)
+    shown = rows[:limit]
+    has_older = subs["has_older"]
+
+    issuer_line = (
+        f"발행사: **{issuer['name']}** (CIK {issuer['cik']}) · "
+        f"요청 티커 {issuer['requested_ticker']}"
+        + (f" -> 대표 {issuer['primary_ticker']}"
+           if issuer['primary_ticker'] != issuer['requested_ticker'] else "")
+        + (f" · 동일 발행사 티커: {', '.join(issuer['issuer_tickers'])}"
+           if len(issuer['issuer_tickers']) > 1 else "")
+    )
+
+    if not shown:
+        note = ("최근 공시 목록에 해당 유형이 없습니다."
+                if requested_forms else "최근 공시 목록이 비어 있습니다.")
+        if has_older:
+            note += " 더 오래된 공시가 SEC 에 존재하므로 '공시가 없다'고 결론 내리면 안 됩니다."
+        return _append_result_meta(
+            f"**{issuer['requested_ticker']}** SEC 공시\n{issuer_line}\n\n{note}",
+            _us_meta(
+                kind="filing", ticker=ticker,
+                data_completeness=rmeta.PARTIAL if has_older else rmeta.NONE,
+                coverage={"requested": {"limit": limit, "forms": requested_forms},
+                          "returned_count": 0,
+                          "total_count": None if has_older else total_matching,
+                          "truncated": False, "coverage_complete": not has_older,
+                          "reason": "source_limit" if has_older else None},
+                extra={"issuer": issuer},
+                warnings=(["최근 목록 밖(구간 외) 공시가 존재합니다."] if has_older else None),
+            ),
+        )
+
+    lines = [f"**{issuer['requested_ticker']}** SEC 공시 (표시 {len(shown)}건"
+             + (f" / 최근 목록 {total_matching}건" if total_matching > len(shown) else "")
+             + ")", issuer_line, ""]
+    lines.append("접수일 | 유형 | 보고서 기준일 | accession | 원문")
+    lines.append("---|---|---|---|---")
+    for r in shown:
+        url = sec.filing_url(issuer["cik"], r["accession"], r["primary_document"] or "")
+        doc = r.get("primary_document") or "-"
+        lines.append(
+            f"{r['filing_date']} | **{r['form']}** | {r.get('report_date') or '-'} | "
+            f"`{r['accession']}` | [{doc}]({url})"
+        )
+    lines.append("")
+    lines.append("_본문·exhibit 검색: `get_us_filing_detail(ticker, accession_no, find=...)`_")
+    if has_older:
+        lines.append("_이 목록은 SEC 의 최근 공시 구간입니다. 더 오래된 공시는 여기 없습니다._")
+
+    truncated = len(shown) < total_matching
+    incomplete = truncated or has_older
+    return _append_result_meta(
+        "\n".join(lines),
+        _us_meta(
+            kind="filing", ticker=ticker,
+            data_as_of=shown[0].get("filing_date"),
+            data_completeness=rmeta.PARTIAL if incomplete else rmeta.COMPLETE,
+            coverage={
+                "requested": {"limit": limit, "forms": requested_forms},
+                "returned_count": len(shown),
+                "total_count": None if has_older else total_matching,
+                "truncated": truncated,
+                "coverage_complete": not incomplete,
+                "reason": ("server_cap" if truncated
+                           else "source_limit" if has_older else None),
+            },
+            extra={"issuer": issuer},
+        ),
+    )
+
+
+@mcp.tool()
+@safe_us_tool
+@track_metrics("get_us_filing_detail")
+async def get_us_filing_detail(
+    ticker: str,
+    accession_no: str,
+    find: str | None = None,
+    analyze: str | None = None,
+    document: str | None = None,
+) -> str:
+    """US SEC filing 본문 — 원문 키워드 검색·희석/계약 조항 구조화 (SL-04).
+
+    - find: 본문에서 키워드 주변 발췌(전체 매치 수 + 최대 5건 표시).
+      매치 0건은 "본문에 없다"가 아니다 - 표기가 다를 수 있다.
+    - analyze: "dilution"(증권 수·전환가·워런트·리픽싱·자금용도) 또는
+      "contract"(계약금액·기간·해지·최소구매·상대방 비공개)를 범주별 원문
+      발췌로 구조화. **못 찾은 범주는 '미확인'이지 '없다'가 아니다.**
+    - 둘 다 비우면 문서 목록(본문+exhibit)만 보여준다. 전체 본문은 반환하지
+      않는다(10-Q 하나가 수십만 자다).
+
+    Args:
+        ticker: US 티커 (발행사 CIK 확인용)
+        accession_no: SEC 접수번호 (get_us_filings 결과의 accession)
+        find: 본문 검색 키워드 (선택)
+        analyze: "dilution" / "contract" (선택)
+        document: 읽을 문서 파일명 (비우면 본문. exhibit 는 목록에서 이름 확인)
+    """
+    def _fail(reason_text: str, warn: str) -> str:
+        return _append_result_meta(
+            reason_text,
+            _us_meta(kind="filing", ticker=ticker,
+                     data_completeness=rmeta.NONE,
+                     coverage={"truncated": False, "coverage_complete": False,
+                               "reason": "unknown"},
+                     warnings=[warn]),
+        )
+
+    try:
+        issuer = await sec.resolve_issuer(ticker)
+    except sec.SecFetchError as e:
+        return _fail(f"⚠️ SEC 티커 목록 조회 실패 ({e}).", f"SEC 조회 실패: {e}")
+    if issuer is None:
+        return _fail(f"티커 '{ticker}' 를 SEC 발행사에 연결하지 못했습니다.",
+                     f"티커 매핑 실패: {ticker}")
+
+    acc = (accession_no or "").strip()
+    # 이 공시의 본문 파일명은 submissions 목록에 있다.
+    primary = None
+    form = None
+    filing_date = None
+    try:
+        subs = await sec.get_submissions(issuer["cik"])
+        for r in subs["rows"]:
+            if (r.get("accession") or "").replace("-", "") == acc.replace("-", ""):
+                primary, form, filing_date = (r.get("primary_document"),
+                                              r.get("form"), r.get("filing_date"))
+                break
+    except sec.SecFetchError:
+        pass
+
+    filing_info = {"accession": acc, "form": form, "filing_date": filing_date,
+                   "issuer": issuer}
+
+    # 문서 목록 모드
+    if not find and not analyze:
+        try:
+            docs = await sec.fetch_filing_index(issuer["cik"], acc)
+        except sec.SecFetchError as e:
+            return _fail(f"⚠️ 문서 목록 조회 실패 ({e}). 접수번호를 확인하세요.",
+                         f"SEC 조회 실패: {e}")
+        lines = [f"# SEC 공시 문서 (accession={acc})",
+                 f"발행사: {issuer['name']} (CIK {issuer['cik']})"
+                 + (f" · {form} {filing_date}" if form else ""), "",
+                 "파일 | 크기 | URL", "---|---|---"]
+        for d in docs[:40]:
+            url = sec.filing_url(issuer["cik"], acc, d["name"])
+            lines.append(f"{d['name']} | {d.get('size') or '-'} | [열기]({url})")
+        lines.append("")
+        lines.append("_본문 검색: find=..., 조항 구조화: analyze=\"dilution\"/\"contract\". "
+                     "exhibit 를 읽으려면 document=파일명._")
+        return _append_result_meta(
+            "\n".join(lines),
+            _us_meta(kind="filing", ticker=ticker, data_as_of=filing_date,
+                     extra={"filing": filing_info,
+                            "documents": [d["name"] for d in docs[:40]]}),
+        )
+
+    target_doc = document or primary
+    if not target_doc:
+        return _fail(
+            f"accession {acc} 의 본문 파일을 찾지 못했습니다. "
+            "document= 로 파일명을 지정하세요 (목록: find/analyze 없이 호출).",
+            "본문 파일 미확인",
+        )
+
+    try:
+        text = await sec.fetch_filing_text(issuer["cik"], acc, target_doc)
+    except sec.SecFetchError as e:
+        # 원문을 못 가져왔으면 그 무엇도 "없다"고 말할 수 없다(요구 7).
+        return _fail(
+            f"⚠️ 원문을 가져오지 못했습니다 ({e}). 검색·분석 결과가 0건이라는 뜻이 "
+            f"아니라 **확인 불가**입니다. SEC 원문: "
+            f"{sec.filing_url(issuer['cik'], acc, target_doc)}",
+            f"원문 확인 불가: {e}",
+        )
+
+    header = [f"# SEC 공시 본문 (accession={acc}, {target_doc})",
+              f"발행사: {issuer['name']} (CIK {issuer['cik']})"
+              + (f" · {form} {filing_date}" if form else ""),
+              f"원문: {sec.filing_url(issuer['cik'], acc, target_doc)}",
+              f"본문 길이: {len(text):,}자", ""]
+
+    if find:
+        kw = find.strip()
+        positions = sec.find_all_matches(text, kw)
+        showed = sec.match_snippets(text, kw, positions[:sec.FIND_MAX_MATCHES])
+        lines = list(header)
+        if positions:
+            if len(positions) > len(showed):
+                lines.append(f"**매치:** 전체 {len(positions)}건 중 {len(showed)}건 표시")
+            else:
+                lines.append(f"**매치:** {len(positions)}건")
+            for i, s in enumerate(showed, 1):
+                lines += ["", f"## 매치 {i} (위치 ~{s['pos']:,})", "", s["snippet"]]
+        else:
+            lines.append(f"'{kw}' 매치 0건 - 본문에 해당 내용이 **없다는 뜻이 아닙니다**. "
+                         "표기가 다르거나 다른 문서(exhibit)에 있을 수 있습니다.")
+        truncated = len(positions) > len(showed)
+        complete = bool(positions) and not truncated
+        extra = {"filing": filing_info,
+                 "match_coverage": {"keyword": kw,
+                                    "total_matches": len(positions),
+                                    "displayed_matches": len(showed),
+                                    "truncated": truncated,
+                                    "coverage_complete": complete}}
+        if not positions:
+            extra["absence_confirmed"] = False
+        return _append_result_meta(
+            "\n".join(lines),
+            _us_meta(kind="filing", ticker=ticker, data_as_of=filing_date,
+                     data_completeness=rmeta.COMPLETE if complete else rmeta.PARTIAL,
+                     coverage=(None if complete else
+                               {"truncated": truncated, "coverage_complete": False,
+                                "reason": "server_cap" if truncated else "unknown"}),
+                     extra=extra),
+        )
+
+    kind_map = {"dilution": (sec.extract_dilution_facts, "희석(증권 수·전환·워런트)"),
+                "contract": (sec.extract_contract_facts, "계약 조항")}
+    if analyze not in kind_map:
+        return _fail(f"analyze 는 'dilution' 또는 'contract' 여야 합니다 (받음: {analyze}).",
+                     "잘못된 analyze 값")
+    extractor, label = kind_map[analyze]
+    facts = extractor(text)
+    lines = list(header)
+    lines.append(f"## {label} 구조화 - 원문 발췌 기반")
+    for category, info in facts["found"].items():
+        lines += ["", f"### {category} (매치 {info['total_matches']}건)"]
+        for s in info["shown"]:
+            lines.append(f"- …{s['snippet'][:400]}")
+    if facts["unconfirmed"]:
+        lines += ["", "### 미확인 범주",
+                  "- " + ", ".join(facts["unconfirmed"]),
+                  "- 이 문서에서 패턴으로 찾지 못했다는 뜻이며 **없다는 뜻이 아닙니다**. "
+                  "exhibit 나 다른 공시(S-1·424B 등)에 있을 수 있습니다."]
+    return _append_result_meta(
+        "\n".join(lines),
+        _us_meta(kind="filing", ticker=ticker, data_as_of=filing_date,
+                 extra={"filing": filing_info,
+                        "analysis": {"kind": analyze,
+                                     "found_categories": list(facts["found"]),
+                                     "unconfirmed_categories": facts["unconfirmed"]}},
+                 warnings=([f"미확인 범주({', '.join(facts['unconfirmed'])})는 "
+                            "원문에 없다는 뜻이 아니라 이 문서에서 못 찾았다는 뜻입니다."]
+                           if facts["unconfirmed"] else None)),
+    )
 
 
 @mcp.tool()
