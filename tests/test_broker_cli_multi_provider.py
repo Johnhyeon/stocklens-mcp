@@ -206,6 +206,31 @@ class MultiProviderCliTests(unittest.TestCase):
         # 아무것도 저장되지 않는다.
         self.assertFalse(self.service.has_profile("toss", "real"))
 
+    def test_default_verifier_dispatches_all_three_providers(self):
+        # main() 이 쓰는 기본 verifier 는 세 공급자 검증기를 모두 안다.
+        seen = []
+
+        class FakeVerifier:
+            def __init__(self, name):
+                self.name = name
+
+            async def verify(self, credentials, profile):
+                seen.append((self.name, profile))
+                return {"auth": "ok", "kr_intraday": "available",
+                        "us_intraday": "available"}
+
+        verifier = broker_cli.make_default_verifier(
+            kis=FakeVerifier("kis"), kiwoom=FakeVerifier("kiwoom"),
+            toss=FakeVerifier("toss"))
+        for provider in ("kis", "kiwoom", "toss"):
+            resp = self._handle({
+                "contract_version": 1, "action": "verify",
+                "provider": provider, "profile": "real",
+                "credentials": dict(_CREDS[provider]),
+            }, verifier=verifier)
+            self.assertTrue(resp["ok"], resp)
+        self.assertEqual([s[0] for s in seen], ["kis", "kiwoom", "toss"])
+
     def test_contract_v1_kis_request_still_works(self):
         # Manager v1 이 보내는 요청 그대로. 응답의 기존 필드가 유지된다.
         resp = self._save("kis")

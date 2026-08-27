@@ -419,20 +419,36 @@ def handle_request(
 
 
 def make_cli_verifier(kis_verifier):
-    """KisVerifier 를 handle_request 의 verifier 계약으로 감싼다.
+    """KisVerifier 하나만 감싼 verifier (KIS 전용 테스트 호환)."""
+    return make_default_verifier(kis=kis_verifier)
+
+
+def make_default_verifier(*, kis=None, kiwoom=None, toss=None):
+    """세 공급자 검증기를 dispatch 하는 기본 verifier.
 
     verifier(provider, profile, payload) -> 검증 결과 dict | None.
-    None 은 "이 공급자의 검증기가 아직 없다"는 뜻이다 (kiwoom·toss 는
-    해당 어댑터 Task 에서 연결된다).
+    None 은 "이 공급자의 검증기가 없다"는 뜻이다.
     """
     import asyncio
 
+    verifiers = {"kis": kis, "kiwoom": kiwoom, "toss": toss}
+
     def _verifier(provider, profile, payload):
-        if provider != "kis":
+        target = verifiers.get(provider)
+        if target is None:
             return None
-        return asyncio.run(kis_verifier.verify(payload, profile))
+        return asyncio.run(target.verify(payload, profile))
 
     return _verifier
+
+
+def _default_verifier():
+    from stock_mcp_server.market_data.kis_verifier import KisVerifier
+    from stock_mcp_server.market_data.kiwoom_verifier import KiwoomVerifier
+    from stock_mcp_server.market_data.toss_verifier import TossVerifier
+
+    return make_default_verifier(
+        kis=KisVerifier(), kiwoom=KiwoomVerifier(), toss=TossVerifier())
 
 
 def _default_service() -> BrokerService:
@@ -443,38 +459,59 @@ def _interactive_main() -> int:
     """소유자 로컬용 대화형 등록. 비밀값은 화면에 표시되지 않는 입력으로만
     받고, 파일·명령행·출력 어디에도 남기지 않는다."""
     import getpass
+    import os
 
-    from stock_mcp_server.market_data.kis_verifier import KisVerifier
+    ids = registry.ids()
+    print("증권사 Open API 연결")
+    home = os.environ.get("STOCKLENS_HOME")
+    if home:
+        print(f"STOCKLENS_HOME = {home}")
+    print(f"공급자 선택 {ids}")
+    provider = input("증권사 [kis/kiwoom/toss] (기본 kis): ").strip() or "kis"
+    try:
+        descriptor = registry.require(provider)
+    except UnknownProviderError:
+        print(f"지원하지 않는 공급자입니다: {provider}")
+        return 2
 
-    profiles = registry.require("kis").supported_profiles
-    print("한국투자증권(KIS) Open API 연결")
+    print(f"{descriptor.display_name} 연결을 시작합니다.")
     print("비밀값은 입력 중 화면에 표시되지 않으며 OS 자격 증명 저장소에만"
           " 저장됩니다.")
-    profile = input("프로필 [real/demo] (기본 real): ").strip() or "real"
-    if profile not in profiles:
-        print("real 또는 demo만 지원합니다.")
-        return 2
-    app_key = getpass.getpass("App Key: ").strip()
-    app_secret = getpass.getpass("App Secret: ").strip()
-    if not app_key or not app_secret:
-        print("App Key와 App Secret이 모두 필요합니다.")
-        return 2
+    profiles = descriptor.supported_profiles
+    if len(profiles) == 1:
+        profile = profiles[0]
+        print(f"프로필: {profile} (이 증권사는 {profile}만 지원)")
+    else:
+        profile = input(
+            f"프로필 [{'/'.join(profiles)}] (기본 real): ").strip() or "real"
+        if profile not in profiles:
+            print(f"{'/'.join(profiles)}만 지원합니다.")
+            return 2
+
+    credentials = {}
+    for field in descriptor.credential_schema:
+        value = getpass.getpass(f"{field.label} ({field.name}): ").strip()
+        if not value:
+            print("모든 값이 필요합니다.")
+            return 2
+        credentials[field.name] = value
 
     response = handle_request(
         {
             "contract_version": CONTRACT_VERSION,
             "action": "verify_and_save",
-            "provider": "kis",
+            "provider": provider,
             "profile": profile,
-            "credentials": {"app_key": app_key, "app_secret": app_secret},
+            "credentials": credentials,
         },
-        verifier=make_cli_verifier(KisVerifier()),
+        verifier=_default_verifier(),
     )
+    credentials.clear()
     print(json.dumps(response, ensure_ascii=False, indent=2))
     if response.get("ok"):
         print("\n연결 성공. 데이터 사용 방식을 자동으로 바꾸려면:")
         print('  echo {"contract_version":1,"action":"set_data_source_mode",'
-              '"provider":"kis","mode":"auto"} | '
+              f'"provider":"{provider}","mode":"auto"}} | '
               "stocklens-broker --json --non-interactive --stdin")
     return 0 if response.get("ok") else 1
 
@@ -500,10 +537,9 @@ def main(argv: list[str] | None = None) -> int:
             ensure_ascii=False))
         return 2
 
-    from stock_mcp_server.market_data.kis_verifier import KisVerifier
     response = handle_request(
         request, service=_default_service(),
-        verifier=make_cli_verifier(KisVerifier()))
+        verifier=_default_verifier())
     print(json.dumps(response, ensure_ascii=False))
     return 0 if response.get("ok") else 1
 
