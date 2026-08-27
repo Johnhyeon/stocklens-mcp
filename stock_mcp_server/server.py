@@ -865,6 +865,41 @@ def _emit_coverage_counters(lens: str, meta: dict) -> None:
         pass
 
 
+def _classify_us_security(q: dict) -> str:
+    """스크리너 행의 증권 유형 판정(SL-12).
+
+    워런트도 Yahoo quoteType 은 EQUITY 라 유형 필드만으로는 못 거른다
+    (실측: GRABW·KLXER 가 small_cap_gainers 에 보통주처럼 섞여 나옴).
+    이름 키워드가 가장 확실하고, 없으면 나스닥 5글자 접미사 규약
+    (W=워런트, R=라이츠, U=유닛)을 쓴다. 아무 근거도 없으면 unknown 이다 -
+    모르는 것을 보통주로 승격하지 않는다.
+    """
+    name = (q.get("name") or "").lower()
+    if "warrant" in name:
+        return "warrant"
+    if "right" in name and "copyright" not in name:
+        return "right"
+    if name.endswith(" unit") or name.endswith(" units") or " units " in name:
+        return "unit"
+    if "american depositary" in name or " adr" in f" {name}" or name.endswith(" adr"):
+        return "adr"
+
+    qt = (q.get("quote_type") or "").upper()
+    if qt == "ETF":
+        return "etf"
+    if qt in ("MUTUALFUND", "MONEYMARKET"):
+        return "fund"
+    if qt in ("INDEX", "CRYPTOCURRENCY", "FUTURE", "CURRENCY"):
+        return qt.lower()
+
+    symbol = (q.get("symbol") or "").upper()
+    if qt == "EQUITY" and len(symbol) == 5 and symbol[-1] in ("W", "R", "U")             and symbol.isalpha():
+        return {"W": "warrant", "R": "right", "U": "unit"}[symbol[-1]]
+    if qt == "EQUITY":
+        return "common_stock"
+    return "unknown"
+
+
 # 업종 밸류에이션에서 한 번에 재무를 긁을 최대 종목 수. KRX 업종은 대부분
 # 이 안에 들어온다(최대 반도체 172개). 넘으면 표본 집계임을 명시한다(SL-11).
 _SECTOR_AGG_CAP = 300
@@ -5945,7 +5980,8 @@ async def get_us_market() -> str:
 @mcp.tool()
 @safe_us_tool
 @track_metrics("get_us_screener")
-async def get_us_screener(preset: str = "day_gainers", count: int = 20) -> str:
+async def get_us_screener(preset: str = "day_gainers", count: int = 20,
+                          common_stock_only: bool = False) -> str:
     """US stock screener — 미국 주식 프리셋 스크리너 (US predefined screener).
     "오늘 급등주", "top gainers", "가장 많이 거래된 종목", "저평가 성장주" 같은 질문에 사용합니다.
 
@@ -5953,9 +5989,15 @@ async def get_us_screener(preset: str = "day_gainers", count: int = 20) -> str:
     aggressive_small_caps, growth_technology_stocks, undervalued_growth_stocks,
     undervalued_large_caps, small_cap_gainers, conservative_foreign_funds
 
+    각 행에 증권 유형(common_stock/warrant/right/unit/adr/etf/unknown)이 붙습니다.
+    small_cap_gainers 같은 프리셋에는 GRABW(워런트)·KLXER(라이츠) 같은 파생
+    식별자가 섞여 나옵니다 - 보통주 후보만 원하면 common_stock_only=True.
+    유형을 확인할 수 없는 항목은 unknown 으로 남고 보통주로 치지 않습니다.
+
     Args:
         preset: 스크리너 ID (기본 day_gainers)
         count: 반환 종목 수 (기본 20)
+        common_stock_only: True 면 보통주만 남깁니다 (unknown 도 제외)
     """
     data = await us.screen(preset, count=count)
     if data.get("error"):
@@ -5965,14 +6007,30 @@ async def get_us_screener(preset: str = "day_gainers", count: int = 20) -> str:
     if not quotes:
         return f"'{preset}' 결과 없음."
 
+    # 행마다 증권 유형을 판정한다(SL-12). 필터를 켜면 보통주만 남기되,
+    # 무엇을 몇 개 걸렀는지는 본문·메타에 남긴다.
+    from collections import Counter as _Counter
+    for q in quotes:
+        q["_sec_type"] = _classify_us_security(q)
+    type_counts = dict(_Counter(q["_sec_type"] for q in quotes))
+    excluded_counts: dict = {}
+    if common_stock_only:
+        kept = [q for q in quotes if q["_sec_type"] == "common_stock"]
+        excluded_counts = dict(_Counter(
+            q["_sec_type"] for q in quotes if q["_sec_type"] != "common_stock"))
+        quotes = kept
+
     lines = [
         f"**{data.get('title', preset)}** ({len(quotes)} / 전체 {data.get('total', '-')})",
     ]
     if data.get("description"):
         lines.append(f"_{data['description']}_")
+    if excluded_counts:
+        parts = ", ".join(f"{k} {v}개" for k, v in sorted(excluded_counts.items()))
+        lines.append(f"⚠️ common_stock_only=True - 보통주가 아닌 {sum(excluded_counts.values())}개 제외: {parts}")
     lines.append("")
-    lines.append("티커 | 이름 | 현재가 | 변동% | 거래량 | 시총 | P/E")
-    lines.append("---|---|---|---|---|---|---")
+    lines.append("티커 | 이름 | 유형 | 거래소 | 현재가 | 변동% | 거래량 | 시총 | P/E")
+    lines.append("---|---|---|---|---|---|---|---|---")
     for q in quotes:
         chp = q.get("change_percent")
         chp_s = f"{chp:+.2f}%" if isinstance(chp, (int, float)) else "-"
@@ -5985,8 +6043,24 @@ async def get_us_screener(preset: str = "day_gainers", count: int = 20) -> str:
         price = q.get("price")
         price_s = f"${price:,.2f}" if isinstance(price, (int, float)) else "-"
         name = (q.get("name") or "-")[:30]
-        lines.append(f"{q['symbol']} | {name} | {price_s} | {chp_s} | {vol_s} | {mcap_s} | {pe_s}")
-    return _append_result_meta("\n".join(lines), _us_meta(kind="snapshot"))
+        lines.append(
+            f"{q['symbol']} | {name} | {q['_sec_type']} | "
+            f"{q.get('exchange') or '-'} | {price_s} | {chp_s} | {vol_s} | {mcap_s} | {pe_s}")
+    if not quotes:
+        lines.append("(필터 후 남은 종목 없음)")
+    lines.append("")
+    lines.append("※ 유형 unknown 은 확인 불가라는 뜻이며 보통주로 치지 않습니다. "
+                 "warrant/right/unit 은 이름 또는 나스닥 5글자 접미사(W/R/U) 규약으로 판정합니다.")
+    return _append_result_meta(
+        "\n".join(lines),
+        _us_meta(
+            kind="snapshot",
+            extra={"security_types": type_counts,
+                   **({"security_filter": {"common_stock_only": True,
+                                           "excluded": excluded_counts}}
+                      if common_stock_only else {})},
+        ),
+    )
 
 
 @mcp.tool()

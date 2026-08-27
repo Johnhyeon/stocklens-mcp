@@ -615,6 +615,10 @@ async def screen(preset: str, count: int = 20) -> dict:
                 "market_cap": _clean(q.get("marketCap")),
                 "pe": _clean(q.get("trailingPE")),
                 "exchange": q.get("fullExchangeName") or q.get("exchange"),
+                # 증권 유형 분류용(SL-12). 워런트도 quoteType 은 EQUITY 라
+                # 이름·접미사와 함께 봐야 한다.
+                "quote_type": q.get("quoteType"),
+                "exchange_code": q.get("exchange"),
             })
         return {
             "preset": preset,
