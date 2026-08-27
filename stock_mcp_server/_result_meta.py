@@ -89,6 +89,10 @@ PROVIDER_STATUSES = (
     "authentication_failed", "permission_denied", "rate_limited",
     "provider_unavailable", "source_parse_error", "entity_not_found",
     "no_session", "partial",
+    # 1.0 추가 (additive): 키 문제가 아니라 공급자가 이 시장·요청을
+    # 지원하지 않거나 데이터 계약이 검증되지 않아 제공하지 않는 상태.
+    # not_configured(키 미설정)와 구분해야 사용자가 키를 의심하지 않는다.
+    "unsupported",
 )
 
 PROVIDER_EXTENSION_FIELDS = (

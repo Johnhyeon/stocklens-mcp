@@ -8328,6 +8328,14 @@ def _intraday_error_result(symbol: str, market: str, message: str,
                            provider_status: str) -> str:
     # 자동 전환이 없으므로(1.0 정책) 장애 시 사용자가 스스로 고를 수 있는
     # 대안을 안내한다. Yahoo 는 거래량 기준이 달라 명시 선택으로만 쓴다.
+    if provider_status == "unsupported":
+        # 키 문제가 아니다 - 이 공급자가 해당 시장·요청의 데이터 계약을
+        # 지원하지 않거나 검증되지 않아 제공하지 않는 상태다.
+        message = (
+            f"{message}\n이 증권사는 해당 시장 분봉을 지원하지 않거나 "
+            "데이터 계약이 검증되지 않았습니다. API 키 문제가 아닙니다. "
+            "다른 source(예: 주 사용 증권사 또는 KR 일봉은 기본 데이터)를 "
+            "사용하세요.")
     if market == "US" and provider_status in (
             "rate_limited", "provider_unavailable",
             "authentication_failed", "permission_denied"):
@@ -8393,8 +8401,10 @@ async def get_intraday_chart(
 ) -> str:
     """분봉차트 — 국내·미국 분봉/시간봉 OHLCV (증권사 연결 필요 구간 있음).
 
-    한국투자증권 Open API 를 연결한 사용자는 KR·US 분봉을 KIS 에서,
-    미연결 사용자는 US 분봉을 Yahoo 에서 받는다. KR 분봉은 KIS 연결 필요.
+    증권사(한국투자증권·키움증권·토스증권 중 하나) Open API 를 연결한
+    사용자는 주 사용 증권사에서 KR·US 분봉을 받는다. 미연결 사용자는
+    US 분봉만 Yahoo 에서 받는다 (KR 분봉은 증권사 연결 필요).
+    검증된 능력만 활성화된다 (토스는 US 전용 검증 중, KR 미지원).
     일·주·월봉은 기존 get_chart / get_us_chart 를 사용.
 
     Args:
@@ -8403,10 +8413,12 @@ async def get_intraday_chart(
         interval: 1m|3m|5m|10m|15m|30m|60m|120m|240m
         date: 기준 거래일 (YYYY-MM-DD, 기본 최근 거래일)
         row_limit: 최대 반환 봉 수 (기본 120, 최대 500)
-        venue: KR 은 KRX 고정. US 는 KIS 사용 시 NYS|NAS|AMS 필요
+        venue: KR 은 KRX 고정. US 는 증권사 사용 시 NYS|NAS|AMS 필요
         session: "regular" (기타 세션은 능력 검증 후 지원)
         completed_only: 완성 봉만 반환 (기본 True)
-        source: auto|kis|naver|yahoo. kis 는 strict(대체 없음)
+        source: auto|kis|kiwoom|toss|naver|yahoo.
+            auto 는 주 사용 증권사 하나에 고정되고, 증권사 명시는
+            strict(실패해도 다른 공급원으로 대체하지 않음)
     """
     err, trading_date = _validate_intraday_args(
         market, interval, source, date, session)

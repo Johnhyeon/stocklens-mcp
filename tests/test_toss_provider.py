@@ -111,11 +111,12 @@ class TossKrBlockedTests(unittest.TestCase):
     검증될 때까지 KR 은 코드로 차단한다. 추측 보정 금지.
     """
 
-    def test_kr_fetch_is_rejected_with_reason(self):
+    def test_kr_fetch_is_rejected_as_unsupported_not_key_problem(self):
         server = PageServer([])
         with self.assertRaises(TossApiError) as ctx:
             _run(_provider(server).fetch_bars(_kr_request()))
-        self.assertEqual(ctx.exception.provider_status, "not_configured")
+        # 키 문제(not_configured)로 보고하면 사용자가 키를 의심한다.
+        self.assertEqual(ctx.exception.provider_status, "unsupported")
         self.assertEqual(server.candle_requests, [])
 
     def test_kr_capability_not_advertised(self):

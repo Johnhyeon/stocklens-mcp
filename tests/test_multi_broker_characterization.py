@@ -319,6 +319,8 @@ class MetaContractCharacterization(unittest.TestCase):
             "authentication_failed", "permission_denied", "rate_limited",
             "provider_unavailable", "source_parse_error", "entity_not_found",
             "no_session", "partial",
+            # 1.0 승인 추가 (additive): 미지원·미검증 시장 구분
+            "unsupported",
         ))
 
         ext = provider_extension(

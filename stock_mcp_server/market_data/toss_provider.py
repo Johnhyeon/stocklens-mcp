@@ -126,8 +126,9 @@ class TossBarProvider:
                 f"toss_provider는 1m 원천만 반환합니다. 요청 interval: "
                 f"{request.interval}")
         if request.market == "KR":
-            # 실측 계약 불일치 (2026-08-27). 조용한 보정 대신 명시 거부.
-            raise TossApiError("not_configured")
+            # 실측 계약 불일치 (2026-08-27). 키 문제(not_configured)가
+            # 아니라 지원 중단이다 - 사용자가 키를 의심하지 않게 구분한다.
+            raise TossApiError("unsupported")
         market_cfg = _MARKETS.get(request.market)
         if market_cfg is None:
             raise ValueError(

@@ -209,6 +209,22 @@ class ProviderCacheKeyTests(unittest.TestCase):
             self.assertIsNotNone(cache.get(kiwoom_key, connected=True))
 
 
+class ToolDocContractTests(unittest.TestCase):
+    def test_ai_facing_docs_mention_all_brokers(self):
+        # AI 는 도구 설명으로 능력을 파악한다. 키움·토스가 설명에 없으면
+        # 존재를 모른다 (리뷰 보완 항목).
+        doc = server.get_intraday_chart.__doc__ or ""
+        for name in ("키움", "토스", "kiwoom", "toss"):
+            self.assertIn(name, doc, name)
+        self.assertNotIn("auto|kis|naver|yahoo.", doc)
+
+    def test_unsupported_error_says_not_a_key_problem(self):
+        text = server._intraday_error_result(
+            "005930", "KR", "증권사 데이터 조회 실패: unsupported",
+            "unsupported")
+        self.assertIn("키 문제가 아닙니다", text)
+
+
 class BrokerErrorMappingTests(unittest.IsolatedAsyncioTestCase):
     async def test_kiwoom_and_toss_errors_are_reported_like_kis(self):
         from stock_mcp_server.market_data.kiwoom_client import KiwoomApiError
