@@ -739,6 +739,7 @@ def _us_meta(
     data_completeness: str = rmeta.COMPLETE,
     coverage: dict | None = None,
     bar_state: dict | None = None,
+    price_adjustment: dict | None = None,
     extra: dict | None = None,
     warnings: list[str] | None = None,
 ) -> dict:
@@ -776,6 +777,8 @@ def _us_meta(
     )
     if bar_state:
         meta["bar_state"] = bar_state
+    if price_adjustment:
+        meta["price_adjustment"] = price_adjustment
     for key, value in (extra or {}).items():
         meta[key] = value
     return meta
@@ -911,6 +914,44 @@ def _classify_news_relevance(item: dict, names: tuple[str, ...]) -> dict:
                 "basis": "제목에 종목명 - 기사 주제"}
     return {"category": "mention", "relevance_score": 35,
             "basis": "요약에만 언급 - 주변 문맥"}
+
+
+def _earnings_session(timestamp: str) -> str:
+    """발표 ET 시각 -> 장전/장중/장후. 자정 정각은 날짜만 있는 것으로 본다.
+
+    반응창 선택이 여기 걸린다: 장전 발표는 당일 봉이, 장후 발표는 다음
+    거래일 봉이 첫 반응이다(SL-05 요구 4).
+    """
+    try:
+        ts = _dt.datetime.fromisoformat(timestamp)
+    except (TypeError, ValueError):
+        return "unknown"
+    t = ts.time()
+    if t == _dt.time(0, 0):
+        return "unknown"
+    if t < _dt.time(9, 30):
+        return "pre_market"
+    if t >= _dt.time(16, 0):
+        return "post_market"
+    return "during_market"
+
+
+def _match_fiscal_period(event_date: str, periods: list[str]) -> str | None:
+    """발표일 직전 120일 안에서 가장 가까운 분기말을 회계기간으로 잡는다."""
+    try:
+        ed = _dt.date.fromisoformat(event_date)
+    except (TypeError, ValueError):
+        return None
+    best = None
+    for pd_ in periods:
+        try:
+            d = _dt.date.fromisoformat(pd_)
+        except ValueError:
+            continue
+        gap = (ed - d).days
+        if 0 <= gap <= 120 and (best is None or gap < best[0]):
+            best = (gap, pd_)
+    return best[1] if best else None
 
 
 def _classify_insider_tx(row: dict) -> str:
@@ -4596,7 +4637,9 @@ async def get_us_earnings(ticker: str) -> str:
 
     upcoming = data.get("upcoming", []) or []
     history = data.get("history", []) or []
-    if not upcoming and not history:
+    # 사건 레코드(ev_data)가 있으면 일정·이력이 비어도 내용이 있다(SL-05).
+    _ev_probe = await us.get_earnings_events(ticker)
+    if not upcoming and not history and not (_ev_probe and _ev_probe.get("events")):
         return f"**{data['ticker']}** 실적 일정 & 이력\n\n실적 데이터 없음 (ETF나 개별 주식이 아닌 자산은 해당 없음)."
 
     lines = [f"**{data['ticker']}** 실적 일정 & 이력"]
@@ -4623,7 +4666,263 @@ async def get_us_earnings(ticker: str) -> str:
             sur = e.get("surprise(%)") or e.get("surprise_%") or e.get("surprise")
             lines.append(f"{date} | {_fmt_num(est)} | {_fmt_num(rep)} | {_fmt_num(sur)}%")
 
-    return _append_result_meta("\n".join(lines), _us_meta(kind="filing", ticker=ticker))
+    # ── 사건별 레코드(SL-05): EPS·매출·현금흐름·발표 시각을 한 사건으로 ──
+    ev_data = _ev_probe
+    events_meta: list[dict] = []
+    quality_warns: list[str] = []
+    if ev_data and ev_data.get("events"):
+        rev_by = ev_data.get("revenue_by_period") or {}
+        ocf_by = ev_data.get("ocf_by_period") or {}
+        rev_est_by = ev_data.get("revenue_estimates") or {}
+        ccy = ev_data.get("financial_currency") or "USD"
+        now_day = _now_kst().date().isoformat()
+        past = [e for e in ev_data["events"]
+                if e.get("eps_actual") is not None and (e.get("date") or "") <= now_day]
+
+        lines.append("")
+        lines.append(f"## 🧾 사건별 기록 (통화: {ccy}, 최근 {min(len(past), 6)}건)")
+        lines.append("발표(ET) | 세션 | 회계기간 | EPS 예상->실제 | 매출 예상->실제 | OCF | 판정")
+        lines.append("---|---|---|---|---|---|---")
+        for e in past[:6]:
+            session = _earnings_session(e.get("timestamp") or "")
+            fiscal = _match_fiscal_period(e.get("date"), list(rev_by))
+            rev_act = rev_by.get(fiscal) if fiscal else None
+            rev_est = rev_est_by.get(fiscal) if fiscal else None
+            rev_spct = (round((rev_act - rev_est) / rev_est * 100, 2)
+                        if isinstance(rev_act, (int, float))
+                        and isinstance(rev_est, (int, float)) and rev_est else None)
+            ocf = ocf_by.get(fiscal) if fiscal else None
+
+            eps_s = e.get("eps_surprise_pct")
+            parts = []
+            if isinstance(eps_s, (int, float)):
+                parts.append("EPS beat" if eps_s > 0 else
+                             ("EPS miss" if eps_s < 0 else "EPS in-line"))
+            if rev_spct is not None:
+                parts.append("매출 beat" if rev_spct > 0 else
+                             ("매출 miss" if rev_spct < 0 else "매출 in-line"))
+            else:
+                parts.append("매출 예상 확인 불가")
+            verdict = " · ".join(parts) if parts else "확인 불가"
+
+            session_ko = {"pre_market": "장전", "post_market": "장후",
+                          "during_market": "장중", "unknown": "시각미상"}[session]
+            ts_short = (e.get("timestamp") or "")[:16].replace("T", " ")
+            fmt_b = lambda v: f"{v/1e9:,.1f}B" if isinstance(v, (int, float)) else "-"
+            lines.append(
+                f"{ts_short} | {session_ko} | {fiscal or '미매칭'} | "
+                f"{e.get('eps_estimate') if e.get('eps_estimate') is not None else '-'}"
+                f"->{e.get('eps_actual')}"
+                + (f" ({eps_s:+.1f}%)" if isinstance(eps_s, (int, float)) else "")
+                + f" | {fmt_b(rev_est)}->{fmt_b(rev_act)}"
+                + (f" ({rev_spct:+.1f}%)" if rev_spct is not None else "")
+                + f" | {fmt_b(ocf)} | {verdict}"
+            )
+            events_meta.append({
+                "date": e.get("date"), "timestamp": e.get("timestamp"),
+                "session": session, "fiscal_period": fiscal,
+                "eps_estimate": e.get("eps_estimate"),
+                "eps_actual": e.get("eps_actual"),
+                "eps_surprise_pct": eps_s,
+                "revenue_actual": rev_act, "revenue_estimate": rev_est,
+                "revenue_surprise_pct": rev_spct,
+                "operating_cash_flow": ocf,
+                "verdict": verdict,
+            })
+        lines.append("")
+        lines.append("※ 매출 **예상**은 공급자가 현재·다음 분기만 제공합니다 - 과거 사건의 "
+                     "매출 예상이 '-' 이면 확인 불가이지 예상이 없었다는 뜻이 아닙니다.")
+        lines.append("※ **실적의 질(가이던스 변화·일회성 조정)은 이 피드로 확인 불가**입니다. "
+                     "발표 당일 8-K 원문으로 확인하세요: "
+                     "`get_us_filings(ticker, forms=[\"8-K\"])` -> "
+                     "`get_us_filing_detail(..., find=\"guidance\")`.")
+        lines.append("※ 반응창: 장전 발표는 당일, 장후 발표는 다음 거래일이 첫 반응입니다 - "
+                     "`get_us_event_reaction(ticker, event_date)` 로 정렬하세요.")
+        quality_warns.append(
+            "가이던스·일회성 조정 근거가 이 피드에 없어 실적의 질은 확인 불가입니다. "
+            "8-K 원문 확인 전에는 'EPS beat=좋은 실적'으로 단정하지 마세요."
+        )
+
+    return _append_result_meta(
+        "\n".join(lines),
+        _us_meta(
+            kind="filing", ticker=ticker,
+            data_as_of=(events_meta[0]["date"] if events_meta else None),
+            extra=({"earnings_events": {
+                "events": events_meta,
+                "quality_assessable": False,
+                "quality_missing": ["guidance", "one_off_adjustments"],
+            }} if events_meta else None),
+            warnings=quality_warns or None,
+        ),
+    )
+
+
+@mcp.tool()
+@safe_us_tool
+@track_metrics("get_us_event_reaction")
+async def get_us_event_reaction(
+    ticker: str,
+    event_date: str,
+    session: str = "auto",
+    after: int = 5,
+) -> str:
+    """US event reaction — 발표 세션에 맞는 기준 거래일로 주가 반응을 정렬 (SL-05).
+
+    미국 실적은 장전(BMO)·장후(AMC) 발표가 갈린다. 장전 발표는 **당일** 봉이,
+    장후 발표는 **다음 거래일** 봉이 첫 반응이다. 이 정렬을 자동으로 한다.
+    완성된 일봉만 쓴다(진행 중 봉 제외).
+
+    Args:
+        ticker: US 티커
+        event_date: 발표일 YYYY-MM-DD
+        session: "auto"(실적 발표 시각에서 자동 판정) / "pre" / "post" / "unknown"
+        after: 사건 후 비교 거래일 수 (기본 5, 최대 20)
+    """
+    after = max(1, min(int(after), 20))
+    day = rmeta.normalize_day(event_date)
+    if not day:
+        return f"event_date 를 날짜로 읽지 못했습니다: {event_date}"
+
+    warns: list[str] = []
+    resolved = session
+    if session == "auto":
+        resolved = "unknown"
+        try:
+            ev = await us.get_earnings_events(ticker)
+            for e in (ev or {}).get("events", []):
+                if e.get("date") == day:
+                    resolved = _earnings_session(e.get("timestamp") or "")
+                    break
+        except Exception:
+            pass
+        if resolved == "unknown":
+            warns.append(
+                f"{day} 발표 시각을 실적 일정에서 찾지 못했습니다. "
+                "세션을 알면 session=\"pre\"/\"post\" 로 지정하세요."
+            )
+    elif session == "pre":
+        resolved = "pre_market"
+    elif session == "post":
+        resolved = "post_market"
+
+    if resolved == "unknown":
+        # 시각을 모르면 보수적으로 다음 거래일을 기준으로 잡는다 - 장후 발표를
+        # 당일로 정렬하면 발표 전 가격을 반응으로 읽게 되는 쪽이 더 위험하다.
+        warns.append("발표 시각 미상 - 보수적으로 다음 거래일을 기준 거래일로 씁니다.")
+
+    raw = await us.get_history(ticker, period="1y", interval="1d")
+    if not raw:
+        return f"티커 '{ticker}'의 일봉을 가져올 수 없습니다."
+    bars, _exc = split_valid_bars(raw)
+    # 완성된 봉만 쓴다 - 진행 중인 오늘 봉으로 반응을 재면 마감 때 값이 바뀐다.
+    cal = us_calendar()
+    while bars:
+        last_day = rmeta.normalize_day(bars[-1].get("date") or bars[-1].get("datetime"))
+        try:
+            closed = cal.is_period_closed(_dt.date.fromisoformat(last_day), "day",
+                                          _now_kst())
+        except Exception:
+            closed = None
+        if closed:
+            break
+        bars = bars[:-1]
+        warns.append(f"진행 중인 봉({last_day})은 반응 계산에서 제외했습니다.")
+    if len(bars) < 3:
+        return f"티커 '{ticker}'의 완성된 일봉이 부족합니다."
+
+    dates = [rmeta.normalize_day(b.get("date") or b.get("datetime")) for b in bars]
+
+    if resolved == "pre_market":
+        basis_idx = next((i for i, d in enumerate(dates) if d >= day), None)
+        basis_selection = "same_day_pre_market"
+    elif resolved == "during_market":
+        basis_idx = next((i for i, d in enumerate(dates) if d >= day), None)
+        basis_selection = "same_day_during_market"
+        warns.append("장중 발표 - 당일 봉에는 발표 전 체결이 섞여 있습니다.")
+    else:   # post_market / unknown -> 다음 거래일
+        basis_idx = next((i for i, d in enumerate(dates) if d > day), None)
+        basis_selection = ("next_trading_day_post_market"
+                           if resolved == "post_market" else
+                           "next_trading_day_unknown_session")
+
+    if basis_idx is None:
+        return _append_result_meta(
+            f"# US 이벤트 반응 - {ticker} ({day})\n\n"
+            "사건 이후의 완성된 거래일이 아직 없습니다. 다음 정규장 이후 다시 조회하세요.",
+            _us_meta(kind="bars", ticker=ticker, data_as_of=dates[-1],
+                     data_completeness=rmeta.NONE,
+                     coverage={"truncated": False, "coverage_complete": False,
+                               "reason": "insufficient_post_event_history"},
+                     warnings=warns or None),
+        )
+    if basis_idx == 0:
+        return f"사건({day}) 이전 봉이 없어 기준 대비 수익률을 만들 수 없습니다."
+
+    basis_date = dates[basis_idx]
+    ref_close = float(bars[basis_idx - 1]["close"])   # 직전 완성봉 종가
+
+    offsets = [0, 1]
+    if after >= 3:
+        offsets.append(after // 2 if after >= 4 else after)
+    if after not in offsets:
+        offsets.append(after)
+    points = []
+    actual_after = min(after, len(bars) - 1 - basis_idx)
+    for off in sorted(set(offsets)):
+        idx = basis_idx + off
+        if idx >= len(bars):
+            points.append((f"D+{off}", None, None))
+            continue
+        close = float(bars[idx]["close"])
+        points.append((f"D+{off}" if off else "D0", dates[idx],
+                       (close - ref_close) / ref_close * 100))
+
+    session_ko = {"pre_market": "장전", "post_market": "장후",
+                  "during_market": "장중", "unknown": "시각미상"}.get(resolved, resolved)
+    lines = [
+        f"# US 이벤트 반응 - {ticker} (발표일 {day}, {session_ko})",
+        f"기준 거래일: **{basis_date}** ({basis_selection}) · "
+        f"기준가: 직전 완성봉({dates[basis_idx - 1]}) 종가 {ref_close:,.2f}",
+        "",
+        "| 지점 | 거래일 | 기준 대비 |",
+        "|---|---|---:|",
+    ]
+    for label, d, pct in points:
+        if pct is None:
+            lines.append(f"| {label} | - | - |")
+        else:
+            lines.append(f"| {label} | {d} | {pct:+.2f}% |")
+    short = actual_after < after
+    if short:
+        lines.append("")
+        lines.append(f"⚠️ 사건 후 완성 거래일이 {actual_after}일뿐입니다"
+                     f"(요청 D+{after}). 빈 지점은 아직 거래일이 없는 것입니다.")
+    lines.append("")
+    lines.append(f"_{CORPORATE_ACTION_NOTE}_")
+
+    return _append_result_meta(
+        "\n".join(lines),
+        _us_meta(
+            kind="bars", ticker=ticker,
+            data_as_of=dates[-1],
+            data_completeness=rmeta.PARTIAL if short else rmeta.COMPLETE,
+            coverage=({"requested": {"unit": "trading_day", "after": after},
+                       "effective": {"unit": "trading_day", "after": actual_after},
+                       "truncated": True, "coverage_complete": False,
+                       "reason": "insufficient_post_event_history"} if short else None),
+            price_adjustment=price_adjustment_meta(),
+            extra={"event_window": {
+                "requested": {"after": after},
+                "actual": {"after": actual_after},
+                "basis_trading_date": basis_date,
+                "basis_selection": basis_selection,
+                "session": resolved,
+                "last_usable_trading_date": dates[-1],
+            }},
+            warnings=warns or None,
+        ),
+    )
 
 
 @mcp.tool()

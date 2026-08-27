@@ -225,6 +225,74 @@ async def get_financial_info(ticker: str) -> dict | None:
 
 
 @cached_us(ttl_market=3600, ttl_closed=86400)
+async def get_earnings_events(ticker: str) -> dict | None:
+    """실적 사건 레코드(SL-05): 발표 시각 + EPS + 분기 매출·OCF 를 한 곳에.
+
+    yfinance 는 EPS 예상·실제만 earnings_dates 에 주고, 매출 실제는 분기
+    손익계산서에, 영업현금흐름은 분기 현금흐름표에 흩어져 있다. 매출 **예상**은
+    현재·다음 분기(0q/+1q)만 제공된다 - 과거 사건의 매출 예상은 이 공급자로는
+    복원할 수 없고, 그 사실을 그대로 돌려준다.
+    """
+    norm = normalize_ticker(ticker)
+
+    def _sync():
+        t = yf.Ticker(norm)
+        info = t.info or {}
+        if not info.get("symbol"):
+            return None
+
+        events: list[dict] = []
+        try:
+            ed = t.earnings_dates
+            if ed is not None and not ed.empty:
+                for ts, row in ed.iterrows():
+                    events.append({
+                        "timestamp": ts.isoformat(),          # ET, 발표 시각 포함
+                        "date": str(ts.date()),
+                        "eps_estimate": _clean(row.get("EPS Estimate")),
+                        "eps_actual": _clean(row.get("Reported EPS")),
+                        "eps_surprise_pct": _clean(row.get("Surprise(%)")),
+                    })
+        except Exception:
+            pass
+
+        def _by_period(df, row_name):
+            out = {}
+            try:
+                if df is not None and not df.empty and row_name in df.index:
+                    for col in df.columns:
+                        v = _clean(df.loc[row_name, col])
+                        if v is not None:
+                            out[str(col)[:10]] = v
+            except Exception:
+                pass
+            return out
+
+        revenue_by_period = _by_period(t.quarterly_income_stmt, "Total Revenue")
+        ocf_by_period = _by_period(t.quarterly_cash_flow, "Operating Cash Flow")
+
+        revenue_estimates: dict = {}
+        try:
+            re_df = t.revenue_estimate
+            if re_df is not None and not re_df.empty:
+                for period, row in re_df.iterrows():
+                    revenue_estimates[str(period)] = _clean(row.get("avg"))
+        except Exception:
+            pass
+
+        return {
+            "ticker": info.get("symbol"),
+            "financial_currency": info.get("financialCurrency") or info.get("currency"),
+            "events": events,
+            "revenue_by_period": revenue_by_period,
+            "ocf_by_period": ocf_by_period,
+            "revenue_estimates": revenue_estimates,   # 0q/+1q 만 - 과거는 없다
+        }
+
+    return await _in_thread(_sync)
+
+
+@cached_us(ttl_market=3600, ttl_closed=86400)
 async def get_earnings(ticker: str) -> dict | None:
     """실적 발표 일정 + 최근 서프라이즈 이력."""
     norm = normalize_ticker(ticker)
