@@ -30,6 +30,15 @@ class CredentialField:
 
 
 @dataclass(frozen=True)
+class EndpointSpec:
+    """descriptor 가 소유하는 정확한 endpoint. 호출자는 URL 을 만들 수 없다."""
+
+    endpoint_id: str
+    method: str
+    path: str
+
+
+@dataclass(frozen=True)
 class ProviderDescriptor:
     provider_id: str
     display_name: str
@@ -39,12 +48,28 @@ class ProviderDescriptor:
     supported_profiles: tuple[str, ...]
     signup_url: str
     docs_url: str
+    # 프로필 -> API host. transport 가 여기서만 host 를 고른다.
+    hosts_by_profile: tuple[tuple[str, str], ...] = ()
+    # endpoint_id -> (method, path). path 는 allowed_paths 부분집합이다.
+    endpoints: tuple[EndpointSpec, ...] = ()
     # 어댑터 factory. 공개 직렬화 대상이 아니며 repr 에서도 감춘다.
     auth_factory: Callable[..., Any] | None = field(default=None, repr=False)
     provider_factory: Callable[..., Any] | None = field(
         default=None, repr=False)
     capability_probe_factory: Callable[..., Any] | None = field(
         default=None, repr=False)
+
+    def host_for_profile(self, profile: str) -> str | None:
+        for name, host in self.hosts_by_profile:
+            if name == profile:
+                return host
+        return None
+
+    def endpoint(self, endpoint_id: str) -> EndpointSpec | None:
+        for spec in self.endpoints:
+            if spec.endpoint_id == endpoint_id:
+                return spec
+        return None
 
 
 _KIS = ProviderDescriptor(
@@ -66,6 +91,19 @@ _KIS = ProviderDescriptor(
     supported_profiles=("real", "demo"),
     signup_url="https://apiportal.koreainvestment.com",
     docs_url="https://apiportal.koreainvestment.com/docs",
+    hosts_by_profile=(
+        ("real", "openapi.koreainvestment.com:9443"),
+        ("demo", "openapivts.koreainvestment.com:29443"),
+    ),
+    endpoints=(
+        EndpointSpec("token", "POST", "/oauth2/tokenP"),
+        EndpointSpec(
+            "kr_minute", "GET",
+            "/uapi/domestic-stock/v1/quotations/inquire-time-dailychartprice"),
+        EndpointSpec(
+            "us_minute", "GET",
+            "/uapi/overseas-price/v1/quotations/inquire-time-itemchartprice"),
+    ),
 )
 
 _KIWOOM = ProviderDescriptor(
@@ -86,6 +124,14 @@ _KIWOOM = ProviderDescriptor(
     supported_profiles=("real", "demo"),
     signup_url="https://openapi.kiwoom.com",
     docs_url="https://openapi.kiwoom.com/m/guide/apiguide",
+    hosts_by_profile=(
+        ("real", "api.kiwoom.com"),
+        ("demo", "mockapi.kiwoom.com"),
+    ),
+    endpoints=(
+        EndpointSpec("token", "POST", "/oauth2/token"),
+        EndpointSpec("kr_chart", "POST", "/api/dostk/chart"),
+    ),
 )
 
 _TOSS = ProviderDescriptor(
@@ -106,6 +152,13 @@ _TOSS = ProviderDescriptor(
     supported_profiles=("real",),
     signup_url="https://corp.tossinvest.com/ko/open-api",
     docs_url="https://developers.tossinvest.com/docs",
+    hosts_by_profile=(
+        ("real", "openapi.tossinvest.com"),
+    ),
+    endpoints=(
+        EndpointSpec("token", "POST", "/oauth2/token"),
+        EndpointSpec("candles", "GET", "/api/v1/candles"),
+    ),
 )
 
 
