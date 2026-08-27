@@ -1,9 +1,9 @@
 """공급원 라우팅 결정표 테스트 (Task 11).
 
 - 모드·시장·간격·연결 상태별 공급자 선택
-- strict source=kis 는 fallback 없음
-- 봉 0개 채택 시에만 요청 전체 재시작 가능
-- 봉 1개라도 채택하면 공급원 변경 금지
+- 자동 전환(fallback) 없음: 요청 시작 전 능력 기반 초기 선택만 있고,
+  실패해도 다른 공급자나 Yahoo 로 자동 전환하지 않는다 (1.0 정책)
+- 공급자 전환은 사용자의 직접 선택(source 명시·모드 변경)으로만
 - 일부 반환을 다른 공급원으로 메우지 않음
 - 미검증 KIS 일봉 능력은 선택되지 않음
 """
@@ -161,30 +161,46 @@ class DecisionTableTests(unittest.TestCase):
         res = self._route("auto", "US", "5m", True, source="yahoo")
         self.assertEqual(res.selected_provider, "yahoo")
 
-    def test_auto_us_fallback_flag_set(self):
-        res = self._route("auto", "US", "5m", True)
-        self.assertTrue(res.fallback_allowed_before_first_bar)
-        self.assertEqual(res.fallback_provider, "yahoo")
+    def test_no_fallback_in_any_mode(self):
+        # 1.0 정책: 자동 전환 없음. 연결·능력 확인 시 KIS 고정.
+        for mode in ("auto", "broker_first"):
+            res = self._route(mode, "US", "5m", True)
+            self.assertEqual(res.selected_provider, "kis")
+            self.assertFalse(res.fallback_allowed_before_first_bar)
+            self.assertIsNone(res.fallback_provider)
 
 
-class FailoverTests(unittest.TestCase):
-    def test_zero_bars_error_restarts_whole_request_on_fallback(self):
+class NoAutoSwitchTests(unittest.TestCase):
+    """1.0 정책: 장애가 나도 다른 공급자로 자동 전환하지 않는다."""
+
+    def test_kis_error_propagates_without_touching_yahoo(self):
         kis = FakeProvider("kis", error=KisApiError("provider_unavailable"))
         yahoo = FakeProvider("yahoo", result=_dataset("yahoo", [_bar(0)]))
         res = resolve_source(
             mode="auto", market="US", interval="5m",
             requested_source="auto", capabilities=_caps())
-        ds, meta = _run(fetch_with_failover(
-            res, {"kis": kis, "yahoo": yahoo}, _request(market="US",
-                                                        venue="NAS")))
-        self.assertEqual(ds.provider, "yahoo")
-        self.assertTrue(meta["fallback_used"])
-        self.assertEqual(meta["fallback_from"], "kis")
-        self.assertEqual(kis.calls, 1)
-        self.assertEqual(yahoo.calls, 1)
+        with self.assertRaises(KisApiError):
+            _run(fetch_with_failover(
+                res, {"kis": kis, "yahoo": yahoo},
+                _request(market="US", venue="NAS")))
+        self.assertEqual(yahoo.calls, 0)
 
-    def test_partial_result_is_not_filled_by_fallback(self):
-        # 봉을 하나라도 채택했으면 fallback 호출 자체가 없어야 한다.
+    def test_empty_dataset_returned_as_is(self):
+        # 빈 결과도 다른 공급자로 메우지 않는다. 빈 것은 빈 것이다.
+        kis = FakeProvider("kis", result=_dataset("kis", []))
+        yahoo = FakeProvider("yahoo", result=_dataset("yahoo", [_bar(0)]))
+        res = resolve_source(
+            mode="auto", market="US", interval="5m",
+            requested_source="auto", capabilities=_caps())
+        ds, meta = _run(fetch_with_failover(
+            res, {"kis": kis, "yahoo": yahoo},
+            _request(market="US", venue="NAS")))
+        self.assertEqual(ds.provider, "kis")
+        self.assertEqual(ds.bars, ())
+        self.assertFalse(meta["fallback_used"])
+        self.assertEqual(yahoo.calls, 0)
+
+    def test_partial_result_is_not_filled_by_other_provider(self):
         kis = FakeProvider(
             "kis", result=_dataset("kis", [_bar(0)], complete=False))
         yahoo = FakeProvider("yahoo", result=_dataset("yahoo", [_bar(0)]))
@@ -199,56 +215,16 @@ class FailoverTests(unittest.TestCase):
         self.assertEqual(yahoo.calls, 0)
         self.assertFalse(ds.coverage["complete"])
 
-    def test_strict_kis_failure_propagates_without_fallback(self):
-        kis = FakeProvider("kis", error=KisApiError("rate_limited"))
+    def test_explicit_yahoo_is_user_choice_not_fallback(self):
         yahoo = FakeProvider("yahoo", result=_dataset("yahoo", [_bar(0)]))
         res = resolve_source(
             mode="auto", market="US", interval="5m",
-            requested_source="kis", capabilities=_caps())
-        with self.assertRaises(KisApiError):
-            _run(fetch_with_failover(
-                res, {"kis": kis, "yahoo": yahoo},
-                _request(market="US", venue="NAS", source="kis")))
-        self.assertEqual(yahoo.calls, 0)
-
-    def test_empty_dataset_restarts_on_fallback(self):
-        # 예외가 아니어도 봉 0개면 "유효한 봉을 하나도 채택하지 않은" 상태다.
-        # 설계 규칙 1: 이때만 요청 전체 재시작이 허용된다 (2026-08-27 실측:
-        # 미국 야간에 KIS 가 세션 밖 행만 돌려줘 빈 결과가 나왔다).
-        kis = FakeProvider("kis", result=_dataset("kis", []))
-        yahoo = FakeProvider("yahoo", result=_dataset("yahoo", [_bar(0)]))
-        res = resolve_source(
-            mode="auto", market="US", interval="5m",
-            requested_source="auto", capabilities=_caps())
+            requested_source="yahoo", capabilities=_caps())
         ds, meta = _run(fetch_with_failover(
-            res, {"kis": kis, "yahoo": yahoo},
-            _request(market="US", venue="NAS")))
+            res, {"yahoo": yahoo},
+            _request(market="US", venue="NAS", source="yahoo")))
         self.assertEqual(ds.provider, "yahoo")
-        self.assertTrue(meta["fallback_used"])
-
-    def test_strict_kis_empty_dataset_returned_as_is(self):
-        kis = FakeProvider("kis", result=_dataset("kis", []))
-        yahoo = FakeProvider("yahoo", result=_dataset("yahoo", [_bar(0)]))
-        res = resolve_source(
-            mode="auto", market="US", interval="5m",
-            requested_source="kis", capabilities=_caps())
-        ds, meta = _run(fetch_with_failover(
-            res, {"kis": kis, "yahoo": yahoo},
-            _request(market="US", venue="NAS", source="kis")))
-        self.assertEqual(ds.provider, "kis")
-        self.assertEqual(ds.bars, ())
-        self.assertEqual(yahoo.calls, 0)
-
-    def test_fallback_failure_also_propagates(self):
-        kis = FakeProvider("kis", error=KisApiError("provider_unavailable"))
-        yahoo = FakeProvider("yahoo", error=RuntimeError("yahoo down"))
-        res = resolve_source(
-            mode="auto", market="US", interval="5m",
-            requested_source="auto", capabilities=_caps())
-        with self.assertRaises(RuntimeError):
-            _run(fetch_with_failover(
-                res, {"kis": kis, "yahoo": yahoo},
-                _request(market="US", venue="NAS")))
+        self.assertFalse(meta["fallback_used"])
 
 
 if __name__ == "__main__":

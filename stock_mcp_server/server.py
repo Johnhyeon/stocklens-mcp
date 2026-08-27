@@ -8286,6 +8286,15 @@ def _intraday_meta_extra(dataset, route_meta: dict) -> dict:
 
 def _intraday_error_result(symbol: str, market: str, message: str,
                            provider_status: str) -> str:
+    # 자동 전환이 없으므로(1.0 정책) 장애 시 사용자가 스스로 고를 수 있는
+    # 대안을 안내한다. Yahoo 는 거래량 기준이 달라 명시 선택으로만 쓴다.
+    if market == "US" and provider_status in (
+            "rate_limited", "provider_unavailable",
+            "authentication_failed", "permission_denied"):
+        message = (
+            f"{message}\n일시 장애면 잠시 후 재시도하세요. "
+            "지금 바로 조회가 필요하면 source=\"yahoo\" 를 명시해 Yahoo "
+            "데이터로 볼 수 있습니다 (거래량 기준이 증권사와 다릅니다).")
     meta_fn = _kr_meta if market == "KR" else _us_meta
     kwargs = {"code": symbol} if market == "KR" else {"ticker": symbol}
     meta = meta_fn(

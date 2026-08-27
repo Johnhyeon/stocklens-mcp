@@ -88,8 +88,12 @@ and never will be connected.
 
 Data source modes (chosen in Manager): automatic (recommended),
 broker-first, and legacy (zero KIS calls, identical to pre-connection
-behavior). Sources are never mixed inside one response; the meta always
-records `provider` and `fallback_used`.
+behavior). Once a broker is connected, intraday requests stay on the
+broker: there is NO silent switching to Yahoo on failure (volume basis
+differs between sources). Errors are reported honestly; pass
+source="yahoo" explicitly if you want Yahoo instead. Sources are never
+mixed inside one response; the meta always records `provider` and
+`fallback_used`.
 
 US intraday volume basis (measured): KIS US minute volume counts only
 the listing exchange's trades (NYSE/NASDAQ), while Yahoo reports the

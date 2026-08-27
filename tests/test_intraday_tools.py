@@ -188,6 +188,19 @@ class IntradayChartTests(unittest.IsolatedAsyncioTestCase):
         meta = _extract_meta(text)
         self.assertEqual(meta["provider_status"], "rate_limited")
 
+    async def test_us_kis_error_suggests_manual_alternatives(self):
+        # 자동 전환이 없으므로(1.0 정책) 장애 시 대안을 안내한다.
+        # 전환은 어디까지나 사용자의 직접 선택이다.
+        fetch = AsyncMock(side_effect=KisApiError("rate_limited", 429))
+        with patch.object(server, "_fetch_intraday_dataset", fetch), \
+             patch.object(server, "build_market_clock",
+                          return_value=_OPEN_CLOCK):
+            text = await server.get_intraday_chart(
+                symbol="AAPL", market="US", interval="5m", venue="NAS")
+        self.assertIn("source", text)
+        self.assertIn("yahoo", text)
+        self.assertIn("거래량 기준", text)
+
     async def test_empty_dataset_reports_none(self):
         fetch = AsyncMock(return_value=(_dataset([]), _route_meta()))
         with patch.object(server, "_fetch_intraday_dataset", fetch), \

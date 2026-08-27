@@ -157,13 +157,16 @@ def resolve_source(
         return _make(legacy, reason)
 
     # --- 분·시간봉 ---
+    # 1.0 정책(대표 결정 2026-08-27): 자동 전환 없음. 증권사를 연결한
+    # 사용자는 증권사 데이터로 고정된다 - 장애 시 다른 공급자로 조용히
+    # 바꾸면 거래량 기준(상장 거래소 vs 통합 테이프)이 소리 없이 바뀐다.
+    # 전환은 사용자의 직접 선택(source 명시·모드 변경)으로만 한다.
     if kis_ok:
-        fallback = legacy if mode in ("auto", "broker_first") else None
-        return _make("kis", "broker_connected_and_intraday_supported",
-                     fallback=fallback)
+        return _make("kis", "broker_connected_and_intraday_supported")
 
     if legacy is not None:
-        reason = ("broker_first_unavailable_full_restart_on_legacy"
+        # 미연결·능력 없음은 "전환"이 아니라 요청 시작 전의 초기 선택이다.
+        reason = ("broker_capability_unavailable_default_source"
                   if mode == "broker_first"
                   else "auto_broker_unavailable_default_source")
         return _make(legacy, reason)
@@ -179,11 +182,14 @@ async def fetch_with_failover(
     providers: dict,
     request: BarRequest,
 ) -> tuple[BarDataset, dict]:
-    """고정된 공급자로 조회한다.
+    """고정된 공급자로 조회한다. 자동 전환은 없다 (1.0 정책).
 
-    공급자가 봉을 하나도 채택하지 못하고 실패했을 때만, 그리고 fallback 이
-    허용된 경우에만 요청 전체를 fallback 공급자에서 새로 시작한다.
-    일부 반환(partial)은 그대로 반환하고 절대 다른 공급원으로 메우지 않는다.
+    장애·빈 결과·partial 모두 그대로 보고한다. 다른 공급자의 데이터로
+    메우는 순간 거래량 기준 등 숫자의 의미가 소리 없이 바뀐다. 전환은
+    사용자의 직접 선택(source 명시·모드 변경)으로만 일어난다.
+
+    함수 이름의 failover 는 역사적 이름이다 - meta 의 fallback_used 는
+    하위 호환을 위해 항상 False 로 남는다.
     """
     primary = providers[resolution.selected_provider]
     meta = {
@@ -194,31 +200,5 @@ async def fetch_with_failover(
         "fallback_used": False,
         "fallback_from": None,
     }
-    fallback_possible = (resolution.fallback_allowed_before_first_bar
-                         and resolution.fallback_provider is not None)
-
-    async def _restart_on_fallback():
-        fallback = providers[resolution.fallback_provider]
-        ds = await fallback.fetch_bars(request)
-        meta.update({
-            "selected_provider": resolution.fallback_provider,
-            "fallback_used": True,
-            "fallback_from": resolution.selected_provider,
-        })
-        return ds, meta
-
-    try:
-        dataset = await primary.fetch_bars(request)
-    except Exception:
-        # 예외 = 봉 0개 채택. 공급자는 봉을 하나라도 채택했으면 partial
-        # dataset 을 반환하지 예외를 던지지 않는다 (kis_domestic 참고).
-        if not fallback_possible:
-            raise
-        return await _restart_on_fallback()
-
-    # 빈 dataset 도 "유효한 봉을 하나도 채택하지 않은" 상태다. 이때만
-    # 요청 전체 재시작이 허용된다 (2026-08-27 실측: 미국 야간에 KIS 가
-    # 정규장 밖 행만 돌려줘 빈 결과가 나왔다).
-    if not dataset.bars and fallback_possible:
-        return await _restart_on_fallback()
+    dataset = await primary.fetch_bars(request)
     return dataset, meta
