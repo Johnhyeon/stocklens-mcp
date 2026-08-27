@@ -1,0 +1,16 @@
+{
+  "result": {
+    "candles": [
+      {"timestamp": "2026-08-27T15:28:00+09:00", "openPrice": "71000",
+       "highPrice": "71000", "lowPrice": "70900", "closePrice": "70950",
+       "volume": "6110", "currency": "KRW"},
+      {"timestamp": "2026-08-27T15:27:00+09:00", "openPrice": "70900",
+       "highPrice": "71050", "lowPrice": "70850", "closePrice": "71000",
+       "volume": "5000", "currency": "KRW"},
+      {"timestamp": "2026-08-26T15:29:00+09:00", "openPrice": "70600",
+       "highPrice": "70650", "lowPrice": "70450", "closePrice": "70500",
+       "volume": "7000", "currency": "KRW"}
+    ],
+    "nextBefore": "2026-08-26T15:29:00+09:00"
+  }
+}
