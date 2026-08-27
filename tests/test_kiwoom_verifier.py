@@ -61,10 +61,17 @@ def _verify(scenario: Scenario) -> dict:
 
 
 class KiwoomVerifierTests(unittest.TestCase):
-    def test_kr_available_us_fixed_unavailable(self):
-        # US 는 실측 계약 불일치(2026-08-27)로 probe 없이 unavailable.
+    def test_kr_and_us_both_probed_available(self):
+        # US 도 probe 한다 (2026-08-28 ET 라벨 계약 확정으로 차단 해제).
         result = _verify(Scenario())
         self.assertEqual(result["auth"], "ok")
+        self.assertEqual(result["kr_intraday"], "available")
+        self.assertEqual(result["us_intraday"], "available")
+
+    def test_us_body_error_is_unavailable(self):
+        result = _verify(Scenario(
+            us=httpx.Response(200, json={"return_code": 7,
+                                         "return_msg": "no data"})))
         self.assertEqual(result["kr_intraday"], "available")
         self.assertEqual(result["us_intraday"], "unavailable")
 

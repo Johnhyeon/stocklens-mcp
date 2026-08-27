@@ -8,6 +8,9 @@
 
 from __future__ import annotations
 
+import datetime as _dt
+from zoneinfo import ZoneInfo as _ZoneInfo
+
 import httpx
 
 from stock_mcp_server.market_data.kiwoom_client import (
@@ -44,9 +47,19 @@ class KiwoomVerifier:
 
         result["auth"] = "ok"
         result["kr_intraday"] = kr
-        # US 는 실측 계약 불일치(가격·거래량·커버리지, 2026-08-27)로
-        # 코드 차단 상태다. probe 없이 unavailable 로 고정한다.
-        result["us_intraday"] = "unavailable"
+        # US probe (usa06011). 2026-08-28 lag 스캔으로 ET 라벨 계약이
+        # 확정되어 차단이 풀렸다.
+        et_today = _dt.datetime.now(
+            _ZoneInfo("America/New_York")).strftime("%Y%m%d")
+        result["us_intraday"] = await self._probe(
+            client, "us_chart", "usa06011", {
+                "stex_tp": "ND",
+                "stk_cd": "AAPL",
+                "strt_dt": et_today,
+                "tic_scope": "1",
+                "upd_stkpc_tp": "0",
+                "exrt_appl_tp": "0",
+            })
         return result
 
     async def _probe(self, client: KiwoomClient, endpoint_id: str,

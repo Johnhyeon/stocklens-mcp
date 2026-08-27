@@ -1,12 +1,16 @@
-"""키움 미국 1분봉 공급자 테스트 (1.0 Task 14, 2026-08-27 실측 개정판).
+"""키움 미국 1분봉 공급자 테스트 (1.0 Task 14, 2026-08-28 실측 재개정).
 
-공식 스펙(usa06011) + 실계좌 실측으로 확정한 semantics:
-- cntr_tm 은 **한국 시각(KST) 라벨**이다 (실측: ET 09:11 프리장 행이
-  20260826221100 으로 옴). ET 로 변환해 저장한다.
+공식 스펙(usa06011) + 실계좌 실측(2026-08-28 lag 스캔)으로 확정:
+- cntr_tm 은 **미국 동부시각(ET) 라벨, 봉 시작**이다. ET 그대로
+  해석하면 KIS 기준과 lag 0 에서 391/391분 완전 일치한다
+  (median|dClose|=0.0000, 거래량 상관 1.0). 이전의 "KST 라벨" 해석은
+  오독이었고, 그 해석이 읽던 22:30~05:00 행은 실제로는 미국
+  오버나이트 세션(ET) 데이터였다.
+- 응답은 24시간 스트림이다: 정규장(09:30~16:00, 마감 print 포함
+  391행) + 프리장 + 애프터 + 오버나이트. 정규장 밖 행은 버린다.
 - bus_dt 가 미국 영업일자다. 요청 거래일 필터의 기준이다.
-- strt_dt 는 KST 달력 날짜 필터다. 미국 영업일 D 의 세션은 KST 로
-  D 22:30~D+1 05:00(EDT 기준)에 걸치므로 D+1 을 넣고 과거로
-  페이지네이션한다.
+- strt_dt 는 ET 달력 날짜 필터다. 거래일 D 를 그대로 넣으면 D 23:59
+  ET 에서 시작해 과거로 페이지네이션한다 (D+1 앵커 불필요).
 - 페이지 크기 실측 100행. 하루 세션(391행)은 항상 다페이지다.
 """
 
@@ -117,28 +121,55 @@ class SymbolMappingTests(unittest.TestCase):
                 validate_ticker(bad)
 
 
-class KiwoomUsBlockedTests(unittest.TestCase):
-    """2026-08-27 실계좌 실측: 키움 US 분봉은 데이터 계약 불일치.
+class EtLabelContractTests(unittest.TestCase):
+    """2026-08-28 확정 계약: cntr_tm=ET 라벨, strt_dt=ET 달력 D 앵커."""
 
-    AAPL 완결일(08-26) 전수 대조에서:
-    - 공통 82분 전부 종가 불일치 (예 09:31 KIS 309.39 vs 키움 310.99)
-    - 과거일(08-20) 시가: 야후 317.46 = KIS 317.46, 키움만 311.84
-      (독립 기준 2개가 일치, 키움만 반증됨)
-    - 거래량 비율 0.0004~0.002 (주수 단위가 아님, 26일 09:30 KIS
-      491,063주 vs 키움 171)
-    - 커버리지가 ET ~11:00 에서 절단 (완결일 82/391분)
-    계약이 규명·검증되기 전까지 US 요청은 거부한다. 추측 보정 금지.
-    """
+    def test_et_labels_and_session_filter(self):
+        server = PageServer([(_PAGE_1, "Y", "K1"), (_PAGE_2, None, None)])
+        ds = _run(_provider(server).fetch_bars(_request()))
+        # 18:05 애프터 행은 버려지고 정규장 4행(15:57~16:00)만 남는다.
+        self.assertEqual(
+            [b.start_at for b in ds.bars],
+            [datetime(2026, 8, 26, 15, 57, tzinfo=NY),
+             datetime(2026, 8, 26, 15, 58, tzinfo=NY),
+             datetime(2026, 8, 26, 15, 59, tzinfo=NY),
+             datetime(2026, 8, 26, 16, 0, tzinfo=NY)])
+        close_print = ds.bars[-1]
+        self.assertEqual(close_print.close, Decimal("225.4400"))
+        self.assertEqual(close_print.volume, 1250000)
+        self.assertEqual(ds.timezone, "America/New_York")
+        self.assertIn("정규장 밖 행 1개", " ".join(ds.warnings))
 
-    def test_us_fetch_is_rejected_as_unsupported(self):
+    def test_strt_dt_is_trading_date_itself(self):
+        server = PageServer([(_PAGE_1, "Y", "K1"), (_PAGE_2, None, None)])
+        _run(_provider(server).fetch_bars(_request()))
+        body = json.loads(server.chart_requests[0].content)
+        # ET 달력 필터: D+1 앵커가 아니라 거래일 그대로.
+        self.assertEqual(body["strt_dt"], "20260826")
+        self.assertEqual(body["stex_tp"], "ND")
+        self.assertEqual(body["exrt_appl_tp"], "0")
+
+    def test_stops_when_earlier_bus_dt_reached(self):
+        server = PageServer([(_PAGE_1, "Y", "K1"), (_PAGE_2, "Y", "K2")])
+        ds = _run(_provider(server).fetch_bars(_request()))
+        # page2 의 bus_dt=20260825 행에서 요청일 구간이 끝났음을 알고
+        # 더 페이지를 당기지 않는다.
+        self.assertEqual(len(server.chart_requests), 2)
+        self.assertTrue(ds.coverage["complete"])
+
+    def test_missing_symbol_blank_row_is_entity_not_found(self):
         from stock_mcp_server.market_data.kiwoom_client import KiwoomApiError
-        server = PageServer([])
+        blank = {"return_code": 0, "return_msg": "정상",
+                 "result_list": [{"cntr_tm": "", "bus_dt": "",
+                                  "cur_prc": "", "open_pric": "",
+                                  "high_pric": "", "low_pric": "",
+                                  "trde_qty": ""}]}
+        server = PageServer([(blank, None, None)])
         with self.assertRaises(KiwoomApiError) as ctx:
             _run(_provider(server).fetch_bars(_request()))
-        self.assertEqual(ctx.exception.provider_status, "unsupported")
-        self.assertEqual(server.chart_requests, [])
+        self.assertEqual(ctx.exception.provider_status, "entity_not_found")
 
-    def test_verifier_reports_us_unavailable_without_probe(self):
+    def test_verifier_probes_us_chart(self):
         from stock_mcp_server.market_data.kiwoom_verifier import (
             KiwoomVerifier,
         )
@@ -148,6 +179,8 @@ class KiwoomUsBlockedTests(unittest.TestCase):
             seen_paths.append(request.url.path)
             if request.url.path == "/oauth2/token":
                 return httpx.Response(200, json=_TOKEN)
+            if request.url.path == "/api/us/chart":
+                return httpx.Response(200, json=_PAGE_1)
             return httpx.Response(200, json={
                 "return_code": 0,
                 "stk_min_pole_chart_qry": [{"cur_prc": "+70000",
@@ -156,8 +189,9 @@ class KiwoomUsBlockedTests(unittest.TestCase):
         verifier = KiwoomVerifier(transport=httpx.MockTransport(handler))
         result = _run(verifier.verify(_payload(), "real"))
         self.assertEqual(result["auth"], "ok")
-        self.assertEqual(result["us_intraday"], "unavailable")
-        self.assertNotIn("/api/us/chart", seen_paths)
+        self.assertEqual(result["kr_intraday"], "available")
+        self.assertEqual(result["us_intraday"], "available")
+        self.assertIn("/api/us/chart", seen_paths)
 
 
 if __name__ == "__main__":
