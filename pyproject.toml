@@ -43,6 +43,9 @@ dependencies = [
     # 증권사 리포트 PDF 본문 추출(_pdf.py). pdftotext 계열은 한글이 통째로 날아가서
     # 쓰지 않는다 — 실측에서 pypdf 만 한글이 살아 나왔다.
     "pypdf>=4.0.0",
+    # 증권사 App Key·App Secret 은 OS 자격 증명 저장소에만 둔다(market_data).
+    # 평문 환경변수 fallback 을 기본 경로로 두지 않는다.
+    "keyring>=24,<26",
 ]
 
 [project.urls]
