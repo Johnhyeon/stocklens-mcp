@@ -62,20 +62,32 @@ class SecretSweepTests(unittest.TestCase):
         self.keyring = FakeKeyring()
         self.store = BrokerProfileStore(
             provider="kis", keyring_module=self.keyring, home=self.home)
+        self.service = broker_cli.BrokerService(
+            keyring_module=self.keyring, home=self.home)
 
     def tearDown(self):
         self._tmp.cleanup()
 
     def test_cli_all_actions_and_files_clean(self):
-        self.store.save_profile(
-            "real", BrokerCredentials(app_key=KEY, app_secret=SECRET))
+        from stock_mcp_server.market_data.provider_registry import registry
+        from stock_mcp_server.market_data.secrets import SecretPayload
+
+        payload = SecretPayload.from_schema(
+            registry.require("kis").credential_schema,
+            {"app_key": KEY, "app_secret": SECRET})
+        self.service.save_verified("kis", "real", payload, {
+            "auth": "ok", "kr_intraday": "available",
+            "us_intraday": "available"})
 
         requests = [
             {"action": "status"},
+            {"action": "describe_providers"},
             {"action": "switch_profile", "profile": "real"},
             {"action": "set_data_source_mode", "mode": "auto"},
+            {"action": "set_primary_provider"},
             {"action": "verify", "profile": "real",
              "credentials": {"app_key": KEY, "app_secret": SECRET}},
+            {"action": "recover_cleanup"},
             {"action": "disconnect_profile", "profile": "demo"},
             {"action": "disconnect_provider"},
             {"action": "format_disk"},
@@ -84,7 +96,7 @@ class SecretSweepTests(unittest.TestCase):
         for req in requests:
             full = {"contract_version": 1, "provider": "kis"}
             full.update(req)
-            resp = broker_cli.handle_request(full, store=self.store)
+            resp = broker_cli.handle_request(full, service=self.service)
             _assert_clean(self, json.dumps(resp, ensure_ascii=False),
                           f"CLI {req.get('action')}")
 

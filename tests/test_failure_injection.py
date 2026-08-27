@@ -68,43 +68,67 @@ class KeychainUnavailableTests(unittest.TestCase):
         return BrokerProfileStore(
             provider="kis", keyring_module=keyring, home=self.home)
 
+    def _service(self, keyring):
+        return broker_cli.BrokerService(keyring_module=keyring,
+                                        home=self.home)
+
+    def _save_kis(self, service, key="k", secret="s"):
+        from stock_mcp_server.market_data.provider_registry import registry
+        from stock_mcp_server.market_data.secrets import SecretPayload
+
+        payload = SecretPayload.from_schema(
+            registry.require("kis").credential_schema,
+            {"app_key": key, "app_secret": secret})
+        service.save_verified("kis", "real", payload, {
+            "auth": "ok", "kr_intraday": "available",
+            "us_intraday": "available"})
+
     def test_read_failure_raises_typed_error(self):
         store = self._store(DeadKeyring())
         with self.assertRaises(KeychainUnavailableError):
             store.load_profile("real")
 
     def test_cli_reports_keychain_unavailable_without_mutation(self):
-        store = self._store(DeadKeyring())
-        gen = load_state(self.home)["connection_generation"]
+        from stock_mcp_server.market_data.connection_state import (
+            load_state_v2,
+        )
+        service = self._service(DeadKeyring())
+        gen = load_state_v2(self.home)["routing_generation"]
         resp = broker_cli.handle_request(
             {"contract_version": 1, "action": "status", "provider": "kis"},
-            store=store)
+            service=service)
         self.assertFalse(resp["ok"])
         self.assertEqual(resp["error"]["code"], "keychain_unavailable")
-        self.assertEqual(load_state(self.home)["connection_generation"], gen)
+        self.assertEqual(
+            load_state_v2(self.home)["routing_generation"], gen)
 
     def test_disconnect_with_denied_delete_does_not_claim_removal(self):
+        from stock_mcp_server.market_data.connection_state import (
+            load_state_v2,
+        )
         keyring = DeleteDeniedKeyring()
-        store = self._store(keyring)
-        store.save_profile("real", BrokerCredentials(
-            app_key="k", app_secret="s"))
-        gen = load_state(self.home)["connection_generation"]
+        service = self._service(keyring)
+        self._save_kis(service)
 
         resp = broker_cli.handle_request(
             {"contract_version": 1, "action": "disconnect_provider",
-             "provider": "kis"}, store=store)
+             "provider": "kis"}, service=service)
         # 자격 증명이 남아 있다. ok 로 보고하면 안 된다.
         self.assertFalse(resp["ok"])
         self.assertEqual(resp["error"]["code"], "keychain_unavailable")
         self.assertEqual(len(keyring.entries), 1)  # 실제로 남아 있음
-        self.assertEqual(load_state(self.home)["connection_generation"], gen)
+        # disable 우선: 실패해도 이 공급자는 더 이상 요청에 쓰이지 않는다.
+        self.assertTrue(resp.get("provider_disabled"))
+        state = load_state_v2(self.home)
+        self.assertEqual(state["providers"]["kis"]["lifecycle"],
+                         "disabled_pending_cleanup")
 
     def test_disconnect_missing_entry_stays_idempotent(self):
-        store = self._store(FakeKeyring())
+        service = self._service(FakeKeyring())
         # 저장된 게 없는 상태의 해제는 여전히 조용히 성공한다.
         resp = broker_cli.handle_request(
             {"contract_version": 1, "action": "disconnect_provider",
-             "provider": "kis"}, store=store)
+             "provider": "kis"}, service=service)
         self.assertTrue(resp["ok"])
 
     def test_doctor_reports_unknown_not_false_negative(self):
@@ -155,8 +179,8 @@ class StatusAfterCommitFailureTests(unittest.TestCase):
 
     def test_verify_and_save_success_survives_status_failure(self):
         keyring = self._DiesAfterSet()
-        store = BrokerProfileStore(
-            provider="kis", keyring_module=keyring, home=self.home)
+        service = broker_cli.BrokerService(
+            keyring_module=keyring, home=self.home)
 
         class OkVerifier:
             async def verify(self, credentials, profile):
@@ -168,7 +192,7 @@ class StatusAfterCommitFailureTests(unittest.TestCase):
              "provider": "kis", "profile": "real",
              "credentials": {"app_key": "new-key",
                              "app_secret": "new-secret"}},
-            store=store,
+            service=service,
             verifier=broker_cli.make_cli_verifier(OkVerifier()))
 
         # 저장은 실제로 됐다 - 실패로 보고하면 안 된다.
@@ -179,17 +203,19 @@ class StatusAfterCommitFailureTests(unittest.TestCase):
         self.assertEqual(resp["status"]["active_profile"], "real")
         # keychain 에는 새 키가 실제로 저장돼 있다.
         keyring.dead = False
-        self.assertEqual(store.load_profile("real").app_key, "new-key")
+        self.assertEqual(
+            service.credentials.load_active("kis", "real").get("app_key"),
+            "new-key")
 
     def test_mode_change_success_survives_status_failure(self):
         keyring = self._DiesAfterSet()
-        store = BrokerProfileStore(
-            provider="kis", keyring_module=keyring, home=self.home)
+        service = broker_cli.BrokerService(
+            keyring_module=keyring, home=self.home)
         # set_data_source_mode 는 keychain 을 안 쓰지만 status() 가 쓴다.
         keyring.dead = True
         resp = broker_cli.handle_request(
             {"contract_version": 1, "action": "set_data_source_mode",
-             "provider": "kis", "mode": "auto"}, store=store)
+             "provider": "kis", "mode": "auto"}, service=service)
         self.assertTrue(resp["ok"], resp)
         self.assertTrue(resp.get("status_unavailable"))
         self.assertEqual(resp["status"]["data_source_mode"], "auto")
@@ -261,12 +287,16 @@ class NetworkFailureTests(unittest.TestCase):
 
 class CacheRemovalDeniedTests(unittest.TestCase):
     def test_cache_removal_failure_reported_honestly(self):
+        from stock_mcp_server.market_data.provider_registry import registry
+        from stock_mcp_server.market_data.secrets import SecretPayload
+
         with tempfile.TemporaryDirectory() as home:
-            store = BrokerProfileStore(
-                provider="kis", keyring_module=FakeKeyring(),
-                home=Path(home))
-            store.save_profile("real", BrokerCredentials(
-                app_key="k", app_secret="s"))
+            service = broker_cli.BrokerService(
+                keyring_module=FakeKeyring(), home=Path(home))
+            payload = SecretPayload.from_schema(
+                registry.require("kis").credential_schema,
+                {"app_key": "k", "app_secret": "s"})
+            service.save_verified("kis", "real", payload, {"auth": "ok"})
 
             class DenyingCache:
                 def remove_provider(self, provider):
@@ -275,7 +305,7 @@ class CacheRemovalDeniedTests(unittest.TestCase):
             resp = broker_cli.handle_request(
                 {"contract_version": 1, "action": "disconnect_provider",
                  "provider": "kis"},
-                store=store, cache=DenyingCache())
+                service=service, cache=DenyingCache())
             # 리뷰 지적(결함 3): Manager 는 ok 만 보고 전체 정리를
             # 계속한다. 캐시가 남았으면 ok=False 로 멈추게 한다.
             self.assertFalse(resp["ok"])

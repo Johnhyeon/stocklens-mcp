@@ -182,8 +182,8 @@ class CliCacheIntegrationTests(unittest.TestCase):
         self._tmp = tempfile.TemporaryDirectory()
         self.home = Path(self._tmp.name)
         self.keyring = FakeKeyring()
-        self.store = BrokerProfileStore(
-            provider="kis", keyring_module=self.keyring, home=self.home)
+        self.service = broker_cli.BrokerService(
+            keyring_module=self.keyring, home=self.home)
         self.cache = ProviderCache(home=self.home)
 
     def tearDown(self):
@@ -191,11 +191,19 @@ class CliCacheIntegrationTests(unittest.TestCase):
 
     def _handle(self, request):
         return broker_cli.handle_request(
-            request, store=self.store, cache=self.cache)
+            request, service=self.service, cache=self.cache)
+
+    def _save_real(self):
+        from stock_mcp_server.market_data.provider_registry import registry
+        from stock_mcp_server.market_data.secrets import SecretPayload
+
+        payload = SecretPayload.from_schema(
+            registry.require("kis").credential_schema,
+            {"app_key": "k", "app_secret": "s"})
+        self.service.save_verified("kis", "real", payload, {"auth": "ok"})
 
     def test_disconnect_provider_removes_kis_cache(self):
-        self.store.save_profile("real", BrokerCredentials(
-            app_key="k", app_secret="s"))
+        self._save_real()
         self.cache.put(_key(profile="real"), {"rows": [1]}, complete=True)
         self.cache.put(_key(profile="demo", market="US", venue="NAS",
                             symbol="AAPL"), {"rows": [2]}, complete=True)
@@ -211,8 +219,7 @@ class CliCacheIntegrationTests(unittest.TestCase):
         self.assertTrue(naver.exists())
 
     def test_disconnect_profile_keeps_cache(self):
-        self.store.save_profile("real", BrokerCredentials(
-            app_key="k", app_secret="s"))
+        self._save_real()
         self.cache.put(_key(profile="real"), {"rows": [1]}, complete=True)
         resp = self._handle({"contract_version": 1,
                              "action": "disconnect_profile",

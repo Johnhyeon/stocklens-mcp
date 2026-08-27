@@ -338,8 +338,12 @@ class CredentialStore:
                 if record.get("active_profile") == name:
                     record["active_profile"] = None
 
-        if record["profiles"]:
+        if failed:
+            # 부분 삭제. 다음 실행에서 재개할 수 있게 비활성으로 남긴다.
             record["lifecycle"] = "disabled_pending_cleanup"
+        if record["profiles"]:
+            # 남은 프로필이 쓰던 토큰·클라이언트를 폐기시킨다.
+            record["generation"] = int(record["generation"]) + 1
         else:
             del state["providers"][provider]
             if state["primary_provider"] == provider:

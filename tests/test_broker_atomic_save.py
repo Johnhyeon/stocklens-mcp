@@ -1,8 +1,9 @@
-"""verify_and_save 원자성 테스트 (Task 14).
+"""verify_and_save 원자성 테스트 (Task 14, 1.0 Task 6에서 v2 슬롯 포팅).
 
 - 최소 인증 게이트 통과 시에만 저장
 - 시장별 능력 결과를 상태 파일에 보존 (검증 안 된 시장을 available 로 주장 X)
-- 실패 시 기존 프로필·active pointer·상태 무변경
+- 실패 시 기존 활성 키·상태 무변경 (v2: pointer 교체 실패 = 이전 키 유지)
+- 능력 결과는 pointer 교체와 같은 한 번의 상태 쓰기에 실린다
 """
 
 from __future__ import annotations
@@ -12,15 +13,12 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from stock_mcp_server import broker_cli
-from stock_mcp_server.market_data.broker_profiles import (
-    BrokerCredentials,
-    BrokerProfileStore,
-)
-from stock_mcp_server.market_data.connection_state import load_state
+from stock_mcp_server.market_data.connection_state import load_state_v2
 
 SENTINEL_KEY = "PSA-SENTINEL-APP-KEY-555"
 SENTINEL_SECRET = "PSA-SENTINEL-APP-SECRET-555"
@@ -42,14 +40,12 @@ class FakeKeyring:
         del self.entries[(service, username)]
 
 
-class FakeVerifier:
-    def __init__(self, result):
-        self.result = result
-        self.calls = 0
-
-    async def verify(self, credentials, profile):
-        self.calls += 1
-        return self.result
+def _verifier(result, counter=None):
+    def _verify(provider, profile, payload):
+        if counter is not None:
+            counter.append(provider)
+        return dict(result)
+    return _verify
 
 
 class VerifyAndSaveTests(unittest.TestCase):
@@ -57,20 +53,23 @@ class VerifyAndSaveTests(unittest.TestCase):
         self._tmp = tempfile.TemporaryDirectory()
         self.home = Path(self._tmp.name)
         self.keyring = FakeKeyring()
-        self.store = BrokerProfileStore(
-            provider="kis", keyring_module=self.keyring, home=self.home)
+        self.service = broker_cli.BrokerService(
+            keyring_module=self.keyring, home=self.home)
 
     def tearDown(self):
         self._tmp.cleanup()
 
     def _handle(self, action, verifier_result, profile="real",
                 key=SENTINEL_KEY, secret=SENTINEL_SECRET):
-        verifier = broker_cli.make_cli_verifier(FakeVerifier(verifier_result))
         return broker_cli.handle_request(
             {"contract_version": 1, "action": action, "provider": "kis",
              "profile": profile,
              "credentials": {"app_key": key, "app_secret": secret}},
-            store=self.store, verifier=verifier)
+            service=self.service, verifier=_verifier(verifier_result))
+
+    def _active_key(self, profile="real"):
+        payload = self.service.credentials.load_active("kis", profile)
+        return payload.get("app_key") if payload else None
 
     def test_verify_reports_without_saving(self):
         resp = self._handle("verify", {
@@ -78,7 +77,7 @@ class VerifyAndSaveTests(unittest.TestCase):
             "us_intraday": "available"})
         self.assertTrue(resp["ok"])
         self.assertEqual(resp["verification"]["kr_intraday"], "available")
-        self.assertFalse(self.store.has_profile("real"))
+        self.assertFalse(self.service.has_profile("kis", "real"))
         text = json.dumps(resp, ensure_ascii=False)
         self.assertNotIn(SENTINEL_KEY, text)
         self.assertNotIn(SENTINEL_SECRET, text)
@@ -88,11 +87,12 @@ class VerifyAndSaveTests(unittest.TestCase):
             "auth": "ok", "kr_intraday": "available",
             "us_intraday": "unavailable"})
         self.assertTrue(resp["ok"])
-        self.assertTrue(self.store.has_profile("real"))
+        self.assertTrue(self.service.has_profile("kis", "real"))
 
-        state = load_state(self.home)
-        self.assertEqual(state["active_profile"], "real")
-        caps = state["capability_results"]["real"]
+        state = load_state_v2(self.home)
+        kis = state["providers"]["kis"]
+        self.assertEqual(kis["active_profile"], "real")
+        caps = kis["profiles"]["real"]["capabilities"]
         self.assertEqual(caps["kr_intraday"], "available")
         # 검증 안 된 시장을 available 로 주장하지 않는다.
         self.assertEqual(caps["us_intraday"], "unavailable")
@@ -102,9 +102,10 @@ class VerifyAndSaveTests(unittest.TestCase):
         self.assertNotIn(SENTINEL_SECRET, raw)
 
     def test_auth_failure_saves_nothing(self):
-        self.store.save_profile("real", BrokerCredentials(
-            app_key="old-key", app_secret="old-secret"))
-        gen = load_state(self.home)["connection_generation"]
+        self._handle("verify_and_save", {
+            "auth": "ok", "kr_intraday": "available",
+            "us_intraday": "available"}, key="old-key", secret="old-secret")
+        gen = load_state_v2(self.home)["routing_generation"]
 
         resp = self._handle("verify_and_save", {
             "auth": "credential_invalid", "kr_intraday": "unverified",
@@ -112,72 +113,61 @@ class VerifyAndSaveTests(unittest.TestCase):
         self.assertFalse(resp["ok"])
         self.assertEqual(resp["error"]["code"], "credential_invalid")
 
-        # 기존 프로필과 generation 이 그대로다.
-        old = self.store.load_profile("real")
-        self.assertEqual(old.app_key, "old-key")
-        self.assertEqual(load_state(self.home)["connection_generation"], gen)
+        # 기존 활성 키와 generation 이 그대로다.
+        self.assertEqual(self._active_key(), "old-key")
+        self.assertEqual(load_state_v2(self.home)["routing_generation"], gen)
 
-    def test_no_second_state_write_capability_saved_atomically(self):
-        """리뷰 지적: verify_and_save 가 상태 파일을 두 번 써서, 두 번째
-        (capability) 저장 실패가 keyring 원복 범위 밖이었다.
+    def test_capabilities_land_in_same_write_as_pointer_switch(self):
+        """v1 리뷰 지적의 v2 계승: 능력 결과가 pointer 교체와 다른 쓰기로
+        찢어지면 그 실패가 트랜잭션 밖이 된다. commit 이후 상태 스냅샷
+        하나에 pointer 와 capability 가 함께 있어야 한다."""
+        self._handle("verify_and_save", {
+            "auth": "ok", "kr_intraday": "available",
+            "us_intraday": "available"}, key="new-key", secret="new-secret")
+        state = load_state_v2(self.home)
+        record = state["providers"]["kis"]["profiles"]["real"]
+        self.assertIsNotNone(record["credential_ref"])
+        self.assertNotEqual(record["credential_ref"], "legacy")
+        self.assertEqual(record["capabilities"]["kr_intraday"], "available")
+        self.assertTrue(record["verified"])
+        # pending 트랜잭션 기록도 같은 쓰기에서 정리됐다.
+        self.assertEqual(state["pending_operations"], [])
 
-        수정 후 계약: capability 는 save_profile 의 원자 쓰기에 포함되고
-        CLI 는 connection_state.save_state 를 직접 부르지 않는다. 이
-        테스트는 CLI 경로의 save_state 를 죽여놓고도 저장이 성공하며
-        capability 까지 기록됨을 요구한다 (두 번째 쓰기 부재 증명).
-        """
-        from unittest.mock import patch
-        from stock_mcp_server.market_data import connection_state
+    def test_pointer_write_failure_keeps_old_key_and_capabilities(self):
+        # 이전 저장 성공
+        self._handle("verify_and_save", {
+            "auth": "ok", "kr_intraday": "available",
+            "us_intraday": "available"}, key="old-key", secret="old-secret")
+        old_state = load_state_v2(self.home)
 
-        self.store.save_profile("real", BrokerCredentials(
-            app_key="old-key", app_secret="old-secret"))
-
-        # broker_profiles 는 자기 모듈 참조를 쓰므로 영향받지 않고,
-        # CLI 가 두 번째 쓰기를 시도하면 여기서 터진다.
-        with patch.object(connection_state, "save_state",
-                          side_effect=PermissionError("state locked")):
+        # commit 의 상태 쓰기를 죽인다.
+        with patch(
+                "stock_mcp_server.market_data.credential_store.save_state_v2",
+                side_effect=PermissionError("state locked")):
             resp = self._handle("verify_and_save", {
-                "auth": "ok", "kr_intraday": "available",
-                "us_intraday": "available"},
-                key="new-key", secret="new-secret")
-
-        self.assertTrue(resp["ok"], resp)
-        stored = self.store.load_profile("real")
-        self.assertEqual(stored.app_key, "new-key")
-        state = load_state(self.home)
-        self.assertEqual(
-            state["capability_results"]["real"]["kr_intraday"], "available")
-
-    def test_first_write_failure_still_rolls_back_key(self):
-        # 하나로 합친 뒤에도 그 유일한 쓰기가 실패하면 keyring 원복.
-        from unittest.mock import patch
-        from stock_mcp_server.market_data import broker_profiles
-
-        self.store.save_profile("real", BrokerCredentials(
-            app_key="old-key", app_secret="old-secret"))
-        gen = load_state(self.home)["connection_generation"]
-
-        with patch.object(broker_profiles, "save_state",
-                          side_effect=PermissionError("state locked")):
-            resp = self._handle("verify_and_save", {
-                "auth": "ok", "kr_intraday": "available",
+                "auth": "ok", "kr_intraday": "limited",
                 "us_intraday": "available"},
                 key="new-key", secret="new-secret")
 
         self.assertFalse(resp["ok"])
-        self.assertEqual(self.store.load_profile("real").app_key, "old-key")
-        self.assertEqual(load_state(self.home)["connection_generation"], gen)
-        self.assertNotIn("capability_results", load_state(self.home))
+        # 기존 활성 키 유지, 능력 결과도 이전 그대로다.
+        self.assertEqual(self._active_key(), "old-key")
+        state = load_state_v2(self.home)
+        self.assertEqual(
+            state["providers"]["kis"]["profiles"]["real"]["capabilities"],
+            old_state["providers"]["kis"]["profiles"]["real"]["capabilities"])
 
     def test_limited_demo_is_recorded_as_is(self):
         resp = self._handle("verify_and_save", {
             "auth": "ok", "kr_intraday": "limited",
             "us_intraday": "unavailable"}, profile="demo")
         self.assertTrue(resp["ok"])
-        state = load_state(self.home)
-        self.assertEqual(state["capability_results"]["demo"]["kr_intraday"],
-                         "limited")
-        self.assertEqual(state["active_profile"], "demo")
+        state = load_state_v2(self.home)
+        kis = state["providers"]["kis"]
+        self.assertEqual(
+            kis["profiles"]["demo"]["capabilities"]["kr_intraday"],
+            "limited")
+        self.assertEqual(kis["active_profile"], "demo")
 
 
 if __name__ == "__main__":

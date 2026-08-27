@@ -1,9 +1,11 @@
 """stocklens-broker: 증권사 연결 관리 CLI.
 
 Manager 가 이 명령을 `--json --non-interactive --stdin` 으로 호출한다.
-비밀값(App Key·App Secret)은 stdin JSON 으로만 받는다. 명령행 인자,
-로그, 오류, 응답에 비밀값을 싣지 않는다.
+비밀값은 stdin JSON 으로만 받는다. 명령행 인자, 로그, 오류, 응답에
+비밀값을 싣지 않는다.
 
+1.0: 공급자 목록·credential schema 는 Provider Registry 가 단일 출처다.
+상태는 connection state v2, 자격 증명은 버전 keyring 슬롯을 쓴다.
 응답은 JSON 문서 하나다. JSON 뒤에 사람용 텍스트를 덧붙이지 않는다.
 """
 
@@ -11,27 +13,183 @@ from __future__ import annotations
 
 import json
 import sys
+from pathlib import Path
 
 from stock_mcp_server.market_data.broker_profiles import (
-    BrokerCredentials,
-    BrokerProfileStore,
     KeychainUnavailableError,
-    PROFILES,
+)
+from stock_mcp_server.market_data.connection_state import (
+    DATA_SOURCE_MODES,
+    load_state_v2,
+    save_state_v2,
+    set_primary_v2,
+)
+from stock_mcp_server.market_data.credential_store import (
+    CleanupReport,
+    CredentialStore,
+)
+from stock_mcp_server.market_data.provider_registry import (
+    UnknownProviderError,
+    registry,
+)
+from stock_mcp_server.market_data.secrets import (
+    SecretPayload,
+    SecretValidationError,
 )
 
 CONTRACT_VERSION = 1
 
-SUPPORTED_PROVIDERS = ("kis",)
-
 ACTIONS = (
     "status",
+    "describe_providers",
     "verify",
     "verify_and_save",
     "switch_profile",
     "disconnect_profile",
     "disconnect_provider",
     "set_data_source_mode",
+    "set_primary_provider",
+    "recover_cleanup",
 )
+
+
+class BrokerService:
+    """CLI 액션이 쓰는 v2 상태·자격 증명 서비스."""
+
+    def __init__(self, keyring_module=None,
+                 home: Path | str | None = None) -> None:
+        self.credentials = CredentialStore(
+            keyring_module=keyring_module, home=home)
+        self._home = home
+
+    @property
+    def home(self) -> Path | str | None:
+        return self._home
+
+    def state(self) -> dict:
+        return load_state_v2(self._home)
+
+    # --- 조회 ---
+
+    def has_profile(self, provider: str, profile: str) -> bool:
+        """keyring 기준 설정 여부. 상태 파일이 지워져도 슬롯을 찾는다."""
+        state = self.state()
+        record = (state["providers"].get(provider) or {}).get(
+            "profiles", {}).get(profile) or {}
+        usernames = []
+        ref = record.get("credential_ref")
+        if ref:
+            usernames.append(
+                self.credentials._username(provider, profile, ref))
+        legacy = f"{provider}:{profile}"
+        if legacy not in usernames:
+            usernames.append(legacy)
+        for username in usernames:
+            if self.credentials._get_raw(provider, username):
+                return True
+        return False
+
+    def status(self, provider: str) -> dict:
+        """비밀 없는 상태 요약. keyring 불가 시 KeychainUnavailableError."""
+        descriptor = registry.require(provider)
+        state = self.state()
+        profiles = {
+            p: {"configured": self.has_profile(provider, p)}
+            for p in descriptor.supported_profiles
+        }
+        return self._status_from_state(state, provider, profiles)
+
+    def minimal_status(self, provider: str) -> dict:
+        """상태 파일만으로 만드는 최소 상태. configured 를 단정하지 않는다."""
+        return self._status_from_state(self.state(), provider, {})
+
+    def _status_from_state(self, state: dict, provider: str,
+                           profiles: dict) -> dict:
+        record = state["providers"].get(provider) or {}
+        capability_results = {
+            name: dict(rec.get("capabilities") or {})
+            for name, rec in record.get("profiles", {}).items()
+        }
+        primary = state["primary_provider"]
+        primary_record = state["providers"].get(primary) if primary else None
+        return {
+            "provider": provider,
+            # v1 호환 필드. active_provider 는 주 사용 증권사를 뜻한다.
+            "connection_generation": state["routing_generation"],
+            "active_provider": primary,
+            "active_profile": (primary_record or {}).get("active_profile"),
+            "data_source_mode": state["data_source_mode"],
+            "profiles": profiles,
+            "capability_results": capability_results,
+            # 1.0 추가 필드 (additive)
+            "primary_provider": primary,
+            "providers": {
+                pid: {
+                    "lifecycle": rec["lifecycle"],
+                    "active_profile": rec["active_profile"],
+                    "generation": rec["generation"],
+                    "verified_profiles": sorted(
+                        name for name, prec in rec["profiles"].items()
+                        if prec.get("verified")),
+                }
+                for pid, rec in state["providers"].items()
+            },
+        }
+
+    # --- 변경 ---
+
+    def save_verified(self, provider: str, profile: str,
+                      payload: SecretPayload, verification: dict) -> None:
+        """검증 통과한 자격 증명을 슬롯 트랜잭션으로 저장한다."""
+        pending = self.credentials.stage(provider, profile, payload)
+        self.credentials.commit(pending, verification)
+
+    def switch_profile(self, provider: str, profile: str) -> None:
+        state = self.state()
+        record = state["providers"].get(provider)
+        if record is None or profile not in record["profiles"]:
+            raise ValueError(f"프로필 {profile}이(가) 설정되어 있지 않습니다")
+        record["active_profile"] = profile
+        record["generation"] = int(record["generation"]) + 1
+        state["routing_generation"] = int(state["routing_generation"]) + 1
+        save_state_v2(state, self._home)
+
+    def set_data_source_mode(self, mode: str) -> None:
+        if mode not in DATA_SOURCE_MODES:
+            raise ValueError(f"지원하지 않는 data_source_mode: {mode}")
+        state = self.state()
+        state["data_source_mode"] = mode
+        state["routing_generation"] = int(state["routing_generation"]) + 1
+        save_state_v2(state, self._home)
+
+    def set_primary(self, provider: str) -> None:
+        save_state_v2(set_primary_v2(self.state(), provider), self._home)
+
+    def disconnect_profile(self, provider: str,
+                           profile: str) -> CleanupReport:
+        return self.credentials.cleanup_disabled(provider, profile)
+
+    def disconnect_provider(self, provider: str) -> CleanupReport:
+        """disable 우선 해제. 실패해도 provider 는 요청에 쓰이지 않는다."""
+        state = self.state()
+        record = state["providers"].get(provider)
+        active = (record or {}).get("active_profile")
+        if record is not None:
+            self.credentials.disable_profile(provider, active or "")
+        return self.credentials.cleanup_disabled(provider, None)
+
+    def recover(self) -> CleanupReport:
+        """중단된 자격 증명 트랜잭션·미완 삭제를 재개한다."""
+        pending_report = self.credentials.recover_pending()
+        removed = list(pending_report.removed)
+        failed = list(pending_report.failed)
+        state = self.state()
+        for provider, record in list(state["providers"].items()):
+            if record["lifecycle"] == "disabled_pending_cleanup":
+                report = self.credentials.cleanup_disabled(provider, None)
+                removed.extend(report.removed)
+                failed.extend(report.failed)
+        return CleanupReport(removed=tuple(removed), failed=tuple(failed))
 
 
 def _error(code: str, message: str) -> dict:
@@ -42,30 +200,19 @@ def _error(code: str, message: str) -> dict:
     }
 
 
-def _safe_status(store: BrokerProfileStore) -> tuple[dict, bool]:
+def _safe_status(service: BrokerService, provider: str) -> tuple[dict, bool]:
     """(status, unavailable). 커밋이 끝난 뒤의 상태 재조회 실패는 작업
-    실패가 아니다 (리뷰 지적) - keychain 을 못 읽으면 상태 파일 기반의
-    최소 상태로 대신한다."""
+    실패가 아니다 - keyring 을 못 읽으면 상태 파일 기반 최소 상태로
+    대신한다."""
     try:
-        return store.status(), False
+        return service.status(provider), False
     except Exception:  # noqa: BLE001
-        from stock_mcp_server.market_data.connection_state import load_state
-
-        state = load_state(store.home)
-        return {
-            "provider": store.provider,
-            "connection_generation": state["connection_generation"],
-            "active_provider": state["active_provider"],
-            "active_profile": state["active_profile"],
-            "data_source_mode": state["data_source_mode"],
-            # keychain 을 못 읽어 configured 여부를 모른다. 거짓 단정 금지.
-            "profiles": {},
-            "capability_results": state.get("capability_results") or {},
-        }, True
+        return service.minimal_status(provider), True
 
 
-def _ok(action: str, store: BrokerProfileStore, extra: dict | None = None) -> dict:
-    status, unavailable = _safe_status(store)
+def _ok(action: str, service: BrokerService, provider: str,
+        extra: dict | None = None) -> dict:
+    status, unavailable = _safe_status(service, provider)
     resp = {
         "ok": True,
         "contract_version": CONTRACT_VERSION,
@@ -82,24 +229,10 @@ def _ok(action: str, store: BrokerProfileStore, extra: dict | None = None) -> di
     return resp
 
 
-def _parse_credentials(request: dict) -> BrokerCredentials | None:
-    raw = request.get("credentials")
-    if not isinstance(raw, dict):
-        return None
-    app_key = raw.get("app_key")
-    app_secret = raw.get("app_secret")
-    if not isinstance(app_key, str) or not isinstance(app_secret, str):
-        return None
-    if not app_key.strip() or not app_secret.strip():
-        return None
-    return BrokerCredentials(
-        app_key=app_key.strip(), app_secret=app_secret.strip())
-
-
 def handle_request(
     request: dict,
     *,
-    store: BrokerProfileStore | None = None,
+    service: BrokerService | None = None,
     verifier=None,
     cache=None,
 ) -> dict:
@@ -117,55 +250,80 @@ def handle_request(
         return _error("unknown_action", f"지원하지 않는 action입니다: {action}")
 
     provider = request.get("provider")
-    if provider not in SUPPORTED_PROVIDERS:
+    try:
+        descriptor = registry.require(provider)
+    except UnknownProviderError:
         return _error(
             "invalid_request",
-            f"지원하지 않는 provider입니다 (지원: {SUPPORTED_PROVIDERS})")
+            f"지원하지 않는 provider입니다 (지원: {registry.ids()})")
 
-    if store is None:
-        store = _default_store(provider)
+    if service is None:
+        service = _default_service()
 
     try:
+        if action == "describe_providers":
+            # 레지스트리 공개 계약. keyring 을 건드리지 않는다.
+            return {
+                "ok": True,
+                "contract_version": CONTRACT_VERSION,
+                "action": action,
+                "providers": registry.describe_public(),
+            }
+
         if action == "status":
-            # 순수 조회는 keychain 을 못 읽으면 답 자체가 없다 - 최소
+            # 순수 조회는 keyring 을 못 읽으면 답 자체가 없다 - 최소
             # 상태로 눙치지 않고 keychain_unavailable 로 보고한다.
             # (커밋이 있는 액션들은 _ok 가 커밋 성공을 보존한다.)
             return {
                 "ok": True,
                 "contract_version": CONTRACT_VERSION,
                 "action": action,
-                "status": store.status(),
+                "status": service.status(provider),
             }
 
         if action == "switch_profile":
             profile = request.get("profile")
-            if profile not in PROFILES:
+            if profile not in descriptor.supported_profiles:
                 return _error("invalid_request", "profile이 올바르지 않습니다")
-            if not store.has_profile(profile):
+            try:
+                service.switch_profile(provider, profile)
+            except ValueError:
                 return _error(
                     "profile_not_configured",
                     f"프로필 {profile}이(가) 설정되어 있지 않습니다")
-            store.switch_profile(profile)
-            return _ok(action, store)
+            return _ok(action, service, provider)
 
         if action == "disconnect_profile":
             profile = request.get("profile")
-            if profile not in PROFILES:
+            if profile not in descriptor.supported_profiles:
                 return _error("invalid_request", "profile이 올바르지 않습니다")
-            store.disconnect_profile(profile)
-            return _ok(action, store)
+            report = service.disconnect_profile(provider, profile)
+            if report.failed:
+                return _error(
+                    "keychain_unavailable",
+                    "자격 증명을 삭제할 수 없습니다. 프로필은 비활성 "
+                    "상태로 남았고 다음 시도에서 정리를 재개합니다.")
+            return _ok(action, service, provider)
 
         if action == "disconnect_provider":
-            store.disconnect_provider()
-            # KIS 전체 연결 해제 때만 공급자 분봉 캐시 전체를 삭제한다.
-            # 현재 환경(disconnect_profile) 해제는 캐시를 유지한다.
+            report = service.disconnect_provider(provider)
+            if report.failed:
+                # 부분 삭제를 성공으로 보고하지 않는다. provider 는 이미
+                # 비활성이라 요청에 쓰이지 않는다 (disable 우선, 11.4).
+                resp = _error(
+                    "keychain_unavailable",
+                    "자격 증명 일부를 삭제할 수 없습니다. 연결은 비활성 "
+                    "상태이며 다음 시도에서 정리를 재개합니다.")
+                resp["provider_disabled"] = True
+                resp["cleanup_required"] = True
+                resp["status"], _ = _safe_status(service, provider)
+                return resp
+            # 자격 증명 정리에 성공했을 때만 공급자 분봉 캐시를 지운다.
             if cache is None:
                 from stock_mcp_server.market_data.provider_cache import (
                     ProviderCache,
                 )
-                # store 가 보는 홈과 같은 홈의 캐시를 지운다. 테스트가 tmp 홈
-                # store 를 주입하면 캐시도 tmp 홈만 본다.
-                cache = ProviderCache(home=store.home)
+                cache = ProviderCache(home=service.home)
             try:
                 cache.remove_provider(provider)
             except Exception as exc:  # noqa: BLE001
@@ -179,36 +337,72 @@ def handle_request(
                 resp["credentials_removed"] = True
                 resp["cache_removed"] = False
                 resp["cache_error"] = type(exc).__name__
-                resp["status"], _ = _safe_status(store)
+                resp["status"], _ = _safe_status(service, provider)
                 return resp
-            return _ok(action, store, extra={"cache_removed": True})
+            return _ok(action, service, provider,
+                       extra={"cache_removed": True})
 
         if action == "set_data_source_mode":
             mode = request.get("mode")
             try:
-                store.set_data_source_mode(mode)
+                service.set_data_source_mode(mode)
             except ValueError:
                 return _error(
                     "invalid_request", "data_source_mode가 올바르지 않습니다")
-            return _ok(action, store)
+            return _ok(action, service, provider)
+
+        if action == "set_primary_provider":
+            try:
+                service.set_primary(provider)
+            except ValueError:
+                return _error(
+                    "provider_not_verified",
+                    "검증된 연결이 있는 공급자만 주 사용 증권사로 지정할 "
+                    "수 있습니다.")
+            return _ok(action, service, provider)
+
+        if action == "recover_cleanup":
+            report = service.recover()
+            return _ok(action, service, provider, extra={
+                "recovered": {
+                    "removed": list(report.removed),
+                    "failed": list(report.failed),
+                },
+            })
 
         # verify / verify_and_save
         profile = request.get("profile")
-        if profile not in PROFILES:
+        if profile not in descriptor.supported_profiles:
             return _error("invalid_request", "profile이 올바르지 않습니다")
-        credentials = _parse_credentials(request)
-        if credentials is None:
-            return _error(
-                "invalid_request",
-                "credentials.app_key와 credentials.app_secret이 필요합니다")
+        try:
+            payload = SecretPayload.from_request(
+                descriptor.credential_schema, request.get("credentials"))
+        except SecretValidationError:
+            fields = ", ".join(
+                f"credentials.{f.name}" for f in descriptor.credential_schema)
+            return _error("invalid_request", f"{fields}이(가) 필요합니다")
+
         if verifier is None:
-            # 네트워크 검증기는 이후 단계에서 주입된다. 저장 없이 통제된 실패.
             return _error(
                 "verifier_unavailable",
                 "연결 시험 기능이 아직 활성화되지 않았습니다")
-        return verifier(
-            action=action, store=store, profile=profile,
-            credentials=credentials)
+        result = verifier(provider, profile, payload)
+        if result is None:
+            return _error(
+                "verifier_unavailable",
+                f"{descriptor.display_name} 연결 시험 기능이 아직 "
+                "활성화되지 않았습니다")
+        if result.get("auth") != "ok":
+            return _error(
+                "credential_invalid",
+                "인증에 실패했습니다. 키를 다시 확인하세요.")
+        if action == "verify":
+            return _ok(action, service, provider,
+                       extra={"verification": result})
+
+        service.save_verified(provider, profile, payload, result)
+        return _ok(action, service, provider,
+                   extra={"verification": result})
     except KeychainUnavailableError as exc:
         # 실제 상태를 모른다. 저장 안 됨·삭제 완료로 단정하지 않는다.
         return _error("keychain_unavailable", str(exc))
@@ -218,40 +412,31 @@ def handle_request(
 
 
 def make_cli_verifier(kis_verifier):
-    """KisVerifier 를 handle_request 가 기대하는 callable 로 감싼다.
+    """KisVerifier 를 handle_request 의 verifier 계약으로 감싼다.
 
-    - verify: 저장 없이 능력 결과만 보고
-    - verify_and_save: 인증 게이트 통과 시에만 keyring 저장 + 상태 파일에
-      시장별 능력 결과 기록. 실패 시 어떤 것도 바꾸지 않는다.
+    verifier(provider, profile, payload) -> 검증 결과 dict | None.
+    None 은 "이 공급자의 검증기가 아직 없다"는 뜻이다 (kiwoom·toss 는
+    해당 어댑터 Task 에서 연결된다).
     """
     import asyncio
 
-    def _verifier(*, action, store, profile, credentials):
-        result = asyncio.run(kis_verifier.verify(credentials, profile))
+    from stock_mcp_server.market_data.broker_profiles import (
+        BrokerCredentials,
+    )
 
-        if result.get("auth") != "ok":
-            return _error(
-                "credential_invalid",
-                "App Key 또는 App Secret 인증에 실패했습니다. "
-                "키를 다시 확인하세요.")
-
-        if action == "verify":
-            return _ok(action, store, extra={"verification": result})
-
-        # verify_and_save: keyring·active·capability 를 store 의 단일
-        # 원자 쓰기로 저장한다. 두 번째 상태 쓰기를 여기서 하면 그
-        # 실패가 keyring 원복 범위 밖이 된다 (리뷰 지적).
-        store.save_profile(profile, credentials, capability_results={
-            "kr_intraday": result["kr_intraday"],
-            "us_intraday": result["us_intraday"],
-        })
-        return _ok(action, store, extra={"verification": result})
+    def _verifier(provider, profile, payload):
+        if provider != "kis":
+            return None
+        credentials = BrokerCredentials(
+            app_key=payload.get("app_key"),
+            app_secret=payload.get("app_secret"))
+        return asyncio.run(kis_verifier.verify(credentials, profile))
 
     return _verifier
 
 
-def _default_store(provider: str = "kis") -> BrokerProfileStore:
-    return BrokerProfileStore(provider=provider)
+def _default_service() -> BrokerService:
+    return BrokerService()
 
 
 def _interactive_main() -> int:
@@ -261,11 +446,12 @@ def _interactive_main() -> int:
 
     from stock_mcp_server.market_data.kis_verifier import KisVerifier
 
+    profiles = registry.require("kis").supported_profiles
     print("한국투자증권(KIS) Open API 연결")
     print("비밀값은 입력 중 화면에 표시되지 않으며 OS 자격 증명 저장소에만"
           " 저장됩니다.")
     profile = input("프로필 [real/demo] (기본 real): ").strip() or "real"
-    if profile not in PROFILES:
+    if profile not in profiles:
         print("real 또는 demo만 지원합니다.")
         return 2
     app_key = getpass.getpass("App Key: ").strip()
@@ -314,13 +500,10 @@ def main(argv: list[str] | None = None) -> int:
             ensure_ascii=False))
         return 2
 
-    provider = request.get("provider") if isinstance(request, dict) else None
-    store = None
-    if provider in SUPPORTED_PROVIDERS:
-        store = _default_store(provider)
     from stock_mcp_server.market_data.kis_verifier import KisVerifier
     response = handle_request(
-        request, store=store, verifier=make_cli_verifier(KisVerifier()))
+        request, service=_default_service(),
+        verifier=make_cli_verifier(KisVerifier()))
     print(json.dumps(response, ensure_ascii=False))
     return 0 if response.get("ok") else 1
 

@@ -55,6 +55,24 @@ class SecretPayload:
             cleaned[field.name] = raw
         return cls(cleaned)
 
+    @classmethod
+    def from_request(
+        cls,
+        schema: tuple["CredentialField", ...],
+        values: object,
+    ) -> "SecretPayload":
+        """CLI stdin 요청의 credentials 객체를 검증해 payload 로 만든다.
+
+        문자열 값의 앞뒤 공백만 정리한다. 그 외 규칙은 from_schema 와 같다.
+        """
+        if not isinstance(values, dict):
+            raise SecretValidationError("credentials는 JSON 객체여야 합니다")
+        trimmed = {
+            key: (value.strip() if isinstance(value, str) else value)
+            for key, value in values.items()
+        }
+        return cls.from_schema(schema, trimmed)
+
     def get(self, name: str) -> str:
         try:
             return self._values[name]
