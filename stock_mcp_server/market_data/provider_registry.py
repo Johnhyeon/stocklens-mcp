@@ -116,6 +116,7 @@ _KIWOOM = ProviderDescriptor(
     allowed_paths=(
         "/oauth2/token",
         "/api/dostk/chart",
+        "/api/us/chart",
     ),
     credential_schema=(
         CredentialField(name="app_key", label="앱 키"),
@@ -131,6 +132,8 @@ _KIWOOM = ProviderDescriptor(
     endpoints=(
         EndpointSpec("token", "POST", "/oauth2/token"),
         EndpointSpec("kr_chart", "POST", "/api/dostk/chart"),
+        # 공식 스펙(usa06011): 미국주식 분 차트. POST /api/us/chart
+        EndpointSpec("us_chart", "POST", "/api/us/chart"),
     ),
 )
 

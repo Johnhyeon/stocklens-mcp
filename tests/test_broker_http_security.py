@@ -46,7 +46,7 @@ class EndpointMappingTests(unittest.TestCase):
         self.assertEqual(ids, {"token", "kr_minute", "us_minute"})
         kiwoom = registry.require("kiwoom")
         self.assertEqual({e.endpoint_id for e in kiwoom.endpoints},
-                         {"token", "kr_chart"})
+                         {"token", "kr_chart", "us_chart"})
         toss = registry.require("toss")
         self.assertEqual({e.endpoint_id for e in toss.endpoints},
                          {"token", "candles"})
