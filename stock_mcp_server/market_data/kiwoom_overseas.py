@@ -192,6 +192,11 @@ class KiwoomOverseasProvider:
             code = payload.get("return_code")
             if code not in (0, "0", None):
                 if not bars:
+                    # 실측(2026-08-28): 없는 종목은 return_code 7 +
+                    # return_msg 내부 코드 1903(종목 정보가 없습니다).
+                    msg = str(payload.get("return_msg") or "")
+                    if code in (7, "7") and "[1903:" in msg:
+                        raise KiwoomApiError("entity_not_found")
                     raise KiwoomApiError("provider_unavailable")
                 complete = False
                 failure_status = "provider_unavailable"

@@ -157,6 +157,30 @@ class EtLabelContractTests(unittest.TestCase):
         self.assertEqual(len(server.chart_requests), 2)
         self.assertTrue(ds.coverage["complete"])
 
+    def test_unknown_symbol_code7_1903_is_entity_not_found(self):
+        # 실측(2026-08-28): 없는 종목은 return_code 7 + return_msg 에
+        # 내부 코드 1903(종목 정보가 없습니다)이 온다.
+        from stock_mcp_server.market_data.kiwoom_client import KiwoomApiError
+        resp = {"return_code": 7,
+                "return_msg": ("서비스를 처리하는 중에 오류가 발생했습니다"
+                               "[1903:종목 정보가 없습니다. 입력한 "
+                               "종목코드, 거래소구분 값을 확인바랍니다.]"),
+                "result_list": []}
+        server = PageServer([(resp, None, None)])
+        with self.assertRaises(KiwoomApiError) as ctx:
+            _run(_provider(server).fetch_bars(_request()))
+        self.assertEqual(ctx.exception.provider_status, "entity_not_found")
+
+    def test_generic_code7_stays_provider_unavailable(self):
+        from stock_mcp_server.market_data.kiwoom_client import KiwoomApiError
+        resp = {"return_code": 7, "return_msg": "일시적인 오류",
+                "result_list": []}
+        server = PageServer([(resp, None, None)])
+        with self.assertRaises(KiwoomApiError) as ctx:
+            _run(_provider(server).fetch_bars(_request()))
+        self.assertEqual(ctx.exception.provider_status,
+                         "provider_unavailable")
+
     def test_missing_symbol_blank_row_is_entity_not_found(self):
         from stock_mcp_server.market_data.kiwoom_client import KiwoomApiError
         blank = {"return_code": 0, "return_msg": "정상",
