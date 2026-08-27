@@ -1397,6 +1397,38 @@ def _looks_like_etf(name: str) -> bool:
     return any(upper.startswith(p) for p in _ETF_NAME_PREFIXES)
 
 
+# 공시 제목 -> 사건 유형(SL-14). 순서가 우선순위다 - 행정 안내("가격제한폭
+# 확대요건 도달")가 기업 공시보다 먼저 걸러져야 반응 습관 집계가 안 오염된다.
+# 네이버 공시 제목은 띄어쓰기가 들쭉날쭉해서 공백을 지우고 매칭한다.
+_EVENT_TYPE_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("행정", ("가격제한폭", "공매도과열", "단기과열", "투자경고", "투자위험",
+             "투자주의", "소수계좌", "소수지점", "시황변동", "현저한시황",
+             "조회공시", "매매거래정지", "매매거래재개", "관리종목", "불성실공시",
+             "정리매매", "상장폐지", "풍문또는보도")),
+    ("IR", ("기업설명회", "(IR)", "IR개최")),
+    ("실적", ("실적", "손익구조", "매출액또는손익", "매출액변동", "영업(잠정)",
+             "사업보고서", "반기보고서", "분기보고서", "결산")),
+    ("계약", ("공급계약", "판매ㆍ공급", "수주", "계약체결", "계약해지",
+             "판매·공급")),
+    ("자금조달", ("유상증자", "전환사채", "신주인수권부사채", "교환사채",
+                "사채권발행", "제3자배정", "자금조달", "신주발행")),
+    ("지배구조", ("최대주주", "경영권", "합병", "분할", "주식교환", "포괄적",
+                "대표이사", "임원ㆍ주요주주", "임원·주요주주", "주주총회",
+                "자기주식", "지분", "주식등의대량보유")),
+)
+_EVENT_TYPES = tuple(t for t, _ in _EVENT_TYPE_RULES) + ("기타",)
+
+
+def _classify_event_type(title: str) -> str:
+    """공시 제목 -> 유형. 규칙에 안 걸리면 '기타' - 원제목은 항상 함께 보여
+    주므로(표·필터 모두), 확신 없는 제목을 억지로 어느 유형에 넣지 않는다."""
+    compact = (title or "").replace(" ", "")
+    for etype, keys in _EVENT_TYPE_RULES:
+        if any(k.replace(" ", "") in compact for k in keys):
+            return etype
+    return "기타"
+
+
 @mcp.tool()
 @safe_tool
 @track_metrics("get_event_reactions")
@@ -1405,6 +1437,8 @@ async def get_event_reactions(
     max_events: int = 8,
     before: int = 5,
     after: int = 10,
+    include_types: list[str] | None = None,
+    exclude_types: list[str] | None = None,
 ) -> str:
     """공시반응이력 — 최근 공시들에 이 종목이 **어떻게 반응해 왔는지** 한 번에.
 
@@ -1424,6 +1458,9 @@ async def get_event_reactions(
         max_events: 볼 공시 개수 (기본 8, 최대 15). 같은 날 여러 건이면 하나로 묶습니다.
         before: 기준일 전 비교 거래일 수 (기본 5)
         after: 기준일 후 비교 거래일 수 (기본 10, 최대 60)
+        include_types: 이 유형만 봅니다. 유형: 실적/계약/자금조달/지배구조/행정/IR/기타.
+            예: ["실적"] 이면 가격제한폭 확대·공매도 과열 같은 행정 안내가 빠집니다.
+        exclude_types: 이 유형을 뺍니다 (include_types 와 함께 쓰면 include 적용 후 제외).
     """
     import re as _re
     import statistics as _st
@@ -1438,15 +1475,37 @@ async def get_event_reactions(
     if not items:
         return f"종목 {code}의 공시 목록을 찾지 못했습니다."
 
+    # 유형 필터(SL-14). 필터를 통과한 공시만 날짜로 묶으므로, "실적 8건"을
+    # 요청하면 행정 안내를 건너뛰고 실적 8건을 채운다.
+    inc = [str(t).strip() for t in (include_types or []) if str(t).strip()]
+    exc = [str(t).strip() for t in (exclude_types or []) if str(t).strip()]
+    bad_types = [t for t in inc + exc if t not in _EVENT_TYPES]
+    excluded_count = 0
+    excluded_by_type: dict[str, int] = {}
+
     # 같은 날 여러 건은 첫 건으로 대표시킨다 — 같은 날짜의 반응은 어차피 같다.
-    seen: dict[str, str] = {}
+    seen: dict[str, tuple[str, str]] = {}
     for it in items:
         day = str(it.get("date", "")).replace(".", "-").strip()
-        if len(day) == 10 and day not in seen:
-            seen[day] = str(it.get("title", ""))
+        if len(day) != 10:
+            continue
+        title = str(it.get("title", ""))
+        etype = _classify_event_type(title)
+        if (inc and etype not in inc) or (etype in exc):
+            if day not in seen:
+                excluded_count += 1
+                excluded_by_type[etype] = excluded_by_type.get(etype, 0) + 1
+            continue
+        if day not in seen:
+            seen[day] = (title, etype)
         if len(seen) >= max_events:
             break
     if not seen:
+        if inc or exc:
+            return (f"종목 {code}의 최근 공시 중 유형 필터"
+                    f"(include={inc or '-'}, exclude={exc or '-'})를 통과한 공시가 "
+                    f"없습니다. 필터에 걸려 제외된 공시는 {excluded_count}건입니다 - "
+                    f"공시가 없는 것이 아니라 요청한 유형이 없는 것입니다.")
         return f"종목 {code}의 공시에서 날짜를 읽지 못했습니다."
 
     try:
@@ -1461,13 +1520,13 @@ async def get_event_reactions(
         flows, flow_error = [], type(e).__name__
 
     rows = []
-    for day, title in sorted(seen.items(), reverse=True):
+    for day, (title, etype) in sorted(seen.items(), reverse=True):
         try:
             r = build_event_reaction(code=code, event_date=day, ohlcv=ohlcv, flows=flows,
                                      before=before, after=after, flow_error=flow_error)
         except ValueError:
             continue
-        rows.append((day, title, r))
+        rows.append((day, title, etype, r))
     if not rows:
         return f"종목 {code}의 공시일을 주가 데이터와 맞추지 못했습니다."
 
@@ -1476,11 +1535,15 @@ async def get_event_reactions(
         return p.get("return_pct") if p.get("status") == "available" else None
 
     lines = [f"# 공시 반응 이력 — {code} (최근 {len(rows)}건)", ""]
+    if inc or exc:
+        lines.append(f"유형 필터: include={inc or '전체'} / exclude={exc or '없음'}"
+                     f" · 필터로 제외 {excluded_count}건")
+        lines.append("")
     lines.append(f"기준일 | 공시 | D+1 | D+{after//2 if after>=4 else 1} | D+{after} | 당일거래량/직전평균")
     lines.append("---|---|---:|---:|---:|---:")
     mid_key = f"D+{after//2}" if after >= 4 else "D+1"
     d1s = []
-    for day, title, r in rows:
+    for day, title, etype, r in rows:
         v = r.get("volume") or {}
         pre, basis = v.get("pre_avg"), v.get("basis")
         ratio = f"{basis/pre:.1f}배" if isinstance(pre, (int, float)) and pre and isinstance(basis, (int, float)) else "-"
@@ -1490,7 +1553,7 @@ async def get_event_reactions(
         f = lambda x: f"{x:+.2f}%" if isinstance(x, (int, float)) else "-"
         t = (title or "").replace("|", "/")
         t = (t[:34] + "…") if len(t) > 34 else t
-        lines.append(f"{day} | {t} | {f(d1)} | {f(dm)} | {f(dl)} | {ratio}")
+        lines.append(f"{day} | [{etype}] {t} | {f(d1)} | {f(dm)} | {f(dl)} | {ratio}")
 
     if d1s:
         up = sum(1 for x in d1s if x > 0)
@@ -1516,9 +1579,9 @@ async def get_event_reactions(
 
     # 사건별 검증 상태를 집계한다. 하나라도 창이 덜 찼으면 이 표의 해당 칸은
     # 값이 아니라 결측이고, 그 사실이 메타에 있어야 프로그램이 읽는다(SL-08).
-    statuses = [(r.get("validation") or {}).get("status") for _, _, r in rows]
+    statuses = [(r.get("validation") or {}).get("status") for _, _, _, r in rows]
     all_codes: set[str] = set()
-    for _, _, r in rows:
+    for _, _, _, r in rows:
         all_codes.update((r.get("validation") or {}).get("codes") or [])
     event_coverage = {
         "events": len(rows),
@@ -1541,10 +1604,22 @@ async def get_event_reactions(
             data_completeness=rmeta.PARTIAL if incomplete else rmeta.COMPLETE,
             coverage=ev_cov,
             price_adjustment=price_adjustment_meta(),
-            extra={"event_coverage": event_coverage},
-            warnings=([f"{incomplete}건 사건은 창이 덜 찼거나 분석 불가입니다"
-                       " - 표의 해당 칸은 값이 아니라 결측입니다."]
-                      if incomplete else None),
+            extra={
+                "event_coverage": event_coverage,
+                "event_type_filter": {
+                    "include_types": inc or None,
+                    "excluded_types": exc or None,
+                    "excluded_count": excluded_count,
+                    "excluded_by_type": excluded_by_type or None,
+                    "types_in_result": sorted({e for _, _, e, _ in rows}),
+                },
+            },
+            warnings=(([f"{incomplete}건 사건은 창이 덜 찼거나 분석 불가입니다"
+                        " - 표의 해당 칸은 값이 아니라 결측입니다."]
+                       if incomplete else [])
+                      + ([f"알 수 없는 유형 이름 {bad_types} - 유효한 유형: "
+                          f"{list(_EVENT_TYPES)}"] if bad_types else [])
+                      or None),
         ),
     )
 
