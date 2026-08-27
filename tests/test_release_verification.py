@@ -129,8 +129,12 @@ class RouterGatingTests(unittest.TestCase):
         state = _v2_state("kis")
         caps = provider_capabilities_v2(state, "kis")
         self.assertTrue(caps["connected"])
-        self.assertTrue(caps["kr_intraday"])   # 검증 완료
-        self.assertFalse(caps["us_intraday"])  # 야간 UAT 전
+        self.assertTrue(caps["kr_intraday"])  # 검증 완료
+        self.assertTrue(caps["us_intraday"])  # 2026-08-27 본장 UAT 완료
+        # 게이트가 닫힌 능력은 endpoint available 이어도 꺼져 있다.
+        kw = _v2_state("kiwoom")
+        self.assertFalse(provider_capabilities_v2(kw, "kiwoom")[
+            "us_intraday"])
 
     def test_gate_flip_activates_without_state_change(self):
         state = _v2_state("kiwoom")
