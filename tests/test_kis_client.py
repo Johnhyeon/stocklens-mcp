@@ -204,6 +204,18 @@ class RetryAndErrorTests(unittest.TestCase):
             _run(client.request("GET", "/x", tr_id="T1"))
         self.assertEqual(ctx.exception.provider_status, "credential_invalid")
 
+    def test_token_throttle_egw00133_is_rate_limited_not_credential(self):
+        # KIS 는 접근토큰 발급을 1분당 1회로 제한하고 403 + EGW00133 을
+        # 돌려준다 (2026-08-27 실측). 키가 틀렸다고 오분류하면 안 된다.
+        rec = Recorder()
+        rec.token_response = httpx.Response(
+            403, json={"error_code": "EGW00133",
+                       "error_description": "접근토큰 발급 잠시 후 다시 시도"})
+        client = _client(rec)
+        with self.assertRaises(KisApiError) as ctx:
+            _run(client.request("GET", "/x", tr_id="T1"))
+        self.assertEqual(ctx.exception.provider_status, "rate_limited")
+
 
 class SecretLeakTests(unittest.TestCase):
     def _assert_clean(self, text: str):

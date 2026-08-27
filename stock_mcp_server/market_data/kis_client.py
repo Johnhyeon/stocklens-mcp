@@ -95,6 +95,10 @@ class KisClient:
             raise KisApiError("provider_unavailable") from None
 
         if resp.status_code in (400, 401, 403):
+            # KIS 는 토큰 발급을 1분당 1회로 제한하고 403 + EGW00133 을
+            # 돌려준다 (2026-08-27 실측). 이 경우는 키 문제가 아니다.
+            if self._token_error_code(resp) == "EGW00133":
+                raise KisApiError("rate_limited", resp.status_code)
             raise KisApiError("credential_invalid", resp.status_code)
         if resp.status_code == 429:
             raise KisApiError("rate_limited", resp.status_code)
@@ -112,6 +116,18 @@ class KisClient:
         self._token = token
         self._token_expires_at = self._clock() + expires_in
         self._token_generation = self._generation_provider()
+
+    @staticmethod
+    def _token_error_code(resp: httpx.Response) -> str | None:
+        """토큰 오류 응답의 코드만 뽑는다. 본문 원문은 어디에도 싣지 않는다."""
+        try:
+            payload = resp.json()
+        except ValueError:
+            return None
+        if not isinstance(payload, dict):
+            return None
+        code = payload.get("error_code") or payload.get("msg_cd")
+        return code if isinstance(code, str) else None
 
     async def _ensure_token(self, http: httpx.AsyncClient) -> str:
         if not self._token_valid():
