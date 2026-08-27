@@ -101,3 +101,282 @@ def bump_generation(state: dict) -> dict:
     updated["connection_generation"] = int(state.get(
         "connection_generation", 0)) + 1
     return updated
+
+
+# ---------------------------------------------------------------------------
+# 상태 v2 (1.0 멀티 증권사, 설계 10절)
+#
+# - 공급자별 독립 상태와 generation
+# - 전역 primary_provider 하나 (첫 연결이 primary, 추가 연결은 유지)
+# - 엄격한 allowlist sanitizer: 모르는 필드·공급자·프로필은 버린다
+# - 손상 상태는 legacy 안전 모드 (증권사 호출 없음)
+# - 비밀값·토큰·요청/응답 원문은 어떤 필드에도 쓰지 않는다
+# ---------------------------------------------------------------------------
+
+from stock_mcp_server.market_data.provider_registry import registry  # noqa: E402
+
+STATE_VERSION = 2
+
+# v1 고정 keyring 슬롯에서 migration 된 프로필의 credential 참조값.
+LEGACY_CREDENTIAL_REF = "legacy"
+
+LIFECYCLES = ("connected", "disabled_pending_cleanup")
+
+# 능력 키 allowlist. 1.0 은 봉 데이터 능력만 다룬다.
+_CAPABILITY_KEYS = ("auth", "kr_intraday", "us_intraday",
+                    "kr_daily", "us_daily")
+
+# 비밀 없는 pending 작업 레코드에 허용되는 키 (Task 5 credential 트랜잭션).
+_PENDING_KEYS = ("op", "provider", "profile", "credential_ref",
+                 "retired_ref", "created_at")
+
+DEFAULT_STATE_V2: dict = {
+    "state_version": STATE_VERSION,
+    "routing_generation": 0,
+    "primary_provider": None,
+    "data_source_mode": "legacy",
+    "providers": {},
+    "pending_operations": [],
+}
+
+
+def _default_v2() -> dict:
+    return json.loads(json.dumps(DEFAULT_STATE_V2))
+
+
+def _clean_capabilities(raw: object) -> dict:
+    if not isinstance(raw, dict):
+        return {}
+    return {
+        key: value
+        for key, value in raw.items()
+        if key in _CAPABILITY_KEYS and isinstance(value, str)
+        and len(value) <= 64
+    }
+
+
+def _clean_profile_record(raw: object) -> dict | None:
+    if not isinstance(raw, dict):
+        return None
+    ref = raw.get("credential_ref")
+    verified = raw.get("verified")
+    verified_at = raw.get("verified_at")
+    if ref is not None and (not isinstance(ref, str) or len(ref) > 128):
+        return None
+    if not isinstance(verified, bool):
+        verified = False
+    if verified_at is not None and not isinstance(verified_at, str):
+        verified_at = None
+    return {
+        "credential_ref": ref,
+        "verified": verified,
+        "verified_at": verified_at,
+        "capabilities": _clean_capabilities(raw.get("capabilities")),
+    }
+
+
+def _clean_provider_record(provider_id: str, raw: object) -> dict | None:
+    if not isinstance(raw, dict):
+        return None
+    try:
+        descriptor = registry.require(provider_id)
+    except Exception:
+        return None
+    generation = raw.get("generation")
+    if not isinstance(generation, int) or generation < 0:
+        return None
+    lifecycle = raw.get("lifecycle")
+    if lifecycle not in LIFECYCLES:
+        return None
+    profiles_raw = raw.get("profiles")
+    profiles: dict = {}
+    if isinstance(profiles_raw, dict):
+        for name, record in profiles_raw.items():
+            if name not in descriptor.supported_profiles:
+                continue
+            cleaned = _clean_profile_record(record)
+            if cleaned is not None:
+                profiles[name] = cleaned
+    active_profile = raw.get("active_profile")
+    if active_profile is not None and active_profile not in profiles:
+        active_profile = None
+    return {
+        "generation": generation,
+        "lifecycle": lifecycle,
+        "active_profile": active_profile,
+        "profiles": profiles,
+    }
+
+
+def _clean_pending(raw: object) -> list:
+    if not isinstance(raw, list):
+        return []
+    cleaned = []
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        record = {
+            key: value
+            for key, value in entry.items()
+            if key in _PENDING_KEYS and isinstance(value, str)
+            and len(value) <= 256
+        }
+        if record.get("op"):
+            cleaned.append(record)
+    return cleaned
+
+
+def sanitize_v2(raw: object) -> dict:
+    """v2 상태를 allowlist 로 정제한다. 형식이 깨지면 legacy 안전 모드."""
+    if not isinstance(raw, dict):
+        return _default_v2()
+    routing = raw.get("routing_generation")
+    mode = raw.get("data_source_mode")
+    if not isinstance(routing, int) or routing < 0:
+        return _default_v2()
+    if mode not in DATA_SOURCE_MODES:
+        return _default_v2()
+
+    providers_raw = raw.get("providers")
+    providers: dict = {}
+    if isinstance(providers_raw, dict):
+        for provider_id, record in providers_raw.items():
+            cleaned = _clean_provider_record(provider_id, record)
+            if cleaned is not None:
+                providers[provider_id] = cleaned
+
+    primary = raw.get("primary_provider")
+    if primary is not None and primary not in providers:
+        primary = None
+
+    return {
+        "state_version": STATE_VERSION,
+        "routing_generation": routing,
+        "primary_provider": primary,
+        "data_source_mode": mode,
+        "providers": providers,
+        "pending_operations": _clean_pending(raw.get("pending_operations")),
+    }
+
+
+def migrate_v1(raw: object) -> dict:
+    """v1(KIS 단일) 상태를 v2 로 순수 변환한다. 비밀 필드는 옮기지 않는다."""
+    v1 = _sanitize(raw)
+    state = _default_v2()
+    generation = v1["connection_generation"]
+    state["routing_generation"] = generation
+    state["data_source_mode"] = v1["data_source_mode"]
+
+    if v1["active_provider"] != "kis":
+        # KIS 외 값은 v1 에 존재할 수 없었다. 알 수 없는 공급자는 버린다.
+        return state
+
+    capability_results = v1.get("capability_results")
+    if not isinstance(capability_results, dict):
+        capability_results = {}
+
+    profiles: dict = {}
+    profile_names = list(capability_results.keys())
+    active_profile = v1["active_profile"]
+    if active_profile and active_profile not in profile_names:
+        profile_names.append(active_profile)
+    supported = registry.require("kis").supported_profiles
+    for name in profile_names:
+        if name not in supported:
+            continue
+        caps = _clean_capabilities(capability_results.get(name))
+        profiles[name] = {
+            "credential_ref": LEGACY_CREDENTIAL_REF,
+            "verified": caps.get("auth") == "ok",
+            "verified_at": None,
+            "capabilities": caps,
+        }
+    if not profiles:
+        return state
+
+    if active_profile not in profiles:
+        active_profile = None
+    state["primary_provider"] = "kis"
+    state["providers"]["kis"] = {
+        "generation": generation,
+        "lifecycle": "connected",
+        "active_profile": active_profile,
+        "profiles": profiles,
+    }
+    return state
+
+
+def load_state_v2(home: Path | str | None = None) -> dict:
+    path = state_path(home)
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return _default_v2()
+    if isinstance(raw, dict) and raw.get("state_version") == STATE_VERSION:
+        return sanitize_v2(raw)
+    return migrate_v1(raw)
+
+
+def save_state_v2(state: dict, home: Path | str | None = None) -> None:
+    """정제를 통과한 상태만 원자적으로 저장한다."""
+    save_state(sanitize_v2(state), home)
+
+
+def connect_profile_v2(
+    state: dict,
+    provider: str,
+    profile: str,
+    *,
+    credential_ref: str,
+    verified: bool,
+    verified_at: str | None,
+    capabilities: dict,
+) -> dict:
+    """프로필 연결을 반영한 새 상태를 돌려준다 (순수 함수).
+
+    첫 연결 공급자만 primary 가 된다. 추가 연결은 primary 를 바꾸지
+    않는다 (변경은 set_primary_v2 라는 별도 action 뿐이다).
+    """
+    descriptor = registry.require(provider)
+    if profile not in descriptor.supported_profiles:
+        raise ValueError(f"{provider}가 지원하지 않는 프로필: {profile}")
+
+    updated = sanitize_v2(state)
+    record = updated["providers"].get(provider) or {
+        "generation": 0,
+        "lifecycle": "connected",
+        "active_profile": None,
+        "profiles": {},
+    }
+    record = json.loads(json.dumps(record))
+    record["generation"] = int(record["generation"]) + 1
+    record["lifecycle"] = "connected"
+    record["active_profile"] = profile
+    record["profiles"][profile] = {
+        "credential_ref": credential_ref,
+        "verified": bool(verified),
+        "verified_at": verified_at,
+        "capabilities": _clean_capabilities(capabilities),
+    }
+    updated["providers"][provider] = record
+    updated["routing_generation"] = int(updated["routing_generation"]) + 1
+    if updated["primary_provider"] is None:
+        updated["primary_provider"] = provider
+    return updated
+
+
+def set_primary_v2(state: dict, provider: str) -> dict:
+    """주 사용 증권사 변경. 검증된 연결이 있는 공급자만 허용한다."""
+    updated = sanitize_v2(state)
+    record = updated["providers"].get(provider)
+    if record is None or record["lifecycle"] != "connected":
+        raise ValueError(f"연결되지 않은 공급자는 primary가 될 수 없습니다: "
+                         f"{provider}")
+    active = record.get("active_profile")
+    profile = record["profiles"].get(active) if active else None
+    if profile is None or not profile.get("verified"):
+        raise ValueError(f"검증된 프로필이 없는 공급자는 primary가 될 수 "
+                         f"없습니다: {provider}")
+    updated["primary_provider"] = provider
+    updated["routing_generation"] = int(updated["routing_generation"]) + 1
+    return updated
