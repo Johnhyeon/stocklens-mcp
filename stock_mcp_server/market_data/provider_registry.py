@@ -183,10 +183,14 @@ _RELEASE_VERIFIED: dict[tuple[str, str], bool] = {
     # docs/uat/evidence/kis/uat_kis_us_20260828.json)
     # SPY·IWM 은 EXCD=AMS, BRK.B 는 SYMB "BRK/B" (실측 표기)
     ("kis", "us_intraday"): True,
-    # 키움: 독립 검산 러너로 재검증 후 켠다 (1차 15/15 는 러너가 운영
-    # 코드 재사용이라 독립 증거로 불인정 - 리뷰 차단 항목 4)
+    # 키움 KR: 독립 검산 러너 장중 패스 후 켠다 (장마감 증거는 확보,
+    # 리뷰 조건: 장중 실행과 짝)
     ("kiwoom", "kr_intraday"): False,
-    ("kiwoom", "us_intraday"): False,
+    # 키움 US: strict 러너 15사례 failures=0, 검산 4,663 버킷 0,
+    # 완결일 KIS 교차 391/391·OHLC diff 0·거래량 비율 1.0 (2026-08-28,
+    # docs/uat/evidence/kiwoom/uat_kiwoom_us_20260828.json). 원인 규명
+    # us-contract-resolution-20260828.json (cntr_tm=ET 라벨, db51bab)
+    ("kiwoom", "us_intraday"): True,
     # 토스 KR: 계약 불일치로 차단 (봉 라벨 시프트·통합 거래량·마감
     # 동시호가 부재, 2026-08-27 실측)
     ("toss", "kr_intraday"): False,

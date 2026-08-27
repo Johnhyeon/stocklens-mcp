@@ -50,8 +50,10 @@ class ReleaseGateTableTests(unittest.TestCase):
         #  검산 9,690 버킷 불일치 0 - uat_kis_us_20260828.json)
         self.assertTrue(is_release_verified("kis", "kr_intraday"))
         self.assertTrue(is_release_verified("kis", "us_intraday"))
+        # 키움 KR 은 장중 러너 패스 전, 키움 US 는 2026-08-28 strict
+        # 러너 failures=0 + 완결일 KIS 교차 완전 일치로 검증 완료.
         self.assertFalse(is_release_verified("kiwoom", "kr_intraday"))
-        self.assertFalse(is_release_verified("kiwoom", "us_intraday"))
+        self.assertTrue(is_release_verified("kiwoom", "us_intraday"))
         self.assertFalse(is_release_verified("toss", "kr_intraday"))
         self.assertFalse(is_release_verified("toss", "us_intraday"))
         # 일·주·월봉은 수정주가 게이트 전이라 전부 미검증이다.
@@ -119,12 +121,13 @@ class RouterDistinctionTests(unittest.TestCase):
 class RouterGatingTests(unittest.TestCase):
     def test_endpoint_available_alone_does_not_activate(self):
         # 연결 시험은 통과했지만(available) 출시 검증 전인 능력은
-        # 라우터에 False 로 보인다.
+        # 라우터에 False 로 보인다. (키움 KR 은 장중 러너 패스 전,
+        # 키움 US 는 게이트가 열려 True 다.)
         state = _v2_state("kiwoom")
         caps = provider_capabilities_v2(state, "kiwoom")
         self.assertTrue(caps["connected"])
         self.assertFalse(caps["kr_intraday"])
-        self.assertFalse(caps["us_intraday"])
+        self.assertTrue(caps["us_intraday"])
 
     def test_release_verified_capability_activates(self):
         state = _v2_state("kis")
@@ -135,7 +138,7 @@ class RouterGatingTests(unittest.TestCase):
         # 게이트가 닫힌 능력은 endpoint available 이어도 꺼져 있다.
         kw = _v2_state("kiwoom")
         self.assertFalse(provider_capabilities_v2(kw, "kiwoom")[
-            "us_intraday"])
+            "kr_intraday"])
 
     def test_gate_flip_activates_without_state_change(self):
         state = _v2_state("kiwoom")
@@ -195,7 +198,7 @@ class StatusExposureTests(unittest.TestCase):
             "provider": "kiwoom"}, service=self.service)
         entry = resp["status"]["providers"]["kiwoom"]
         self.assertEqual(entry["release_verified"], {
-            "kr_intraday": False, "us_intraday": False})
+            "kr_intraday": False, "us_intraday": True})
         # 연결 시험 값(endpoint)은 그대로 available 로 남는다.
         self.assertEqual(
             resp["status"]["capability_results"]["real"]["kr_intraday"],

@@ -143,7 +143,7 @@ class DoctorBrokerTests(unittest.TestCase):
         self.assertEqual(caps["kr_intraday"], "available")
         # 연결 시험 available 과 출시 검증은 분리 보고된다.
         self.assertEqual(connections["kiwoom"]["release_verified"], {
-            "kr_intraday": False, "us_intraday": False})
+            "kr_intraday": False, "us_intraday": True})
         self.assertTrue(
             connections["kis"]["release_verified"]["kr_intraday"])
 
