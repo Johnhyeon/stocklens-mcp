@@ -17,7 +17,10 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from unittest.mock import patch as _patch
+
 from stock_mcp_server import broker_cli, diagnostics
+from stock_mcp_server.market_data import provider_registry
 from stock_mcp_server.market_data.connection_state import (
     DEFAULT_STATE_V2,
     connect_profile_v2,
@@ -63,6 +66,20 @@ _MATRIX = [
 
 
 class RoutingMatrixTests(unittest.TestCase):
+    """primary 고정 로직 자체를 검사한다. 출시 검증 게이트는 별도
+    테스트(test_release_verification)가 지키므로 여기서는 열어 둔다."""
+
+    def setUp(self):
+        self._gate = _patch.dict(provider_registry._RELEASE_VERIFIED, {
+            (pid, cap): True
+            for pid in ("kis", "kiwoom", "toss")
+            for cap in ("kr_intraday", "us_intraday")
+        })
+        self._gate.start()
+
+    def tearDown(self):
+        self._gate.stop()
+
     def test_auto_intraday_selects_only_primary(self):
         for name, providers, primary in _MATRIX:
             with self.subTest(case=name):

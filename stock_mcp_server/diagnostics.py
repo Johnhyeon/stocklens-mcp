@@ -683,6 +683,10 @@ def _broker_summary() -> tuple[dict, dict]:
     except Exception:  # noqa: BLE001
         state = None
 
+    from stock_mcp_server.market_data.provider_registry import (
+        is_release_verified,
+    )
+
     for pid in registry.ids():
         descriptor = registry.require(pid)
         connection: dict = {
@@ -695,6 +699,11 @@ def _broker_summary() -> tuple[dict, dict]:
                 p: {"configured": False, "verified": False,
                     "verified_at": None, "capabilities": {}}
                 for p in descriptor.supported_profiles
+            },
+            # 연결 시험(available)과 별개인 출시 검증 상태 (코드 고정 표).
+            "release_verified": {
+                "kr_intraday": is_release_verified(pid, "kr_intraday"),
+                "us_intraday": is_release_verified(pid, "us_intraday"),
             },
             "storage": "os-keychain",
         }

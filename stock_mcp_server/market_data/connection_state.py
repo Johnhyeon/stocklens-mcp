@@ -369,8 +369,16 @@ def provider_capabilities_v2(state: dict, provider: str) -> dict:
     """라우터가 쓰는 능력 dict. disable 된 provider 는 connected=False.
 
     disable 우선 해제(11.4)의 핵심: lifecycle 이 connected 가 아니면
-    비밀 삭제가 끝나지 않았어도 이 provider 는 요청에 쓰이지 않는다.
+    비밀 삭제가 끝나지 않았어도 이 provider 는 요청에 사용되지 않는다.
+
+    능력 활성화는 두 게이트를 모두 통과해야 한다:
+    1. endpoint_available - 연결 시험이 available 로 기록 (상태 파일)
+    2. release_verified - 실계좌 UAT·출시 게이트 통과 (코드 고정 표)
     """
+    from stock_mcp_server.market_data.provider_registry import (
+        is_release_verified,
+    )
+
     cleaned = sanitize_v2(state)
     record = cleaned["providers"].get(provider)
     empty = {"connected": False, "kr_intraday": False, "us_intraday": False,
@@ -382,12 +390,17 @@ def provider_capabilities_v2(state: dict, provider: str) -> dict:
     if profile is None or not profile.get("verified"):
         return empty
     caps = profile.get("capabilities") or {}
+
+    def _on(name: str) -> bool:
+        return caps.get(name) == "available" and \
+            is_release_verified(provider, name)
+
     return {
         "connected": True,
-        "kr_intraday": caps.get("kr_intraday") == "available",
-        "us_intraday": caps.get("us_intraday") == "available",
-        "kr_daily": caps.get("kr_daily") == "available",
-        "us_daily": caps.get("us_daily") == "available",
+        "kr_intraday": _on("kr_intraday"),
+        "us_intraday": _on("us_intraday"),
+        "kr_daily": _on("kr_daily"),
+        "us_daily": _on("us_daily"),
     }
 
 

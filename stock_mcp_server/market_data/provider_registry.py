@@ -165,6 +165,37 @@ _TOSS = ProviderDescriptor(
 )
 
 
+# ---------------------------------------------------------------------------
+# 출시 검증 게이트 (리뷰 차단 항목 2, 2026-08-27)
+#
+# 연결 시험의 available 은 "키와 endpoint 호출이 정상"만 뜻한다
+# (endpoint_available). 자동 라우터가 실제로 쓰는 능력은 실계좌 UAT 와
+# 출시 게이트를 통과해 이 표에 True 로 기록된 것뿐이다(release_verified).
+# 항목을 켜는 커밋은 반드시 해당 UAT 증거 커밋과 짝을 이룬다.
+# ---------------------------------------------------------------------------
+
+_RELEASE_VERIFIED: dict[tuple[str, str], bool] = {
+    # KIS KR: 0.9 브랜치 국내 15종목 UAT 2회(장중·장마감) + 재계산
+    # 3213 버킷 불일치 0 + 공식 종가 대조 (2026-08-27)
+    ("kis", "kr_intraday"): True,
+    # KIS US: 야간 본장 UAT 예정 (2026-08-27 22:33)
+    ("kis", "us_intraday"): False,
+    # 키움: 독립 검산 러너로 재검증 후 켠다 (1차 15/15 는 러너가 운영
+    # 코드 재사용이라 독립 증거로 불인정 - 리뷰 차단 항목 4)
+    ("kiwoom", "kr_intraday"): False,
+    ("kiwoom", "us_intraday"): False,
+    # 토스 KR: 계약 불일치로 차단 (봉 라벨 시프트·통합 거래량·마감
+    # 동시호가 부재, 2026-08-27 실측)
+    ("toss", "kr_intraday"): False,
+    ("toss", "us_intraday"): False,
+    # 일·주·월봉은 수정주가·기업행위 검증 게이트 전이라 전부 미검증.
+}
+
+
+def is_release_verified(provider_id: str, capability: str) -> bool:
+    return bool(_RELEASE_VERIFIED.get((provider_id, capability)))
+
+
 class ProviderRegistry:
     def __init__(self, descriptors: tuple[ProviderDescriptor, ...]):
         self._by_id = {d.provider_id: d for d in descriptors}

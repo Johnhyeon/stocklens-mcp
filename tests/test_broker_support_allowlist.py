@@ -23,7 +23,7 @@ _JUNK_SECRET = "PSA-INJECTED-SECRET-13579"
 
 _ALLOWED_CONNECTION_KEYS = {
     "status", "primary", "lifecycle", "active_profile",
-    "data_source_mode", "profiles", "storage",
+    "data_source_mode", "profiles", "release_verified", "storage",
 }
 _ALLOWED_PROFILE_KEYS = {
     "configured", "verified", "verified_at", "capabilities",

@@ -141,6 +141,11 @@ class DoctorBrokerTests(unittest.TestCase):
         self.assertEqual(connections["toss"]["status"], "not_configured")
         caps = connections["kiwoom"]["profiles"]["real"]["capabilities"]
         self.assertEqual(caps["kr_intraday"], "available")
+        # 연결 시험 available 과 출시 검증은 분리 보고된다.
+        self.assertEqual(connections["kiwoom"]["release_verified"], {
+            "kr_intraday": False, "us_intraday": False})
+        self.assertTrue(
+            connections["kis"]["release_verified"]["kr_intraday"])
 
     def test_disabled_provider_reported_as_disabled(self):
         state = _v2_state("toss")

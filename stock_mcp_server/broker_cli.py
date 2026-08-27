@@ -30,6 +30,7 @@ from stock_mcp_server.market_data.credential_store import (
 )
 from stock_mcp_server.market_data.provider_registry import (
     UnknownProviderError,
+    is_release_verified as _is_release_verified,
     registry,
 )
 from stock_mcp_server.market_data.secrets import (
@@ -131,6 +132,14 @@ class BrokerService:
                     "verified_profiles": sorted(
                         name for name, prec in rec["profiles"].items()
                         if prec.get("verified")),
+                    # 연결 시험(available)과 별개인 출시 검증 상태.
+                    # 자동 라우터는 둘 다 통과한 능력만 쓴다.
+                    "release_verified": {
+                        "kr_intraday": _is_release_verified(
+                            pid, "kr_intraday"),
+                        "us_intraday": _is_release_verified(
+                            pid, "us_intraday"),
+                    },
                 }
                 for pid, rec in state["providers"].items()
             },

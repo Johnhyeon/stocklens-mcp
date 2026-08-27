@@ -122,6 +122,19 @@ class SourceValidationTests(unittest.TestCase):
 
 
 class MultiProviderRoutingTests(unittest.IsolatedAsyncioTestCase):
+    """라우팅 배선을 검사한다. 출시 검증 게이트는 별도 테스트가 지키므로
+    여기서는 열어 둔다 (test_release_verification 참조)."""
+
+    def setUp(self):
+        from stock_mcp_server.market_data import provider_registry
+        self._gate = patch.dict(provider_registry._RELEASE_VERIFIED, {
+            (pid, cap): True
+            for pid in ("kis", "kiwoom", "toss")
+            for cap in ("kr_intraday", "us_intraday")
+        })
+        self._gate.start()
+        self.addCleanup(self._gate.stop)
+
     async def _fetch(self, state_v2, providers, source="auto",
                      market="KR"):
         with patch.object(server, "_broker_state",
