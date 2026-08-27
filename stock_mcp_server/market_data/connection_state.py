@@ -365,6 +365,32 @@ def connect_profile_v2(
     return updated
 
 
+def provider_capabilities_v2(state: dict, provider: str) -> dict:
+    """라우터가 쓰는 능력 dict. disable 된 provider 는 connected=False.
+
+    disable 우선 해제(11.4)의 핵심: lifecycle 이 connected 가 아니면
+    비밀 삭제가 끝나지 않았어도 이 provider 는 요청에 쓰이지 않는다.
+    """
+    cleaned = sanitize_v2(state)
+    record = cleaned["providers"].get(provider)
+    empty = {"connected": False, "kr_intraday": False, "us_intraday": False,
+             "kr_daily": False, "us_daily": False}
+    if record is None or record["lifecycle"] != "connected":
+        return empty
+    active = record.get("active_profile")
+    profile = record["profiles"].get(active) if active else None
+    if profile is None or not profile.get("verified"):
+        return empty
+    caps = profile.get("capabilities") or {}
+    return {
+        "connected": True,
+        "kr_intraday": caps.get("kr_intraday") == "available",
+        "us_intraday": caps.get("us_intraday") == "available",
+        "kr_daily": caps.get("kr_daily") == "available",
+        "us_daily": caps.get("us_daily") == "available",
+    }
+
+
 def set_primary_v2(state: dict, provider: str) -> dict:
     """주 사용 증권사 변경. 검증된 연결이 있는 공급자만 허용한다."""
     updated = sanitize_v2(state)

@@ -173,11 +173,31 @@ class ProviderCache:
             pass
 
     def remove_provider(self, provider: str) -> None:
-        """공급자 전체 해제 시 real·demo 캐시 디렉터리를 삭제한다."""
+        """공급자 전체 해제 시 해당 provider 캐시 디렉터리만 삭제한다.
+
+        - 레지스트리에 등록된 provider ID 만 허용한다 (사용자 문자열 금지)
+        - symlink 와 루트 이탈 경로를 거부한다
+        - 다른 provider 디렉터리는 절대 건드리지 않는다
+        """
+        from stock_mcp_server.market_data.provider_registry import (
+            UnknownProviderError,
+            registry,
+        )
+
         provider = _safe(provider, "provider")
-        target = (self._root / provider).resolve()
+        try:
+            registry.require(provider)
+        except UnknownProviderError:
+            raise ValueError(
+                f"등록되지 않은 provider의 캐시는 삭제하지 않습니다: "
+                f"{provider}") from None
+        target = self._root / provider
+        if target.is_symlink():
+            raise ValueError("캐시 삭제 대상이 symlink 입니다. 거부합니다")
+        resolved = target.resolve()
         root = self._root.resolve()
-        if not str(target).startswith(str(root) + os.sep):
+        if resolved != root / provider or \
+                not str(resolved).startswith(str(root) + os.sep):
             raise ValueError("삭제 대상이 market_data 루트를 벗어납니다")
         if not target.exists():
             return
