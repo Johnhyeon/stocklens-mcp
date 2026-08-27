@@ -1628,15 +1628,20 @@ async def get_event_reactions(
 @mcp.tool()
 @safe_tool
 @track_metrics("get_flow_batch")
-async def get_flow_batch(codes: list[str], days: int = 5) -> str:
+async def get_flow_batch(codes: list[str], days: int = 5, summary: bool = False) -> str:
     """수급벌크 — 여러 종목의 투자자 수급(기관·외국인 순매매)을 한 번에 병렬 조회.
 
     개별 get_flow를 N번 부르는 것보다 훨씬 빠릅니다 (서버 내부 asyncio.gather).
     "이 종목들 외국인 매수 같이 들어왔나", "관심종목 수급 비교" 같은 질문에 사용.
 
+    summary=True 는 심층 모드입니다: 일별 원문 대신 종목당 5/20/60일 누적
+    순매매와 순매수(양수) 일수로 압축해, 상한이 60일로 늘어납니다.
+    "15종목 최근 60일 수급 판정" 같은 질문을 단건 호출 없이 한 번에 봅니다.
+
     Args:
         codes: 종목코드 리스트 (최대 30개)
-        days: 종목당 조회 일수 (기본 5, 최대 20). 토큰 절감 위해 단일 도구보다 짧음
+        days: 종목당 조회 일수 (기본 5, 일별 모드 최대 20 / summary 모드 최대 60)
+        summary: True 면 일별 행 대신 5/20/60일 누적·순매수 일수 요약 (기본 False)
     """
     if not codes:
         return "종목코드 리스트가 비어 있습니다."
@@ -1658,7 +1663,8 @@ async def get_flow_batch(codes: list[str], days: int = 5) -> str:
     requested_codes = len(codes)
     valid = valid[:30]
     requested_days = days
-    effective_days = max(1, min(days, 20))
+    day_cap = 60 if summary else 20
+    effective_days = max(1, min(days, day_cap))
     days = effective_days
     days_truncated = requested_days != effective_days
     codes_truncated = requested_codes > len(valid) + len(invalid)
@@ -1682,9 +1688,11 @@ async def get_flow_batch(codes: list[str], days: int = 5) -> str:
 
     lines: list[str] = []
     if days_truncated:
+        hint = ("더 긴 구간은 get_flow 로 종목별 조회" if summary
+                else "60일까지는 summary=True 심층 모드로 한 번에 조회 가능")
         lines.append(
-            f"⚠️ {requested_days}일을 요청했지만 이 도구의 상한은 {effective_days}일입니다. "
-            f"아래는 최근 {effective_days}일치입니다 (더 긴 구간은 get_flow 로 종목별 조회)."
+            f"⚠️ {requested_days}일을 요청했지만 이 모드의 상한은 {effective_days}일입니다. "
+            f"아래는 최근 {effective_days}일치입니다 ({hint})."
         )
     if codes_truncated:
         lines.append(
@@ -1693,11 +1701,18 @@ async def get_flow_batch(codes: list[str], days: int = 5) -> str:
         )
     if lines:
         lines.append("")
-    lines += [
-        f"수급 배치 ({len(valid)}종목, 최근 {days}일):",
-        "각 행: 날짜 | 기관 순매매(주) | 외국인 순매매(주)  ※ 양수=순매수",
-        "",
-    ]
+    if summary:
+        lines += [
+            f"수급 심층 배치 ({len(valid)}종목, 최근 {days}거래일 요약):",
+            "각 종목: 창별 누적 순매매(주) (순매수 일수/창 일수)  ※ 양수=순매수",
+            "",
+        ]
+    else:
+        lines += [
+            f"수급 배치 ({len(valid)}종목, 최근 {days}일):",
+            "각 행: 날짜 | 기관 순매매(주) | 외국인 순매매(주)  ※ 양수=순매수",
+            "",
+        ]
 
     failed: list[str] = list(invalid)
     matched_count = 0
@@ -1721,14 +1736,33 @@ async def get_flow_batch(codes: list[str], days: int = 5) -> str:
 
         matched_count += 1
         lines.append(header)
-        for row in data:
-            lines.append(
-                f"  {row['date']}  {row['institutional']:+,}  {row['foreign']:+,}"
-            )
-        total_inst = sum(r["institutional"] for r in data)
-        total_frgn = sum(r["foreign"] for r in data)
-        lines.append(f"  합계({len(data)}일)  {total_inst:+,}  {total_frgn:+,}")
-        lines.append("")
+        if summary:
+            # 최신순 정렬을 데이터의 날짜로 보장한다 - 원천 페이지 순서를
+            # 믿고 앞에서 자르면, 순서가 바뀌는 순간 5일 창에 옛날이 들어간다.
+            srt = sorted(data, key=lambda r: rmeta.normalize_day(r.get("date")) or "",
+                         reverse=True)
+            windows = sorted({w for w in (5, 20, 60) if w <= effective_days}
+                             | {min(effective_days, len(srt))})
+            for label, key in (("기관  ", "institutional"), ("외국인", "foreign")):
+                parts = []
+                for w in windows:
+                    win = srt[:w]
+                    n = len(win)
+                    tag = f"{w}일" if n >= w else f"{w}일({n}일치)"
+                    tot = sum(r[key] for r in win)
+                    pos = sum(1 for r in win if r[key] > 0)
+                    parts.append(f"{tag} {tot:+,} ({pos}/{n})")
+                lines.append(f"  {label} " + " · ".join(parts))
+            lines.append("")
+        else:
+            for row in data:
+                lines.append(
+                    f"  {row['date']}  {row['institutional']:+,}  {row['foreign']:+,}"
+                )
+            total_inst = sum(r["institutional"] for r in data)
+            total_frgn = sum(r["foreign"] for r in data)
+            lines.append(f"  합계({len(data)}일)  {total_inst:+,}  {total_frgn:+,}")
+            lines.append("")
 
     # 20일을 요청해 3일만 온 종목이 섞였으면 그 배치는 요청 범위를 못 채운 것이다.
     # 상한과 조회 실패만 보면 이 경우가 통째로 새어 나간다.
@@ -1779,7 +1813,10 @@ async def get_flow_batch(codes: list[str], days: int = 5) -> str:
             data_as_of=max(per_entity_as_of.values()) if per_entity_as_of else None,
             data_completeness=rmeta.PARTIAL if has_gap else rmeta.COMPLETE,
             coverage=coverage,
-            extra={"per_entity_data_as_of": per_entity_as_of},
+            extra={
+                "per_entity_data_as_of": per_entity_as_of,
+                "flow_mode": ("window_summary" if summary else "daily"),
+            },
         ),
     )
 
