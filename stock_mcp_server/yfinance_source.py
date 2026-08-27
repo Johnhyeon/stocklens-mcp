@@ -116,6 +116,9 @@ async def get_price(ticker: str) -> dict | None:
         "currency": info.get("currency"),
         "market_state": info.get("marketState"),  # REGULAR / PRE / POST / CLOSED
         "exchange": info.get("exchange"),
+        # 이 quote 가 언제 것인지(epoch 초). 배치에서 티커별 최신성을 가르는
+        # 근거다(SL-06) - 거래정지 종목의 옛 가격이 태 없이 섞이면 안 된다.
+        "quote_time": _clean(info.get("regularMarketTime")),
     }
 
 

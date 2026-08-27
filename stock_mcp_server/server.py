@@ -6908,6 +6908,7 @@ async def get_us_multi_price(tickers: list[str]) -> str:
     """
     if not tickers:
         return "티커 리스트가 비어있습니다."
+    requested_entities = len(tickers)
     if len(tickers) > 30:
         tickers = tickers[:30]
 
@@ -6915,12 +6916,49 @@ async def get_us_multi_price(tickers: list[str]) -> str:
     if not rows:
         return "데이터를 가져올 수 없습니다."
 
+    # 티커별 quote 기준일(SL-06). quote_time 은 epoch 초 - 미 동부 날짜로
+    # 바꿔야 "그날 장"과 맞는다(UTC 로 읽으면 포스트장이 다음 날로 넘어간다).
+    from stock_mcp_server.market_clock import ET as _ET
+
+    def _quote_day(r: dict) -> str | None:
+        qt = r.get("quote_time")
+        if not isinstance(qt, (int, float)) or qt <= 0:
+            return None
+        try:
+            return datetime.fromtimestamp(float(qt), tz=_ET).strftime("%Y-%m-%d")
+        except (OverflowError, OSError, ValueError):
+            return None
+
+    per_entity_as_of: dict[str, str] = {}
+    per_entity_session: dict[str, str] = {}
+    failed_entities: list[str] = []
+    unknown_as_of: list[str] = []
+    for r in rows:
+        t = str(r.get("ticker") or "?")
+        if r.get("error"):
+            failed_entities.append(t)
+            continue
+        day = _quote_day(r)
+        if day:
+            per_entity_as_of[t] = day
+        else:
+            unknown_as_of.append(t)
+        if r.get("market_state"):
+            per_entity_session[t] = str(r["market_state"])
+
+    # 배치의 공통 기준일 = 실제로 온 quote 중 가장 최신. 그보다 오래된 티커는
+    # 최신성 미달(stale) - 옛 가격이 오늘 가격으로 읽히면 안 된다.
+    batch_as_of = max(per_entity_as_of.values()) if per_entity_as_of else None
+    stale_entities = sorted(
+        t for t, d in per_entity_as_of.items() if batch_as_of and d < batch_as_of
+    )
+
     lines = [f"**멀티 티커 스냅샷** ({len(rows)}개)", ""]
-    lines.append("티커 | 이름 | 현재가 | 변동 | 변동% | 거래량 | 시총")
-    lines.append("---|---|---|---|---|---|---")
+    lines.append("티커 | 이름 | 현재가 | 변동 | 변동% | 거래량 | 시총 | 기준일")
+    lines.append("---|---|---|---|---|---|---|---")
     for r in rows:
         if r.get("error"):
-            lines.append(f"{r['ticker']} | ⚠️ {r['error']} | - | - | - | - | -")
+            lines.append(f"{r['ticker']} | ⚠️ {r['error']} | - | - | - | - | - | -")
             continue
         price = r.get("price")
         price_s = f"${price:,.2f}" if isinstance(price, (int, float)) else "-"
@@ -6933,12 +6971,67 @@ async def get_us_multi_price(tickers: list[str]) -> str:
         mcap = r.get("market_cap")
         mcap_s = _fmt_num(mcap) if mcap else "-"
         name = (r.get("name") or "-")[:25]
-        lines.append(f"**{r['ticker']}** | {name} | {price_s} | {ch_s} | {chp_s} | {vol_s} | {mcap_s}")
+        t = str(r.get("ticker") or "?")
+        day = per_entity_as_of.get(t)
+        day_s = (f"⚠️ {day}" if t in stale_entities
+                 else day if day else "미상")
+        lines.append(f"**{t}** | {name} | {price_s} | {ch_s} | {chp_s} | {vol_s} | {mcap_s} | {day_s}")
+
+    if stale_entities:
+        lines.append("")
+        lines.append(
+            "⚠️ 기준일이 배치 최신일보다 오래된 티커: "
+            + ", ".join(f"{t}({per_entity_as_of[t]})" for t in stale_entities)
+            + " - 거래정지·상장폐지·수집 지연일 수 있습니다. 이 가격을 "
+            f"{batch_as_of} 시점 가격으로 읽지 마세요."
+        )
+    if unknown_as_of:
+        lines.append("")
+        lines.append("※ quote 시각 미상 티커: " + ", ".join(unknown_as_of)
+                     + " - 언제 가격인지 확인되지 않았습니다.")
+
+    truncated = requested_entities > len(tickers)
+    has_gap = bool(stale_entities or failed_entities or unknown_as_of or truncated)
+    coverage = {
+        "requested_entities": requested_entities,
+        "returned_entities": len(per_entity_as_of) + len(unknown_as_of),
+        "failed_entities": sorted(failed_entities),
+        "stale_entities": stale_entities,
+        "unknown_as_of_entities": sorted(unknown_as_of),
+        "truncated": truncated,
+        "coverage_complete": not has_gap,
+        "reason": ("server_cap" if truncated
+                   else "source_limit" if has_gap else None),
+    }
+    warns: list[str] = []
+    if truncated:
+        warns.append(f"{requested_entities}티커 요청 중 앞 {len(tickers)}개만 조회했습니다(상한 30).")
+    if stale_entities:
+        warns.append(
+            "배치 최신일(" + str(batch_as_of) + ")보다 오래된 quote: "
+            + ", ".join(f"{t}={per_entity_as_of[t]}" for t in stale_entities))
+    if failed_entities:
+        warns.append("조회 실패 티커: " + ", ".join(sorted(failed_entities)))
+    if unknown_as_of:
+        warns.append("quote 시각을 확인하지 못한 티커: " + ", ".join(sorted(unknown_as_of)))
 
     # 이 함수의 인자는 tickers(복수)다 — 없는 단수 ticker 를 넘기다 NameError 로
     # 죽어서, 데이터를 다 받아놓고 마지막 줄에서 도구 전체가 실패했다.
     # 여러 종목 스냅샷이라 entity 를 하나로 특정할 수 없으므로 ticker 는 넘기지 않는다.
-    return _append_result_meta("\n".join(lines), _us_meta(kind="snapshot"))
+    return _append_result_meta(
+        "\n".join(lines),
+        _us_meta(
+            kind="snapshot",
+            data_as_of=batch_as_of,
+            data_completeness=rmeta.PARTIAL if has_gap else rmeta.COMPLETE,
+            coverage=coverage,
+            extra={
+                "per_entity_data_as_of": per_entity_as_of,
+                "per_entity_session": per_entity_session or None,
+            },
+            warnings=warns or None,
+        ),
+    )
 
 
 @mcp.tool()
