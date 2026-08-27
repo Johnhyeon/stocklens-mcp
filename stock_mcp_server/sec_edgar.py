@@ -155,6 +155,51 @@ async def get_submissions(cik: int) -> dict:
     }
 
 
+CONCEPT_URL = ("https://data.sec.gov/api/xbrl/companyconcept/"
+               "CIK{cik:010d}/us-gaap/{tag}.json")
+
+# 재무제표 본문에서 나온 값만 쓴다 - S-1 등록서류의 옛 수치가 최신으로 둔갑하면 안 된다.
+_CONCEPT_FORMS = ("10-K", "10-Q", "20-F", "40-F", "6-K", "10-K/A", "10-Q/A")
+
+
+async def get_concept_latest(cik: int, tag: str) -> dict | None:
+    """us-gaap 개념의 최신 보고값(값·기준일·양식·제출일·단위).
+
+    태그 미보고(404)는 None 을 돌려준다 - **0이 아니라 확인 불가**다. XBRL 에
+    태그가 없다는 것은 회사가 그 항목을 그 이름으로 보고하지 않았다는 뜻이지
+    금액이 0이라는 뜻이 아니다. 네트워크 실패는 SecFetchError 로 구분한다.
+    """
+    try:
+        data = await _get_json(CONCEPT_URL.format(cik=cik, tag=tag))
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code == 404:
+            return None
+        raise SecFetchError(
+            f"concept 조회 실패({tag}): HTTP {exc.response.status_code}") from exc
+    except Exception as exc:
+        raise SecFetchError(f"concept 조회 실패({tag}): {type(exc).__name__}") from exc
+
+    units = data.get("units") or {}
+    unit_name = "USD" if "USD" in units else (next(iter(units), None))
+    rows = units.get(unit_name) or []
+    best = None
+    best_key = ("", "")
+    for r in rows:
+        if r.get("form") not in _CONCEPT_FORMS:
+            continue
+        end, val = r.get("end"), r.get("val")
+        if end is None or val is None:
+            continue
+        key = (str(end), str(r.get("filed") or ""))
+        if key > best_key:
+            best_key = key
+            best = {"tag": tag, "value": val, "end": str(end),
+                    "form": r.get("form"), "filed": r.get("filed"),
+                    "fy": r.get("fy"), "fp": r.get("fp"), "unit": unit_name,
+                    "start": r.get("start")}
+    return best
+
+
 def filing_url(cik: int, accession: str, document: str) -> str:
     return ARCHIVE_URL.format(cik=cik, acc=(accession or "").replace("-", ""),
                               doc=document or "")

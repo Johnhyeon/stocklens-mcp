@@ -7037,6 +7037,256 @@ async def get_us_multi_price(tickers: list[str]) -> str:
     )
 
 
+# 유동성 원장의 구성 요소(SL-16). 항목별 us-gaap 후보 태그 - 앞선 태그부터
+# 시도하고, 전부 미보고면 그 항목은 0이 아니라 확인 불가다.
+_LIQ_CONCEPTS: dict[str, tuple[str, ...]] = {
+    "cash": ("CashAndCashEquivalentsAtCarryingValue",),
+    "cash_incl_restricted": (
+        "CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents",),
+    "marketable_securities": (
+        "ShortTermInvestments", "MarketableSecuritiesCurrent",
+        "AvailableForSaleSecuritiesDebtSecuritiesCurrent"),
+    "restricted_cash_current": (
+        "RestrictedCashCurrent", "RestrictedCashAndCashEquivalentsAtCarryingValue"),
+    "restricted_cash_noncurrent": (
+        "RestrictedCashNoncurrent", "RestrictedCashAndCashEquivalentsNoncurrent"),
+    "revolver_available": ("LineOfCreditFacilityRemainingBorrowingCapacity",),
+    "debt_due_next_12m": (
+        "LongTermDebtMaturitiesRepaymentsOfPrincipalInNextTwelveMonths",
+        "LongTermDebtCurrent"),
+    "lease_due_next_12m": (
+        "LesseeOperatingLeaseLiabilityPaymentsDueNextTwelveMonths",),
+    "purchase_obligation_next_12m": (
+        "PurchaseObligationDueInNextTwelveMonths",
+        "UnrecordedUnconditionalPurchaseObligationDueInNextTwelveMonths"),
+}
+
+# 보고기간 후 자금조달성 공시로 볼 양식. 8-K 는 항목이 채무 발생(2.03)·미등록
+# 증권 판매(3.02)일 때만 - 임원 변경 8-K 까지 조달로 묶으면 안 된다.
+_FINANCING_FORMS = {"424B2", "424B3", "424B4", "424B5", "FWP",
+                    "S-1", "S-1/A", "S-3", "S-3/A", "S-3ASR"}
+_FINANCING_8K_ITEMS = {"1.01", "2.03", "3.02"}
+
+
+@mcp.tool()
+@safe_us_tool
+@track_metrics("get_us_liquidity")
+async def get_us_liquidity(ticker: str) -> str:
+    """US liquidity ledger — 미국 기업의 사용 가능 유동성 원장 (SEC XBRL, JSON).
+
+    "RIVN 런웨이가 현금만 기준인지", "제한 현금 빼면 실제로 쓸 수 있는 돈이
+    얼마인지", "1년 내 갚을 돈은 얼마인지" 같은 질문에 사용합니다. 재무 요약의
+    현금 한 줄로는 안 되는 것 - 단기투자·제한 현금·미인출 리볼버·부채 만기·
+    보고기간 후 조달 - 을 SEC XBRL 원문에서 출처·기준일별로 구조화합니다.
+
+    - 총액(total_available)은 **기준일이 같은 항목만** 더합니다. 제한 현금은
+      절대 총액에 넣지 않고, 포함형 총계와 교차검증만 합니다(중복 차감 방지).
+    - 미보고 항목은 0이 아니라 not_reported 로 남습니다. 제한·만기 자료가
+      없으면 runway_inputs.official_runway 는 unavailable 입니다 - 그때는
+      현금만 민감도(cash_only_base)까지만 말할 수 있습니다.
+    - 이 도구는 런웨이 개월 수를 계산하지 않습니다. 분모(burn)는
+      get_us_financial_statement 의 영업현금흐름에서 읽는 쪽이 정합니다.
+
+    Args:
+        ticker: US 티커 (예: "RIVN", "CRSP")
+    """
+    issuer = await sec.resolve_issuer(ticker)
+    if issuer is None:
+        return f"티커 '{ticker}'를 SEC 발행사 목록에서 찾지 못했습니다."
+    cik = issuer["cik"]
+
+    async def _component(name: str) -> tuple[str, dict]:
+        for tag in _LIQ_CONCEPTS[name]:
+            try:
+                fact = await sec.get_concept_latest(cik, tag)
+            except sec.SecFetchError as exc:
+                return name, {"status": "fetch_error", "detail": str(exc)}
+            if fact is not None:
+                return name, fact
+        return name, {"status": "not_reported"}
+
+    pairs = await asyncio.gather(*(_component(n) for n in _LIQ_CONCEPTS))
+    facts = dict(pairs)
+
+    def _ok(name: str) -> dict | None:
+        f = facts[name]
+        return f if "value" in f else None
+
+    cash = _ok("cash")
+    base_date = cash["end"] if cash else None
+
+    # 기준일보다 뒤처진 값은 그 사실을 값 옆에 적는다. 실측(RIVN)에서 2년 전
+    # LongTermDebtCurrent=0 이, (CRSP)에서 2018년 포함형 총계가 최신인 양
+    # 원장에 섞였다 - 값은 보존하되 며칠 뒤처졌는지 없이는 내보내지 않는다.
+    if base_date:
+        _base_d = _dt.date.fromisoformat(base_date)
+        for f in facts.values():
+            if "value" in f and f["end"] < base_date:
+                f["days_behind_base"] = (_base_d - _dt.date.fromisoformat(f["end"])).days
+
+    # 연 1회 주석(직전 10-K) 주기는 허용하고, 그보다 뒤처지면 재료로 안 쓴다.
+    _MAX_BEHIND_DAYS = 400
+
+    def _usable(name: str) -> dict | None:
+        f = _ok(name)
+        if f is None or f.get("days_behind_base", 0) > _MAX_BEHIND_DAYS:
+            return None
+        return f
+
+    # 총액: 기준일이 같은 가용 항목만. 기간이 섞인 합계는 원장이 아니라 오류다.
+    total_components: list[str] = []
+    total_value = 0
+    excluded: list[dict] = []
+    warns: list[str] = []
+    for name in ("cash", "marketable_securities", "revolver_available"):
+        f = _ok(name)
+        if f is None:
+            continue
+        if base_date and f["end"] != base_date:
+            excluded.append({"component": name, "reason": "as_of_mismatch",
+                             "end": f["end"], "value": f["value"]})
+            warns.append(
+                f"{name} 기준일({f['end']})이 현금 기준일({base_date})과 달라 "
+                "총액에서 제외했습니다 - 값은 원장에 따로 있습니다.")
+            continue
+        total_components.append(name)
+        total_value += f["value"]
+
+    if cash:
+        total_available: dict = {
+            "value": total_value, "as_of": base_date,
+            "components": total_components, "excluded": excluded,
+        }
+    else:
+        total_available = {"status": "unavailable",
+                           "reason": "cash_not_reported", "excluded": excluded}
+
+    # 제한 현금 - 총액 밖에서 보고. 포함형 총계가 있으면 교차검증까지.
+    rc_cur, rc_non = _ok("restricted_cash_current"), _ok("restricted_cash_noncurrent")
+    incl = _ok("cash_incl_restricted")
+    derived = None
+    if incl and cash and incl["end"] == cash["end"]:
+        derived = incl["value"] - cash["value"]
+    restricted = {
+        "current": facts["restricted_cash_current"],
+        "noncurrent": facts["restricted_cash_noncurrent"],
+        "included_in_total": False,
+        **({"derived_from_inclusive_total": derived} if derived is not None else {}),
+    }
+    reported_rc = sum(f["value"] for f in (rc_cur, rc_non) if f)
+    if derived is not None and (rc_cur or rc_non) and abs(derived - reported_rc) > 0:
+        restricted["cross_check"] = (
+            f"포함형 총계 기준 파생 제한액({derived:,})과 보고된 제한액"
+            f"({reported_rc:,})이 다릅니다 - 별도 제한 항목이 더 있을 수 있습니다.")
+
+    obligations = {n: facts[n] for n in
+                   ("debt_due_next_12m", "lease_due_next_12m",
+                    "purchase_obligation_next_12m")}
+
+    # 보고기간 후 자금조달성 공시(요구 2). 해석하지 않고 연결만 한다.
+    post_rows: list[dict] = []
+    post_error = None
+    if base_date:
+        try:
+            subs = await sec.get_submissions(cik)
+            for row in subs.get("rows") or []:
+                fdate = str(row.get("filing_date") or "")
+                if not fdate or fdate <= base_date:
+                    continue
+                form = str(row.get("form") or "")
+                items = {i.strip() for i in str(row.get("items") or "").split(",") if i.strip()}
+                if form in _FINANCING_FORMS or (
+                        form.startswith("8-K") and items & _FINANCING_8K_ITEMS):
+                    post_rows.append({
+                        "form": form, "filing_date": fdate,
+                        "items": row.get("items"),
+                        "description": row.get("primary_doc_description"),
+                        "url": sec.filing_url(cik, row.get("accession") or "",
+                                              row.get("primary_document") or ""),
+                    })
+                if len(post_rows) >= 10:
+                    break
+        except sec.SecFetchError as exc:
+            post_error = str(exc)
+
+    # 공식 런웨이 재료 판정(수용 2). 제한·만기 중 하나라도 확인 불가면
+    # 승격 불가 - 어떤 재료가 비었는지도 함께 적는다.
+    missing = []
+    if not (_usable("restricted_cash_current") or _usable("restricted_cash_noncurrent")
+            or derived is not None):
+        missing.append("restricted_cash")
+    for _ob in ("debt_due_next_12m", "lease_due_next_12m"):
+        if _usable(_ob) is None:
+            missing.append(_ob)
+            _f = _ok(_ob)
+            if _f is not None:
+                warns.append(
+                    f"{_ob} 최신 보고값이 기준일보다 {_f['days_behind_base']}일 "
+                    f"뒤처져 있습니다({_f['end']}) - 공식 런웨이 재료로 쓰지 않습니다.")
+    official = ({"status": "inputs_available"} if not missing
+                else {"status": "unavailable", "missing": missing,
+                      "note": "이 항목들이 원문(10-K/10-Q 주석)으로 확인되기 "
+                              "전까지 공식 런웨이로 승격하지 마세요."})
+    runway_inputs = {
+        "cash_only_base": cash["value"] if cash else None,
+        "available_liquidity_base": (total_available.get("value")
+                                     if cash else None),
+        "official_runway": official,
+        "note": "런웨이 개월 = 기반액 / 월 소진액(burn). burn 은 "
+                "get_us_financial_statement(cash_flow)의 영업현금흐름으로 정하세요.",
+    }
+
+    not_reported = sorted(n for n, f in facts.items() if f.get("status") == "not_reported")
+    fetch_errors = sorted(n for n, f in facts.items() if f.get("status") == "fetch_error")
+    if fetch_errors:
+        warns.append("조회 실패(재시도 가능): " + ", ".join(fetch_errors))
+    if missing:
+        warns.append("공식 런웨이 승격 불가 - 확인 불가 재료: " + ", ".join(missing))
+    if post_error:
+        warns.append(f"보고기간 후 공시 목록 조회 실패: {post_error}")
+
+    has_gap = bool(missing or fetch_errors or not cash or excluded or post_error)
+    coverage = {
+        "truncated": False,
+        "coverage_complete": not has_gap,
+        "not_reported": not_reported,
+        "fetch_errors": fetch_errors,
+        "reason": "source_limit" if has_gap else None,
+    }
+
+    payload = {
+        "ticker": issuer["requested_ticker"],
+        "issuer": {"cik": cik, "name": issuer["name"]},
+        "base_date": base_date,
+        "liquidity": {
+            "cash": facts["cash"],
+            "cash_incl_restricted": facts["cash_incl_restricted"],
+            "marketable_securities": facts["marketable_securities"],
+            "revolver_available": facts["revolver_available"],
+            "restricted_cash": restricted,
+            "total_available": total_available,
+        },
+        "obligations": obligations,
+        "post_period_financing": {
+            "cutoff": base_date, "rows": post_rows,
+            "note": "기준일 이후 제출된 자금조달성 공시(424B·S-1/S-3·FWP, "
+                    "8-K item 1.01/2.03/3.02)입니다. 조달 여부·금액은 원문으로 "
+                    "확인하세요 - 여기 있다는 것은 후보라는 뜻입니다.",
+        },
+        "runway_inputs": runway_inputs,
+        "_meta": _us_meta(
+            kind="filing",
+            data_as_of=base_date,
+            data_completeness=rmeta.PARTIAL if has_gap else rmeta.COMPLETE,
+            coverage=coverage,
+            warnings=warns or None,
+            extra={"source": "SEC XBRL companyconcept",
+                   "unit": (cash or {}).get("unit")},
+        ),
+    }
+    return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+
+
 @mcp.tool()
 @safe_us_tool
 @track_metrics("get_us_multi_diagnosis")
