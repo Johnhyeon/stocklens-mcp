@@ -124,6 +124,77 @@ class KeychainUnavailableTests(unittest.TestCase):
         self.assertEqual(connections["kis"]["status"], "unknown")
 
 
+class StatusAfterCommitFailureTests(unittest.TestCase):
+    """리뷰 지적: 저장(커밋)은 성공했는데 응답용 store.status() 의
+    keychain 읽기가 실패하면 전체가 실패로 바뀌어, 사용자가 "기존 키
+    유지"로 오해한다. 커밋 성공과 상태 조회를 분리한다."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.home = Path(self._tmp.name)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    class _DiesAfterSet(FakeKeyring):
+        """set_password 성공 후부터 get_password 가 죽는 keychain -
+        '커밋은 됐는데 재조회가 안 되는' 순간을 재현한다."""
+
+        def __init__(self):
+            super().__init__()
+            self.dead = False
+
+        def set_password(self, service, username, password):
+            super().set_password(service, username, password)
+            self.dead = True
+
+        def get_password(self, service, username):
+            if self.dead:
+                raise RuntimeError("keychain read failed")
+            return super().get_password(service, username)
+
+    def test_verify_and_save_success_survives_status_failure(self):
+        keyring = self._DiesAfterSet()
+        store = BrokerProfileStore(
+            provider="kis", keyring_module=keyring, home=self.home)
+
+        class OkVerifier:
+            async def verify(self, credentials, profile):
+                return {"auth": "ok", "kr_intraday": "available",
+                        "us_intraday": "available"}
+
+        resp = broker_cli.handle_request(
+            {"contract_version": 1, "action": "verify_and_save",
+             "provider": "kis", "profile": "real",
+             "credentials": {"app_key": "new-key",
+                             "app_secret": "new-secret"}},
+            store=store,
+            verifier=broker_cli.make_cli_verifier(OkVerifier()))
+
+        # 저장은 실제로 됐다 - 실패로 보고하면 안 된다.
+        self.assertTrue(resp["ok"], resp)
+        self.assertTrue(resp.get("status_unavailable"))
+        self.assertTrue(any("상태" in w for w in resp.get("warnings", [])))
+        # 최소 상태(상태 파일 기반)는 제공한다.
+        self.assertEqual(resp["status"]["active_profile"], "real")
+        # keychain 에는 새 키가 실제로 저장돼 있다.
+        keyring.dead = False
+        self.assertEqual(store.load_profile("real").app_key, "new-key")
+
+    def test_mode_change_success_survives_status_failure(self):
+        keyring = self._DiesAfterSet()
+        store = BrokerProfileStore(
+            provider="kis", keyring_module=keyring, home=self.home)
+        # set_data_source_mode 는 keychain 을 안 쓰지만 status() 가 쓴다.
+        keyring.dead = True
+        resp = broker_cli.handle_request(
+            {"contract_version": 1, "action": "set_data_source_mode",
+             "provider": "kis", "mode": "auto"}, store=store)
+        self.assertTrue(resp["ok"], resp)
+        self.assertTrue(resp.get("status_unavailable"))
+        self.assertEqual(resp["status"]["data_source_mode"], "auto")
+
+
 class StateSaveFailureTests(unittest.TestCase):
     """리뷰 지적(결함 4): keyring 에 새 키를 쓴 뒤 상태 파일 저장이
     실패하면 새 키가 남았다 - "실패하면 기존 프로필 유지" 약속 위반.

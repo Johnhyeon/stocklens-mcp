@@ -42,13 +42,41 @@ def _error(code: str, message: str) -> dict:
     }
 
 
+def _safe_status(store: BrokerProfileStore) -> tuple[dict, bool]:
+    """(status, unavailable). 커밋이 끝난 뒤의 상태 재조회 실패는 작업
+    실패가 아니다 (리뷰 지적) - keychain 을 못 읽으면 상태 파일 기반의
+    최소 상태로 대신한다."""
+    try:
+        return store.status(), False
+    except Exception:  # noqa: BLE001
+        from stock_mcp_server.market_data.connection_state import load_state
+
+        state = load_state(store.home)
+        return {
+            "provider": store.provider,
+            "connection_generation": state["connection_generation"],
+            "active_provider": state["active_provider"],
+            "active_profile": state["active_profile"],
+            "data_source_mode": state["data_source_mode"],
+            # keychain 을 못 읽어 configured 여부를 모른다. 거짓 단정 금지.
+            "profiles": {},
+            "capability_results": state.get("capability_results") or {},
+        }, True
+
+
 def _ok(action: str, store: BrokerProfileStore, extra: dict | None = None) -> dict:
+    status, unavailable = _safe_status(store)
     resp = {
         "ok": True,
         "contract_version": CONTRACT_VERSION,
         "action": action,
-        "status": store.status(),
+        "status": status,
     }
+    if unavailable:
+        resp["status_unavailable"] = True
+        resp["warnings"] = [
+            "변경은 저장됐지만 상태 재조회에 실패했습니다. "
+            "자격 증명 저장소를 읽을 수 없어 최소 상태만 반환합니다."]
     if extra:
         resp.update(extra)
     return resp
@@ -99,7 +127,15 @@ def handle_request(
 
     try:
         if action == "status":
-            return _ok(action, store)
+            # 순수 조회는 keychain 을 못 읽으면 답 자체가 없다 - 최소
+            # 상태로 눙치지 않고 keychain_unavailable 로 보고한다.
+            # (커밋이 있는 액션들은 _ok 가 커밋 성공을 보존한다.)
+            return {
+                "ok": True,
+                "contract_version": CONTRACT_VERSION,
+                "action": action,
+                "status": store.status(),
+            }
 
         if action == "switch_profile":
             profile = request.get("profile")
@@ -143,7 +179,7 @@ def handle_request(
                 resp["credentials_removed"] = True
                 resp["cache_removed"] = False
                 resp["cache_error"] = type(exc).__name__
-                resp["status"] = store.status()
+                resp["status"], _ = _safe_status(store)
                 return resp
             return _ok(action, store, extra={"cache_removed": True})
 
