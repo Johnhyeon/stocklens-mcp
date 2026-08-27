@@ -371,11 +371,16 @@ def compute_volume(df: pd.DataFrame) -> dict:
     }
 
 
-def compute_position(df: pd.DataFrame) -> dict:
+def compute_position(df: pd.DataFrame, bars_per_year: int = 252) -> dict:
+    """52주(1년) 고저 대비 현재가 위치.
+
+    창은 라벨을 따라야 한다: 일봉 252개, 주봉 52개, 월봉 12개가 1년이다.
+    252 고정으로 되돌아보면 주봉에서 약 5년치가 "52주 고가"로 나간다.
+    """
     if len(df) < 2:
         return {}
 
-    lookback = df.iloc[-252:] if len(df) >= 252 else df
+    lookback = df.iloc[-bars_per_year:] if len(df) >= bars_per_year else df
     high_52w = float(lookback["high"].max())
     low_52w = float(lookback["low"].min())
     if low_52w <= 0 or high_52w <= 0:
@@ -402,6 +407,8 @@ def compute_position(df: pd.DataFrame) -> dict:
         "low_date": low_date,
         "bars_since_high": int(len(lookback) - 1 - lookback.index.get_loc(high_idx)),
         "bars_since_low": int(len(lookback) - 1 - lookback.index.get_loc(low_idx)),
+        # 실제로 몇 봉을 봤는지. 이력이 1년치가 안 되면 이 수가 목표보다 작다.
+        "lookback_bars": int(len(lookback)),
     }
 
 
@@ -754,10 +761,15 @@ def split_valid_bars(ohlcv: list[dict]) -> tuple[list[dict], list[dict]]:
     return valid, excluded
 
 
+# 봉 주기별 1년치 봉 수. "52주" 라벨이 붙는 창은 이 수를 따라야 한다.
+_BARS_PER_YEAR = {"day": 252, "week": 52, "month": 12}
+
+
 def compute_indicators(
     ohlcv: list[dict],
     include: list[str],
     params: dict | None = None,
+    timeframe: str = "day",
 ) -> dict:
     """OHLCV와 요청 지표 키 리스트로 종합 지표 dict 생성.
 
@@ -767,6 +779,8 @@ def compute_indicators(
         params: 지표별 파라미터 오버라이드 dict. 예:
             {"rsi": {"period": 21}, "bollinger": {"std": 2.5}}
             지표 키별 dict가 그대로 compute_* 함수 kwargs로 전달됨.
+        timeframe: 봉 주기("day"/"week"/"month"). 52주 위치처럼 달력 기간
+            라벨이 붙는 지표의 창 크기가 이 주기를 따른다.
     """
     # 거래정지 placeholder(가격 0)를 실제 봉으로 계산하지 않는다.
     valid, excluded = split_valid_bars(ohlcv)
@@ -784,7 +798,10 @@ def compute_indicators(
         if fn is None:
             result[key] = {"error": f"지원하지 않는 지표: {key}"}
             continue
-        kwargs = params.get(key) or {}
+        kwargs = dict(params.get(key) or {})
+        if key == "position":
+            kwargs.setdefault("bars_per_year",
+                              _BARS_PER_YEAR.get(timeframe, 252))
         try:
             result[key] = fn(df, **kwargs)
         except TypeError as e:

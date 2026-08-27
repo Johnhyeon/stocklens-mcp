@@ -164,7 +164,7 @@ class IndicatorErrorCompletenessTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(any("position" in w for w in meta["warnings"]))
 
     async def test_bulk_reports_per_code_indicator_errors(self):
-        def broken(ohlcv, include, params=None):
+        def broken(ohlcv, include, params=None, timeframe="day"):
             return {"position": {"error": "ZeroDivisionError: float division by zero"},
                     "ma": {"ma5": 100}}
 

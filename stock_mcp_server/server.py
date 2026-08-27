@@ -2908,7 +2908,7 @@ async def get_indicators(
         return (f"종목 {code}: 조회된 봉 전체가 거래정지 placeholder 등 비정상이라 "
                 "지표를 계산할 수 없습니다.")
 
-    result = compute_indicators(ohlcv, include, params=params)
+    result = compute_indicators(ohlcv, include, params=params, timeframe=timeframe)
     ind_errors = _indicator_error_list(result)
     ind_cov = _indicator_coverage(
         include=include, available_bars=len(ohlcv), params=params
@@ -3245,7 +3245,8 @@ async def get_indicators_bulk(
             # 날짜만 모아 한 시계열인 척 넘기면, 두 종목이 같은 미완성 봉을
             # 가질 때 확정 봉이 자기 자신으로 나온다.
             state = _bar_state(timeframe=timeframe, rows=ohlcv, market_calendar=cal)
-            return code, compute_indicators(ohlcv, include, params=params), state
+            return code, compute_indicators(ohlcv, include, params=params,
+                                            timeframe=timeframe), state
         except Exception as e:
             return code, {"error": f"{type(e).__name__}: {e}"}, None
 
