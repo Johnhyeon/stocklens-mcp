@@ -1,12 +1,12 @@
 # StockLens Tool Reference
 
-**48 tools total** — Market calendar 1 + Korean 27 + US 20.
+**50 tools total** — Market calendar 1 + Korean 29 + US 20.
 
 [🇰🇷 한국어](../ko/TOOLS.md) | [USAGE](USAGE.md) | [INSTALL](INSTALL.md)
 
 ---
 
-## 🇰🇷 Korean Stocks (27)
+## 🇰🇷 Korean Stocks (29)
 
 Data source: Naver Finance (public data, no API key).
 
@@ -114,6 +114,61 @@ Indicator judgments computed from the same bars as the chart (JSON).
   default 260), `include`, `completed_only`, `source`
 - Measured in **bars**, not calendar days. Insufficient history is
   reported as not-computable instead of a silent wrong value
+
+---
+
+### Detailed supply and demand (2) - broker connection
+
+Data available only through a broker Open API. Korean stocks only; this
+data does not exist for US symbols.
+
+**The brokers do not offer the same things**, and neither is a superset
+of the other. They split in opposite directions:
+
+| | Korea Investment | Kiwoom |
+|---|---|---|
+| Investor categories | 3 (individual, foreign, institution total) | 13 (institution breakdown included) |
+| Buy/sell split | Yes | No (net only) |
+| Lending, credit, foreign holding | No | Yes |
+
+So every response carries **what it returned and what it could not**,
+with a reason. A missing item is never filled in with zero or a blank.
+
+#### `get_detailed_investor_flow`
+Daily net flow by investor category (JSON). A different tool from
+`get_flow` (Naver, 3 categories); `get_flow` keeps working with no broker
+connected.
+- `code` (single) or `codes` (up to 30), `days` (default 20, max 120),
+  `measure` (`net_quantity` / `net_amount`), `source`
+  (`auto|kis|kiwoom`)
+- **Quantity and amount are different numbers.** Measured up to 3.7x
+  apart for the same item. Never quote a figure without the `unit`
+- An item listed in `unsettled` is **not yet settled**, which is not the
+  same as 0 (no trading)
+- `institution_total` already contains its sub-items. Adding them
+  together double-counts
+- Example: `"Samsung Electronics investor flow, last 20 days"`
+
+#### `get_supply_pressure`
+Program trading, short selling, credit, securities lending, foreign
+holding (JSON).
+- `code`/`codes`, `kind` or `kinds`
+  (`program_trading|short_selling|credit|securities_lending|`
+  `foreign_holding|cfd`), `days` (default 30), `source`
+- The response is **split into one block per kind**, each with its own
+  `status`, `provider`, `granularity`, `data_as_of` and warnings.
+  Different kinds are never merged into a single score
+- Check `granularity`. Program trading is an **intraday series** from
+  Korea Investment and **daily** from Kiwoom, so the two cannot be
+  compared on the same basis
+- **A lending balance is not short-selling execution.** Lending is the
+  balance of borrowed shares; short selling is an actual sell fill
+- Example: `"Samsung short selling and program trading, past month"`
+
+**Items still in verification**: only items whose data contract has been
+verified return real values. The rest report `verifying`, which is a
+different state from "unsupported". LeetKit Manager's broker screen and
+`stocklens-doctor` show which item is in which state.
 
 ---
 
