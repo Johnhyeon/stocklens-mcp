@@ -1,0 +1,44 @@
+{
+ "title": "토스 KR 계약 불일치 재확인 (2026-08-28 장중 raw, 대표 지시로 실행)",
+ "method": "TossClient raw 1m vs KIS raw 1m, 형성 중 분 제외. 어댑터 KR 차단은 제품 설계라 우회하지 않고 raw 로만 수집",
+ "confirmed": "08-27 확정 사항 전부 재현: (1) 봉 끝 라벨 시프트 - toss[t+1] 의 OHLC 가 kis[t] 와 정확히 일치 (069500 ETF 는 56/56 전부, 000660 26/56, 005930 31/56 - 대형주는 통합 거래량 영향으로 가격도 미세 상이) (2) 같은 라벨 거래량 중앙값 1.6~1.7배 (KRX 단독 아님) (3) 토스는 08:00 프리장 행 포함 (KIS 정규장에 없는 62행)",
+ "note": "전날 strict 러너 2회 실행 기록: 1차는 experimental 플래그 차단으로 전 케이스 거부(플래그가 사용자 경로에서 작동한다는 증거), 2차는 어댑터 KR 차단(unsupported)으로 거부 - 둘 다 의도된 제품 동작. uat_toss_kr_20260828.json 참조",
+ "measurements": {
+  "005930": {
+   "kis_bars": 56,
+   "toss_bars": 118,
+   "compared": 56,
+   "same_label_exact_ohlc(o,c)": 1,
+   "shifted_plus1_exact_ohlc(o,c)": 31,
+   "vol_ratio_med": 1.615,
+   "vol_ratio_q1": 0.796,
+   "vol_ratio_q3": 3.024,
+   "toss_first": "2026-08-28T08:01:00+09:00",
+   "toss_last": "2026-08-28T09:58:00+09:00"
+  },
+  "000660": {
+   "kis_bars": 56,
+   "toss_bars": 118,
+   "compared": 56,
+   "same_label_exact_ohlc(o,c)": 0,
+   "shifted_plus1_exact_ohlc(o,c)": 26,
+   "vol_ratio_med": 1.706,
+   "vol_ratio_q1": 1.096,
+   "vol_ratio_q3": 2.308,
+   "toss_first": "2026-08-28T08:01:00+09:00",
+   "toss_last": "2026-08-28T09:58:00+09:00"
+  },
+  "069500": {
+   "kis_bars": 56,
+   "toss_bars": 58,
+   "compared": 56,
+   "same_label_exact_ohlc(o,c)": 0,
+   "shifted_plus1_exact_ohlc(o,c)": 56,
+   "vol_ratio_med": 0.878,
+   "vol_ratio_q1": 0.635,
+   "vol_ratio_q3": 1.665,
+   "toss_first": "2026-08-28T09:01:00+09:00",
+   "toss_last": "2026-08-28T09:58:00+09:00"
+  }
+ }
+}
