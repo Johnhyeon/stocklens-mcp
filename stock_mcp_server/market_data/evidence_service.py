@@ -240,7 +240,12 @@ class EvidenceService:
                 market=MARKET, data_availability=base.data_availability,
                 records=(), coverage=base.coverage,
                 warnings=base.warnings, error_code=base.error_code,
-                entity_failures=[], measure=measure, unit=base.unit,
+                # 요청한 종목이 목록에서 조용히 사라지면 호출자는 그것을
+                # '조회했는데 없음'으로 읽는다. 시도조차 못 했다는 사실을
+                # 종목마다 남긴다.
+                entity_failures=[{"code": c, "reason": base.error_code}
+                                 for c in unique],
+                measure=measure, unit=base.unit,
                 alternative_provider=base.alternative_provider)
 
         day = self._resolve_base_date(base_date)
@@ -320,9 +325,17 @@ class EvidenceService:
             adapter = self._adapter(runtime, snapshot, provider)
             before = snapshot.provider_generation(provider)
         except EvidenceRouterError as exc:
+            # 여섯 종류를 물었는데 블록이 0 개면 호출자는 두 가지 모양을
+            # 따로 다뤄야 한다. 실패해도 요청한 종류는 자기 자리를 갖는다.
             return PressureResult(
                 ok=False, provider=exc.provider, profile=None,
-                market=MARKET, blocks={}, coverage={"complete": False},
+                market=MARKET,
+                blocks={k: _state_block(k, "not_configured",
+                                        exc.provider or "none", reason=None,
+                                        granularity="unknown")
+                        for k in requested},
+                coverage={"requested_kinds": len(requested),
+                          "fetched_kinds": 0, "complete": False},
                 warnings=(str(exc),), error_code=exc.error_code)
 
         # 종류마다 능력이 다르다. 요청 전체를 하나로 판정하지 않고
@@ -330,6 +343,7 @@ class EvidenceService:
         blocks: dict[str, PressureBlock] = {}
         fetchable: list[str] = []
         reasons = adapter.pressure_unavailable_reasons()
+        shapes = adapter.pressure_granularity()
         for kind in requested:
             state = capability_state(provider, f"kr_{kind}",
                                      caps.get(provider))
@@ -339,7 +353,8 @@ class EvidenceService:
                 fetchable.append(kind)
             else:
                 blocks[kind] = _state_block(
-                    kind, state, provider, reason=reasons.get(kind))
+                    kind, state, provider, reason=reasons.get(kind),
+                    granularity=shapes.get(kind, "unknown"))
 
         if fetchable:
             try:
@@ -370,7 +385,8 @@ class EvidenceService:
 
 
 def _state_block(kind: str, state: str, provider: str,
-                 reason: str | None) -> PressureBlock:
+                 reason: str | None,
+                 granularity: str = "unknown") -> PressureBlock:
     """받지 못한 종류도 자기 자리를 갖는다. 빠뜨리지 않는다.
 
     사용자가 여섯 종류를 물었는데 셋만 돌아오면 나머지 셋이 '없음'인지
@@ -396,4 +412,4 @@ def _state_block(kind: str, state: str, provider: str,
         kind=kind, status=status, provider=provider, market=MARKET,
         rows=(), data_as_of=None, data_completeness="none",
         warnings=(message,), unavailable_reason=why,
-        coverage={"rows": 0, "complete": False})
+        coverage={"rows": 0, "complete": False}, granularity=granularity)

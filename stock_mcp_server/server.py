@@ -7934,6 +7934,13 @@ from stock_mcp_server.market_data.kiwoom_client import (  # noqa: E402
 from stock_mcp_server.market_data.toss_client import (  # noqa: E402
     TossApiError as _TossApiError,
 )
+# 상세 수급 어휘 (1.1). 도구가 목록을 복제하지 않고 원본에서 읽는다.
+from stock_mcp_server.market_data.evidence_models import (  # noqa: E402
+    UNIT_BY_MEASURE as _UNIT_BY_MEASURE,
+)
+from stock_mcp_server.market_data.evidence_router import (  # noqa: E402
+    PRESSURE_KINDS as _EVIDENCE_KINDS,
+)
 
 _INTRADAY_SOURCES = ("auto",) + _provider_registry.ids() + (
     "naver", "yahoo")
@@ -8641,6 +8648,370 @@ async def get_intraday_indicators(
         "indicators": result,
         "_meta": meta,
     }
+    return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+
+
+# ---------------------------------------------------------------------------
+# 상세 수급 증거 (1.1)
+#
+# 공개 도구는 둘뿐이다. 종류는 인자로 고르고 응답에서 블록으로 나뉜다
+# (대표 결정 2026-08-28: 데스크탑 앱은 도구 단위로 승인을 받으므로,
+# 종류마다 도구를 만들면 승인 클릭이 종류 수만큼 늘어난다).
+# ---------------------------------------------------------------------------
+
+def _public_broker_ids() -> tuple[str, ...]:
+    return tuple(p for p in _provider_registry.ids() if _broker_is_public(p))
+
+
+def _evidence_service():
+    from stock_mcp_server.market_data.evidence_service import EvidenceService
+    return EvidenceService(runtime=_PROVIDER_RUNTIME,
+                           public_providers=_public_broker_ids())
+
+
+def _flow_row_json(row) -> dict:
+    """행 하나. 값과 상태를 절대 같은 자리에 담지 않는다.
+
+    `values` 에 없고 `unsettled` 에 있으면 '아직 정산 전이라 값이 아니다'
+    라는 뜻이다. 0 으로 채우면 '매매 없음'과 구분되지 않는다.
+    """
+    return {
+        "date": row.date.isoformat(),
+        "close": float(row.close) if row.close is not None else None,
+        "volume": row.volume,
+        "values": dict(row.values),
+        "unsettled": list(row.unsettled),
+        "data_state": row.data_state,
+        "balance_ok": row.balance_ok,
+        # 어느 원본 계정에서 온 숫자인지 잃지 않는다 (라벨-값 계약).
+        "raw_categories": dict(row.raw_categories),
+    }
+
+
+def _flow_dataset_json(dataset) -> dict:
+    return {
+        "symbol": dataset.symbol,
+        "provider": dataset.provider,
+        "profile": dataset.profile,
+        "market": dataset.market,
+        "measure": dataset.measure,
+        "unit": dataset.unit,
+        "data_state": dataset.data_state,
+        "source_endpoint": dataset.source_endpoint,
+        "coverage": dict(dataset.coverage),
+        "warnings": list(dataset.warnings),
+        "rows": [_flow_row_json(r) for r in dataset.rows],
+    }
+
+
+def _pressure_block_json(block) -> dict:
+    return {
+        "kind": block.kind,
+        "status": block.status,
+        "provider": block.provider,
+        "market": block.market,
+        # 같은 종류라도 공급자마다 모양이 다르다. 실측(2026-08-28)
+        # 프로그램매매는 KIS 가 장중 시계열, 키움이 일별이다.
+        "granularity": block.granularity,
+        "data_as_of": (block.data_as_of.isoformat()
+                       if block.data_as_of else None),
+        "data_completeness": block.data_completeness,
+        "unavailable_reason": block.unavailable_reason,
+        "coverage": dict(block.coverage),
+        "warnings": list(block.warnings),
+        "rows": [{
+            "date": r.date.isoformat(),
+            "measures": {k: float(v) for k, v in r.measures.items()},
+            "raw_fields": dict(r.raw_fields),
+        } for r in block.rows],
+    }
+
+
+def _evidence_meta(*, code: str | None, provider: str | None,
+                   profile: str | None, provider_status: str,
+                   data_as_of: str | None, completeness: str,
+                   warnings: list[str], coverage: dict | None = None,
+                   extra: dict | None = None) -> dict:
+    # coverage 는 extra 가 아니라 정규 슬롯으로 넘긴다. extra 로 넘기면
+    # v3 검증(미정의 reason·잘라놓고 complete 주장)을 통째로 건너뛴다.
+    payload = rmeta.provider_extension(
+        provider=provider or "none", provider_status=provider_status,
+        provider_profile=profile)
+    payload.update(extra or {})
+    return _kr_meta(kind="bars", code=code, data_as_of=data_as_of,
+                    data_completeness=completeness, warnings=warnings,
+                    coverage=coverage, extra=payload)
+
+
+def _evidence_error(code: str | None, message: str, provider_status: str,
+                    body: dict | None = None) -> str:
+    payload = {"ok": False, "market": "KR"}
+    payload.update(body or {})
+    payload["_meta"] = _evidence_meta(
+        code=code, provider=None, profile=None,
+        provider_status=provider_status, data_as_of=None,
+        completeness=rmeta.NONE, warnings=[message])
+    return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+
+
+def _evidence_status_of(result) -> str:
+    if result.ok:
+        return "ok"
+    return {
+        "provider_not_configured": "not_configured",
+        "unknown_capability": "entity_not_found",
+        "provider_changed_during_request": "provider_unavailable",
+    }.get(result.error_code or "", "unsupported")
+
+
+def _validate_evidence_request(code, codes, source):
+    """(오류 문자열 | None, 종목 목록). 공급자를 부르기 전에 거른다."""
+    entities = [str(c).strip() for c in (codes or []) if str(c).strip()]
+    if code:
+        entities.insert(0, str(code).strip())
+    if not entities:
+        return "code 또는 codes 중 하나는 반드시 지정해야 합니다.", []
+    allowed = ("auto",) + _public_broker_ids()
+    if source not in allowed:
+        return (f"지원하지 않는 source입니다: {source} "
+                f"(지원: {', '.join(allowed)})"), []
+    return None, entities
+
+
+# 도구 인자 검증용. 서비스·어댑터와 같은 표에서 나온다.
+_EVIDENCE_MEASURES = tuple(_UNIT_BY_MEASURE)
+_EVIDENCE_PRESSURE_KINDS = _EVIDENCE_KINDS
+
+
+@mcp.tool()
+@safe_tool
+@track_metrics("get_detailed_investor_flow")
+async def get_detailed_investor_flow(
+    code: str | None = None,
+    codes: list[str] | None = None,
+    days: int = 20,
+    measure: str = "net_quantity",
+    source: str = "auto",
+) -> str:
+    """상세수급 — 투자자·기관별 일별 순매매 (증권사 연결 필요, JSON).
+
+    기존 get_flow 와 다른 도구다. get_flow 는 기본 데이터의 개인·외국인·
+    기관 3종이고, 이 도구는 증권사 Open API 로 받는 상세 구분이다.
+
+    **읽을 때 반드시 지킬 것:**
+
+    - `values` 에 없는 항목은 값이 없는 것이고, `unsettled` 에 있으면
+      **미정산**(정산 전이라 아직 값이 아님)이다. **둘 다 0 이 아니다.**
+      0 으로 읽으면 '매매 없음'이 되어 사실과 달라진다.
+    - `data_state` 가 `provisional` 인 행은 확정 수치가 아니다. final 과
+      섞어서 합계·평균을 내지 않는다.
+    - `institution_total`(기관계)과 그 하위 항목(금융투자·보험·투신·은행·
+      연기금·사모·국가 등)을 **함께 더하면 두 번 센다.** 기관계는 이미
+      하위 항목의 합이다.
+    - `measure` 는 수량(net_quantity, 단주)과 금액(net_amount, 백만원)이
+      전혀 다른 값이다. 실측상 같은 항목이 3.7배까지 차이 난다. 응답의
+      `unit` 을 빼고 숫자만 인용하지 않는다.
+    - 국내(KR) 전용이다. **US 종목에는 이 데이터가 없다.**
+    - `data_availability.unavailable` 은 연결된 증권사가 그 항목을 주지
+      않는다는 뜻이다. 키움은 기관 세부 13종을 주지만 매수·매도 분해가
+      없고, 한국투자증권은 3종만 주지만 매수·매도를 준다.
+
+    Args:
+        code: KR 종목코드 6자리 (단건)
+        codes: 종목코드 목록 (최대 30개). code 와 함께 쓸 수 있다
+        days: 조회할 거래일 수 (기본 20, 최대 120)
+        measure: "net_quantity"(수량) | "net_amount"(금액)
+        source: auto|kis|kiwoom. auto 는 주 사용 증권사 하나에 고정되고,
+            증권사를 명시하면 strict(실패해도 다른 곳으로 대체 안 함)
+    """
+    err, entities = _validate_evidence_request(code, codes, source)
+    if err:
+        return _evidence_error(code, err, "entity_not_found")
+    if measure not in _EVIDENCE_MEASURES:
+        return _evidence_error(
+            code, f"지원하지 않는 measure입니다: {measure} "
+            f"(지원: {', '.join(_EVIDENCE_MEASURES)})", "entity_not_found")
+
+    service = _evidence_service()
+    single = len(entities) == 1
+    try:
+        if single:
+            result = await service.investor_flow(
+                code=entities[0], days=days, measure=measure, source=source)
+        else:
+            result = await service.investor_flow_batch(
+                codes=entities, days=days, measure=measure, source=source)
+    except ValueError as exc:
+        return _evidence_error(code, str(exc), "entity_not_found")
+
+    warnings = list(result.warnings)
+    if getattr(result, "alternative_provider", None):
+        warnings.append(
+            f"이미 연결된 {result.alternative_provider} 는 이 항목을 "
+            f"제공합니다. source=\"{result.alternative_provider}\" 로 "
+            "요청하면 받을 수 있습니다. 자동으로 바꾸지 않습니다.")
+
+    payload: dict = {
+        "ok": result.ok,
+        "market": result.market,
+        "provider": result.provider,
+        "measure": result.measure,
+        "unit": result.unit,
+        "data_availability": result.data_availability,
+    }
+    if single:
+        if result.records:
+            payload.update(_flow_dataset_json(result.records[0]))
+    else:
+        payload["entities"] = {d.symbol: _flow_dataset_json(d)
+                               for d in result.records}
+        payload["entity_failures"] = result.entity_failures
+        for failure in result.entity_failures:
+            warnings.append(
+                f"{failure['code']} 조회 실패({failure['reason']}). 다른 "
+                "증권사로 대체하지 않았습니다.")
+
+    as_of = None
+    for dataset in result.records:
+        if dataset.rows:
+            newest = max(r.date for r in dataset.rows).isoformat()
+            as_of = newest if as_of is None else max(as_of, newest)
+    completeness = rmeta.COMPLETE
+    if not result.ok:
+        completeness = rmeta.NONE
+    elif result.data_availability["unavailable"] or \
+            not result.coverage.get("complete", True):
+        completeness = rmeta.PARTIAL
+
+    unavailable = result.data_availability["unavailable"]
+    payload["_meta"] = _evidence_meta(
+        code=entities[0] if single else None, provider=result.provider,
+        profile=result.profile, provider_status=_evidence_status_of(result),
+        data_as_of=as_of, completeness=completeness, warnings=warnings,
+        coverage={
+            **result.coverage,
+            "coverage_complete": (result.ok and not unavailable
+                                  and result.coverage.get("complete", True)),
+            # 요청한 항목 일부를 이 증권사가 주지 않는다는 뜻이다.
+            "reason": None if (result.ok and not unavailable) else
+            "source_limit",
+        },
+        extra={"data_availability": result.data_availability})
+    return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+
+
+@mcp.tool()
+@safe_tool
+@track_metrics("get_supply_pressure")
+async def get_supply_pressure(
+    code: str | None = None,
+    codes: list[str] | None = None,
+    kind: str | None = None,
+    kinds: list[str] | None = None,
+    days: int = 30,
+    source: str = "auto",
+) -> str:
+    """수급압력 — 프로그램매매·공매도·신용·대차·외국인보유 (JSON).
+
+    종류를 여러 개 물어도 응답은 **종류별 블록으로 나뉜다.** 각 블록이
+    자기 status·provider·granularity·data_as_of·경고를 따로 갖는다.
+    서로 다른 종류를 하나의 점수나 숫자로 합치지 않는다. 합쳐서 만든
+    지표는 어느 원본에서 왔는지 되짚을 수 없다.
+
+    **읽을 때 반드시 지킬 것:**
+
+    - `status` 가 `ok` 가 아닌 블록은 데이터가 없는 것이 아니라 **받지
+      못한 것**이다. `unavailable_reason` 을 함께 읽는다. 0 으로 읽거나
+      '해당 없음'으로 요약하지 않는다.
+    - `granularity` 를 확인한다. 프로그램매매는 한국투자증권이 **장중
+      시계열**, 키움증권이 **일별**이다. 모양이 다른 두 숫자를 같은
+      기준으로 비교하지 않는다.
+    - **대차잔고는 공매도 실행이 아니다.** 대차는 빌린 주식의 잔고이고,
+      공매도는 실제 매도 체결이다. 대차잔고 증가를 공매도로 옮겨 적지
+      않는다.
+    - `securities_lending` 은 키움증권만 종목 단위로 준다. 한국투자증권은
+      시장 전체 값만 있어 종목별 답으로 쓰지 않는다(market_level_only).
+    - 국내(KR) 전용이다.
+
+    Args:
+        code: KR 종목코드 6자리 (단건)
+        codes: 종목코드 목록 (최대 30개)
+        kind: 종류 하나
+        kinds: 종류 목록. program_trading | short_selling | credit |
+            securities_lending | foreign_holding | cfd
+        days: 조회 기간(일, 기본 30)
+        source: auto|kis|kiwoom (auto 는 주 사용 증권사 하나에 고정)
+    """
+    err, entities = _validate_evidence_request(code, codes, source)
+    if err:
+        return _evidence_error(code, err, "entity_not_found")
+
+    wanted = [k for k in (kinds or []) if k]
+    if kind:
+        wanted.insert(0, kind)
+    if not wanted:
+        wanted = list(_EVIDENCE_PRESSURE_KINDS)
+
+    service = _evidence_service()
+    try:
+        results = [
+            (entity, await service.supply_pressure(
+                code=entity, kinds=wanted, days=days, source=source))
+            for entity in entities
+        ]
+    except ValueError as exc:
+        return _evidence_error(code, str(exc), "entity_not_found")
+
+    single = len(entities) == 1
+    first = results[0][1]
+    payload: dict = {
+        "ok": any(r.ok for _, r in results),
+        "market": "KR",
+        "provider": first.provider,
+        "requested_kinds": wanted,
+    }
+    if single:
+        payload["blocks"] = {k: _pressure_block_json(b)
+                             for k, b in first.blocks.items()}
+    else:
+        payload["entities"] = {
+            entity: {"blocks": {k: _pressure_block_json(b)
+                                for k, b in result.blocks.items()}}
+            for entity, result in results}
+
+    warnings: list[str] = []
+    for _, result in results:
+        warnings.extend(result.warnings)
+        for block in result.blocks.values():
+            if block.status != "ok":
+                warnings.extend(block.warnings)
+
+    as_of = None
+    for _, result in results:
+        for block in result.blocks.values():
+            if block.data_as_of:
+                stamp = block.data_as_of.isoformat()
+                as_of = stamp if as_of is None else max(as_of, stamp)
+    served = sum(1 for _, r in results
+                 for b in r.blocks.values() if b.status == "ok")
+    total = sum(len(r.blocks) for _, r in results)
+    if not payload["ok"]:
+        completeness = rmeta.NONE
+    elif served < total:
+        completeness = rmeta.PARTIAL
+    else:
+        completeness = rmeta.COMPLETE
+
+    payload["_meta"] = _evidence_meta(
+        code=entities[0] if single else None, provider=first.provider,
+        profile=first.profile, provider_status=_evidence_status_of(first),
+        data_as_of=as_of, completeness=completeness,
+        warnings=list(dict.fromkeys(warnings)),
+        coverage={
+            "requested_kinds": total, "served_kinds": served,
+            "coverage_complete": served == total,
+            "reason": None if served == total else "source_limit",
+        })
     return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
 
 

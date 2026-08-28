@@ -59,6 +59,7 @@ class _FakeAdapter:
         self.pressure_capabilities = source_cls.pressure_capabilities
         self.pressure_unavailable_reasons = (
             source_cls.pressure_unavailable_reasons)
+        self.pressure_granularity = source_cls.pressure_granularity
         self._fail = set(fail_codes)
         self._blocks = blocks or {}
         self.flow_calls = []

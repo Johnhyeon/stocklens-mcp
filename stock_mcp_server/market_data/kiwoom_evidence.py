@@ -306,6 +306,11 @@ class KiwoomEvidenceProvider:
         return caps
 
     @staticmethod
+    def pressure_granularity() -> dict[str, str]:
+        """종류별 시계열 모양. 키움은 실측상 전부 일별이다."""
+        return {kind: "daily" for kind in _SPEC_BY_KIND}
+
+    @staticmethod
     def pressure_unavailable_reasons() -> dict[str, str]:
         """왜 못 주는지. 상태만으로는 복원되지 않는 사실이다."""
         return dict(UNSUPPORTED_KINDS)

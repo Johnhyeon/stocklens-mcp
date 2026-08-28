@@ -240,6 +240,15 @@ class KisEvidenceProvider:
         return caps
 
     @staticmethod
+    def pressure_granularity() -> dict[str, str]:
+        """종류별 시계열 모양. 실제로 주는 종류만 담는다.
+
+        데이터가 없는 블록에 기본값 'daily' 를 실으면, KIS 프로그램매매
+        (장중)를 일별이라고 말하게 된다. 값이 없어도 라벨은 틀리면 안 된다.
+        """
+        return {k: v["granularity"] for k, v in _PRESSURE_SPECS.items()}
+
+    @staticmethod
     def pressure_unavailable_reasons() -> dict[str, str]:
         """왜 못 주는지. 상태만으로는 복원되지 않는 사실이다.
 
