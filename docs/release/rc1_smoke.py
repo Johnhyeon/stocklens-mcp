@@ -1,9 +1,13 @@
 # -*- coding: utf-8 -*-
 """1.0.0rc1 설치본 스모크 (Phase 1 step 6).
 
-깨끗한 venv 에 설치된 산출물만 호출한다. 워크트리 소스는 쓰지 않는다.
-읽기 전용 검사만 하며, UAT 홈 상태를 바꾸지 않는다.
+경로를 인자나 환경변수로 받는다 (임시 폴더 하드코딩 금지).
+
+    python rc1_smoke.py --venv <venv경로> [--home <STOCKLENS_HOME>]
+
+    RC1_VENV / RC1_STOCKLENS_HOME 환경변수로도 지정할 수 있다.
 """
+import argparse
 import io
 import json
 import os
@@ -12,10 +16,30 @@ import sys
 from pathlib import Path
 
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
-VENV = Path(r"C:\Users\whdqj\AppData\Local\Temp\claude"
-            r"\D--project-stocklens\1bbc70bb-4455-422e-8819-ab68fa1e67cb"
-            r"\scratchpad\rc1-clean2\Scripts")
-UAT = r"D:\project\stocklens\.uat-home-1.0"
+
+
+def _resolve_paths() -> "tuple[Path, str]":
+    parser = argparse.ArgumentParser(add_help=True)
+    parser.add_argument("--venv", default=os.environ.get("RC1_VENV"),
+                        help="산출물을 설치한 venv 경로 (Scripts 상위)")
+    parser.add_argument("--home",
+                        default=os.environ.get("RC1_STOCKLENS_HOME"),
+                        help="검증에 쓸 STOCKLENS_HOME")
+    args = parser.parse_args()
+    if not args.venv:
+        parser.error("--venv 또는 RC1_VENV 가 필요합니다 "
+                     "(예: --venv C:/tmp/rc1-clean)")
+    venv = Path(args.venv)
+    scripts = venv / "Scripts" if (venv / "Scripts").exists() else venv
+    if not (scripts / "python.exe").exists() and             not (scripts / "python").exists():
+        parser.error(f"venv 에서 python 을 찾지 못했습니다: {scripts}")
+    home = args.home or os.environ.get("STOCKLENS_HOME") or ""
+    if not home:
+        parser.error("--home 또는 RC1_STOCKLENS_HOME 이 필요합니다")
+    return scripts, home
+
+
+VENV, UAT = _resolve_paths()
 fails = []
 
 
