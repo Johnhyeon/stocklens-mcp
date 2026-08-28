@@ -15,6 +15,9 @@ import httpx
 from stock_mcp_server.market_data.broker_http import EndpointNotAllowedError
 from stock_mcp_server.market_data.broker_profiles import BrokerCredentials
 from stock_mcp_server.market_data.provider_registry import registry
+from stock_mcp_server.market_data.token_store import (
+    credential_fingerprint as _fingerprint,
+)
 
 # host·경로의 단일 출처는 레지스트리다 (1.0 Task 11). 상수는 호환용 별칭.
 _DESCRIPTOR = registry.require("kis")
@@ -48,6 +51,7 @@ class KisClient:
         transport: httpx.AsyncBaseTransport | None = None,
         generation_provider=None,
         clock=None,
+        token_store=None,
     ) -> None:
         if profile not in _DESCRIPTOR.supported_profiles:
             raise ValueError(f"지원하지 않는 프로필: {profile}")
@@ -64,6 +68,9 @@ class KisClient:
         self._transport = transport
         self._generation_provider = generation_provider or (lambda: 0)
         self._clock = clock or time.monotonic
+        self._token_store = token_store
+        self._fingerprint = _fingerprint({"app_key": self._app_key,
+                                          "app_secret": self._app_secret})
 
         self._token: str | None = None
         self._token_expires_at: float = 0.0
@@ -126,7 +133,14 @@ class KisClient:
 
         self._token = token
         self._token_expires_at = self._clock() + expires_in
+        if self._token_store is not None:
+            self._token_store.save(
+                "kis", self.profile, self._fingerprint,
+                token, time.time() + expires_in)
         self._token_generation = self._generation_provider()
+        if self._token_store is not None:
+            self._token_store.save("kis", self.profile, self._fingerprint,
+                                   token, self._token_expires_at)
 
     @staticmethod
     def _token_error_code(resp: httpx.Response) -> str | None:
@@ -140,8 +154,30 @@ class KisClient:
         code = payload.get("error_code") or payload.get("msg_cd")
         return code if isinstance(code, str) else None
 
+    def _load_shared_token(self, provider: str) -> bool:
+        """다른 프로세스가 받아 둔 유효한 토큰을 쓴다.
+
+        실측(2026-08-28): KIS 는 24시간 유효하고 재발급해도 같은 토큰을
+        주지만 발급 엔드포인트가 1분 1회 제한이다. 토스는 재발급하면
+        **이전 토큰을 즉시 무효화**해서, 프로세스마다 새로 받으면 서로의
+        토큰을 죽인다. 저장된 만료는 벽시계라 이 프로세스의 monotonic
+        기준으로 환산한다.
+        """
+        if self._token_store is None:
+            return False
+        got = self._token_store.load(provider, self.profile,
+                                     self._fingerprint)
+        if got is None:
+            return False
+        token, wall_expires_at = got
+        self._token = token
+        self._token_expires_at = self._clock() + (
+            wall_expires_at - time.time())
+        self._token_generation = self._generation_provider()
+        return True
+
     async def _ensure_token(self, http: httpx.AsyncClient) -> str:
-        if not self._token_valid():
+        if not self._token_valid() and not self._load_shared_token("kis"):
             await self._issue_token(http)
         assert self._token is not None
         return self._token

@@ -48,6 +48,8 @@ class PendingCredential:
 class CleanupReport:
     removed: tuple[str, ...] = ()
     failed: tuple[str, ...] = ()
+    # 자격 증명 삭제와 별개로 보고한다 (요구사항 12: 결과를 섞지 않는다).
+    tokens_removed: tuple[str, ...] = ()
 
     @property
     def ok(self) -> bool:
@@ -63,11 +65,15 @@ class CommitResult:
 
 class CredentialStore:
     def __init__(self, keyring_module=None,
-                 home: Path | str | None = None) -> None:
+                 home: Path | str | None = None,
+                 token_store=None) -> None:
         if keyring_module is None:
             import keyring as keyring_module  # noqa: PLC0415
         self._keyring = keyring_module
         self._home = home
+        # 연결을 끊으면 그 연결로 받은 토큰도 함께 지운다. 남겨두면
+        # 지운 줄 아는 자격이 보안 저장소에 계속 살아 있게 된다.
+        self._token_store = token_store
 
     @property
     def home(self) -> Path | str | None:
@@ -276,6 +282,30 @@ class CredentialStore:
         save_state_v2(state, self._home)
         return CleanupReport(removed=tuple(removed), failed=tuple(failed))
 
+    def _forget_token(self, provider: str, profile: str,
+                      collected: list[str]) -> None:
+        """이 연결로 받은 토큰을 보안 저장소에서 지운다.
+
+        자격 증명을 지우기 **전에** 부른다. 지문이 자격 증명에서 나오므로
+        먼저 지우면 어느 슬롯을 지워야 하는지 알 수 없다.
+        """
+        if self._token_store is None:
+            return
+        try:
+            payload = self.load_active(provider, profile)
+        except Exception:  # noqa: BLE001
+            payload = None
+        if payload is None:
+            return
+        from stock_mcp_server.market_data.token_store import (
+            credential_fingerprint,
+        )
+
+        values = {name: payload.get(name) for name in payload.field_names()}
+        if self._token_store.delete(provider, profile,
+                                    credential_fingerprint(values)):
+            collected.append(f"{provider}:{profile}")
+
     # --- 연결 해제 (disable 우선, 설계 11.4) ---
 
     def disable_profile(self, provider: str, profile: str) -> None:
@@ -316,11 +346,13 @@ class CredentialStore:
                    else list(record["profiles"].keys()))
         removed: list[str] = []
         failed: list[str] = []
+        tokens_removed: list[str] = []
         for name in targets:
             prof = record["profiles"].get(name)
             if prof is None:
                 continue
             slot_failed = False
+            self._forget_token(provider, name, tokens_removed)
             ref = prof.get("credential_ref")
             candidates = {self._username(provider, name, ref)} if ref else set()
             # v1 고정 슬롯도 함께 정리한다 (idempotent).
@@ -350,4 +382,5 @@ class CredentialStore:
                 state["primary_provider"] = None
         state["routing_generation"] = int(state["routing_generation"]) + 1
         save_state_v2(state, self._home)
-        return CleanupReport(removed=tuple(removed), failed=tuple(failed))
+        return CleanupReport(removed=tuple(removed), failed=tuple(failed),
+                             tokens_removed=tuple(tokens_removed))

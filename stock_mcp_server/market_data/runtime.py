@@ -46,9 +46,18 @@ class RuntimeSnapshot:
 
 class ProviderRuntime:
     def __init__(self, keyring_module=None,
-                 home: Path | str | None = None) -> None:
+                 home: Path | str | None = None,
+                 token_store=None) -> None:
+        if token_store is None:
+            from stock_mcp_server.market_data.token_store import TokenStore
+            try:
+                token_store = TokenStore(keyring_module=keyring_module)
+            except Exception:  # noqa: BLE001
+                token_store = None
+        self._token_store = token_store
         self._credentials = CredentialStore(
-            keyring_module=keyring_module, home=home)
+            keyring_module=keyring_module, home=home,
+            token_store=token_store)
         self._home = home
         # (provider, profile) -> (generation, client)
         self._clients: dict[tuple[str, str], tuple[int, object]] = {}
@@ -96,20 +105,28 @@ class ProviderRuntime:
             return load_state_v2(home)["providers"].get(
                 provider, {}).get("generation", -1)
 
+        # 토큰은 프로세스 사이에서도 재사용한다. 실측(2026-08-28) 결과
+        # KIS·키움은 재발급해도 같은 토큰을 주고(발급 자체는 KIS 가 1분
+        # 1회 제한), 토스는 재발급이 이전 토큰을 즉시 무효화한다. 새
+        # 프로세스가 매번 받으면 토스에서는 다른 프로세스를 망가뜨린다.
+        store = self._token_store
         if provider == "kis":
             from stock_mcp_server.market_data.kis_client import KisClient
             return KisClient(payload, profile,
-                             generation_provider=_generation)
+                             generation_provider=_generation,
+                             token_store=store)
         if provider == "kiwoom":
             from stock_mcp_server.market_data.kiwoom_client import (
                 KiwoomClient,
             )
             return KiwoomClient(payload, profile,
-                                generation_provider=_generation)
+                                generation_provider=_generation,
+                                token_store=store)
         if provider == "toss":
             from stock_mcp_server.market_data.toss_client import TossClient
             return TossClient(payload, profile,
-                              generation_provider=_generation)
+                              generation_provider=_generation,
+                              token_store=store)
         return None
 
     def providers_for(self, market: str, source: str = "auto",

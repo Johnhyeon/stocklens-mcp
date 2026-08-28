@@ -25,6 +25,9 @@ from stock_mcp_server.market_data.broker_http import (
     BrokerHttpTransport,
 )
 from stock_mcp_server.market_data.provider_registry import registry
+from stock_mcp_server.market_data.token_store import (
+    credential_fingerprint as _fingerprint,
+)
 
 _KST = ZoneInfo("Asia/Seoul")
 _DESCRIPTOR = registry.require("kiwoom")
@@ -67,6 +70,7 @@ class KiwoomClient:
         transport: httpx.AsyncBaseTransport | None = None,
         generation_provider=None,
         clock=None,
+        token_store=None,
     ) -> None:
         if profile not in _DESCRIPTOR.supported_profiles:
             raise ValueError(f"지원하지 않는 프로필: {profile}")
@@ -77,6 +81,11 @@ class KiwoomClient:
         self._generation_provider = generation_provider or (lambda: 0)
         self._clock = clock or (lambda: datetime.now(_KST))
         self._lock = asyncio.Lock()
+
+        # 프로세스 간 토큰 재사용 (선택). 없으면 예전처럼 메모리 전용이다.
+        self._token_store = token_store
+        self._fingerprint = _fingerprint({
+            "app_key": self._app_key, "secret_key": self._secret_key})
 
         self._token: str | None = None
         self._token_expires_at: datetime | None = None
@@ -141,11 +150,34 @@ class KiwoomClient:
         self._token = token
         self._token_expires_at = expires_at
         self._token_generation = self._generation_provider()
+        if self._token_store is not None:
+            self._token_store.save(
+                "kiwoom", self.profile, self._fingerprint, token,
+                expires_at.timestamp())
+
+    def _load_shared_token(self) -> bool:
+        """다른 프로세스가 이미 받아 둔 유효한 토큰을 쓴다.
+
+        실측(2026-08-28): 키움은 재발급을 요청해도 같은 토큰을 돌려준다.
+        즉 다시 받는 것은 낭비일 뿐이고, 토스처럼 이전 토큰을 무효화하는
+        공급자에서는 다른 프로세스를 망가뜨린다.
+        """
+        if self._token_store is None:
+            return False
+        got = self._token_store.load("kiwoom", self.profile,
+                                     self._fingerprint)
+        if got is None:
+            return False
+        token, expires_at = got
+        self._token = token
+        self._token_expires_at = datetime.fromtimestamp(expires_at, _KST)
+        self._token_generation = self._generation_provider()
+        return True
 
     async def _ensure_token(self) -> str:
         # single-flight: 동시 요청이 토큰을 중복 발급하지 않게 한다.
         async with self._lock:
-            if not self._token_valid():
+            if not self._token_valid() and not self._load_shared_token():
                 await self._issue_token()
             assert self._token is not None
             return self._token
