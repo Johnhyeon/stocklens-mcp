@@ -43,7 +43,9 @@ class EndpointMappingTests(unittest.TestCase):
     def test_registry_descriptors_expose_endpoints(self):
         kis = registry.require("kis")
         ids = {e.endpoint_id for e in kis.endpoints}
-        self.assertEqual(ids, {"token", "kr_minute", "us_minute"})
+        # 1.1 상세 수급 endpoint 추가 (2026-08-28 실측 확정 경로).
+        self.assertEqual(ids, {"token", "kr_minute", "us_minute",
+                               "kr_investor_daily"})
         kiwoom = registry.require("kiwoom")
         # 1.1 상세 수급·수급 압력 endpoint (2026-08-28 실측 확정 경로).
         self.assertEqual({e.endpoint_id for e in kiwoom.endpoints},

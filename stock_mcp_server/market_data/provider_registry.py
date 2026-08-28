@@ -83,6 +83,8 @@ _KIS = ProviderDescriptor(
         "/oauth2/tokenP",
         "/uapi/domestic-stock/v1/quotations/inquire-time-dailychartprice",
         "/uapi/overseas-price/v1/quotations/inquire-time-itemchartprice",
+        # 상세 수급 (1.1, 2026-08-28 실측). 시세 조회 전용 경로만 올린다.
+        "/uapi/domestic-stock/v1/quotations/inquire-investor",
     ),
     credential_schema=(
         CredentialField(name="app_key", label="앱 키"),
@@ -103,6 +105,10 @@ _KIS = ProviderDescriptor(
         EndpointSpec(
             "us_minute", "GET",
             "/uapi/overseas-price/v1/quotations/inquire-time-itemchartprice"),
+        # 종목별 투자자 일별 수급 (FHKST01010900)
+        EndpointSpec(
+            "kr_investor_daily", "GET",
+            "/uapi/domestic-stock/v1/quotations/inquire-investor"),
     ),
 )
 

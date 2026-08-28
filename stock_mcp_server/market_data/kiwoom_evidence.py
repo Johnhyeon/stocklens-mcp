@@ -347,12 +347,26 @@ def _parse_pressure_row(raw: dict, spec: PressureSpec) -> PressureRow | None:
                        raw_fields=dict(spec.measures))
 
 
+# 공급자가 실제로 주는 것만 available 이다. KIS 와 정확히 반대 모양이다:
+# 키움은 기관 세부 13종을 주지만 매수·매도 분해가 없고, KIS 는 3종만
+# 주지만 매수·매도를 준다. 어느 쪽도 상위집합이 아니다 (2026-08-28 실측).
+_CAPABILITIES = {
+    "kr.investor_flow.daily.total": "available",
+    "kr.investor_flow.daily.breakdown": "available",
+    "kr.investor_flow.daily.buy_sell": "unsupported",
+}
+
+
 class KiwoomEvidenceProvider:
     provider_id = "kiwoom"
 
     def __init__(self, client: KiwoomClient, profile: str) -> None:
         self._client = client
         self.profile = profile
+
+    @staticmethod
+    def capabilities() -> dict[str, str]:
+        return dict(_CAPABILITIES)
 
     async def fetch_investor_flow(
         self,
