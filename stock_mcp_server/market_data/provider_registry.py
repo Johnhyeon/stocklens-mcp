@@ -84,7 +84,11 @@ _KIS = ProviderDescriptor(
         "/uapi/domestic-stock/v1/quotations/inquire-time-dailychartprice",
         "/uapi/overseas-price/v1/quotations/inquire-time-itemchartprice",
         # 상세 수급 (1.1, 2026-08-28 실측). 시세 조회 전용 경로만 올린다.
+        # 실측으로 데이터를 확인한 것만 올린다 - daily-loan-trans(시장
+        # 전체만)와 daily-credit-balance(빈 결과)는 넣지 않는다.
         "/uapi/domestic-stock/v1/quotations/inquire-investor",
+        "/uapi/domestic-stock/v1/quotations/daily-short-sale",
+        "/uapi/domestic-stock/v1/quotations/program-trade-by-stock",
     ),
     credential_schema=(
         CredentialField(name="app_key", label="앱 키"),
@@ -109,6 +113,14 @@ _KIS = ProviderDescriptor(
         EndpointSpec(
             "kr_investor_daily", "GET",
             "/uapi/domestic-stock/v1/quotations/inquire-investor"),
+        # 공매도 일별추이 (FHPST04830000)
+        EndpointSpec(
+            "kr_short_selling", "GET",
+            "/uapi/domestic-stock/v1/quotations/daily-short-sale"),
+        # 프로그램매매 종목별 (FHPPG04650100) - 장중 시계열이다
+        EndpointSpec(
+            "kr_program_trade", "GET",
+            "/uapi/domestic-stock/v1/quotations/program-trade-by-stock"),
     ),
 )
 

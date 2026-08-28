@@ -1,0 +1,54 @@
+{
+ "rt_cd": "0",
+ "msg1": "정상처리 되었습니다.",
+ "output": [
+  {
+   "bsop_hour": "153014",
+   "stck_prpr": "257000",
+   "prdy_vrss": "-9000",
+   "prdy_vrss_sign": "5",
+   "prdy_ctrt": "-3.38",
+   "acml_vol": "14698288",
+   "whol_smtn_seln_vol": "4996194",
+   "whol_smtn_shnu_vol": "2922488",
+   "whol_smtn_ntby_qty": "-2073706",
+   "whol_smtn_seln_tr_pbmn": "1298472581000",
+   "whol_smtn_shnu_tr_pbmn": "759353774250",
+   "whol_smtn_ntby_tr_pbmn": "-539118806750",
+   "whol_ntby_vol_icdc": "276800",
+   "whol_ntby_tr_pbmn_icdc": "71137600000"
+  },
+  {
+   "bsop_hour": "153008",
+   "stck_prpr": "258500",
+   "prdy_vrss": "-7500",
+   "prdy_vrss_sign": "5",
+   "prdy_ctrt": "-2.82",
+   "acml_vol": "13551766",
+   "whol_smtn_seln_vol": "4576855",
+   "whol_smtn_shnu_vol": "2226349",
+   "whol_smtn_ntby_qty": "-2350506",
+   "whol_smtn_seln_tr_pbmn": "1190702458000",
+   "whol_smtn_shnu_tr_pbmn": "580446051250",
+   "whol_smtn_ntby_tr_pbmn": "-610256406750",
+   "whol_ntby_vol_icdc": "0",
+   "whol_ntby_tr_pbmn_icdc": "0"
+  },
+  {
+   "bsop_hour": "152957",
+   "stck_prpr": "258500",
+   "prdy_vrss": "-7500",
+   "prdy_vrss_sign": "5",
+   "prdy_ctrt": "-2.82",
+   "acml_vol": "13551766",
+   "whol_smtn_seln_vol": "4576855",
+   "whol_smtn_shnu_vol": "2226349",
+   "whol_smtn_ntby_qty": "-2350506",
+   "whol_smtn_seln_tr_pbmn": "1190702458000",
+   "whol_smtn_shnu_tr_pbmn": "580446051250",
+   "whol_smtn_ntby_tr_pbmn": "-610256406750",
+   "whol_ntby_vol_icdc": "0",
+   "whol_ntby_tr_pbmn_icdc": "0"
+  }
+ ]
+}

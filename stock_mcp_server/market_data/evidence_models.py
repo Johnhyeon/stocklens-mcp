@@ -102,7 +102,19 @@ class PressureRow:
 
 @dataclass(frozen=True)
 class PressureBlock:
-    """한 종류의 증거. 다른 종류와 절대 합치지 않는다."""
+    """한 종류의 증거. 다른 종류와 절대 합치지 않는다.
+
+    granularity 를 함께 싣는 이유: 같은 종류라도 공급자마다 모양이 다르다.
+    실측(2026-08-28) 프로그램매매는 키움이 **일별**, KIS 가 **장중
+    시계열**이다. 말하지 않으면 사용자가 두 숫자를 같은 것으로 읽는다.
+
+    status 는 available 여부만이 아니라 확인 수준까지 담는다:
+    - ok           데이터를 받았다
+    - unsupported  공급자가 이 종목 단위로 제공하지 않는다 (사유 필수)
+    - unverified   호출은 되는데 데이터를 확인하지 못했다. 된다고도
+                   안 된다고도 하지 않는다
+    - 그 외         공급자 오류 상태 그대로
+    """
 
     kind: str
     status: str
@@ -114,3 +126,4 @@ class PressureBlock:
     warnings: tuple[str, ...]
     unavailable_reason: str | None
     coverage: dict
+    granularity: str = "daily"

@@ -138,9 +138,6 @@ class KisClient:
                 "kis", self.profile, self._fingerprint,
                 token, time.time() + expires_in)
         self._token_generation = self._generation_provider()
-        if self._token_store is not None:
-            self._token_store.save("kis", self.profile, self._fingerprint,
-                                   token, self._token_expires_at)
 
     @staticmethod
     def _token_error_code(resp: httpx.Response) -> str | None:

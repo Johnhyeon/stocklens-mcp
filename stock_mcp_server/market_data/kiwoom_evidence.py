@@ -368,6 +368,17 @@ class KiwoomEvidenceProvider:
     def capabilities() -> dict[str, str]:
         return dict(_CAPABILITIES)
 
+    @staticmethod
+    def pressure_capabilities() -> dict[str, str]:
+        """종류별 지원 상태. KIS 가 못 주는 것을 키움이 덮는다.
+
+        실측(2026-08-28): 대차·신용·외국인 보유는 키움만 종목 단위로
+        준다. 프로그램매매는 키움이 일별, KIS 가 장중이라 모양이 다르다.
+        """
+        caps = {k: "available" for k in _SPEC_BY_KIND}
+        caps.update({k: "unsupported" for k in UNSUPPORTED_KINDS})
+        return caps
+
     async def fetch_investor_flow(
         self,
         symbol: str,
