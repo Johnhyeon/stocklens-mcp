@@ -16,10 +16,19 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 
+from stock_mcp_server.market_data.evidence_models import (
+    DEFAULT_MEASURE,
+    INSTITUTION_PARTS,
+    PRINCIPAL_CATEGORIES,
+    InvestorFlowDataset,
+    InvestorFlowRow,
+    PressureBlock,
+    PressureRow,
+)
 from stock_mcp_server.market_data.kiwoom_client import (
     KiwoomApiError,
     KiwoomClient,
@@ -49,12 +58,9 @@ INVESTOR_CATEGORIES: tuple[tuple[str, str], ...] = (
 _RAW_BY_NAME = dict(INVESTOR_CATEGORIES)
 
 # 순매매 합이 0 이어야 하는 5주체 (정산 완료일 검산)
-_PRINCIPALS = ("individual", "foreign", "institution_total",
-               "other_corporation", "domestic_foreign")
+_PRINCIPALS = PRINCIPAL_CATEGORIES
 # 기관계를 구성하는 세부 8종
-_INSTITUTION_PARTS = ("financial_investment", "insurance",
-                      "investment_trust", "other_financial", "bank",
-                      "pension_fund", "private_equity_fund", "government")
+_INSTITUTION_PARTS = INSTITUTION_PARTS
 # 측정 단위. 라벨과 값이 갈라지지 않게 요청 파라미터와 함께 고정한다.
 #
 # 실측(2026-08-28) + KIS 교차 검증으로 확정:
@@ -69,7 +75,6 @@ MEASURES: dict[str, dict[str, str]] = {
     "net_amount": {"amt_qty_tp": "1", "unit_tp": "1",
                    "unit": "KRW_million"},
 }
-DEFAULT_MEASURE = "net_quantity"
 
 # 수량은 정확히 0 으로 맞고, 금액은 반올림 때문에 소폭 어긋난다 (실측).
 _TOLERANCE = {"net_quantity": 0, "net_amount": 2}
@@ -97,57 +102,6 @@ def _decimal(raw: object) -> Decimal | None:
         return Decimal(text)
     except InvalidOperation:
         return None
-
-
-@dataclass(frozen=True)
-class InvestorFlowRow:
-    """하루치 투자자별 순매매.
-
-    values 에 없는 정규 이름은 '값이 없다'는 뜻이고, unsettled 에 있으면
-    '정산 전이라 아직 값이 아니다'라는 뜻이다. 둘을 0 으로 뭉개지 않는다.
-    """
-
-    date: date
-    close: Decimal | None
-    volume: int | None
-    values: dict[str, int]
-    unsettled: tuple[str, ...]
-    data_state: str
-    balance_ok: bool
-    principal_sum: int | None
-    raw_categories: dict[str, str] = field(
-        default_factory=lambda: dict(INVESTOR_CATEGORIES))
-
-    def value(self, name: str) -> int | None:
-        return self.values.get(name)
-
-    def is_unsettled(self, name: str) -> bool:
-        return name in self.unsettled
-
-    def raw_category(self, name: str) -> str | None:
-        return self.raw_categories.get(name)
-
-    def institution_subtotal(self) -> int | None:
-        parts = [self.values.get(p) for p in _INSTITUTION_PARTS]
-        if any(p is None for p in parts):
-            return None
-        return sum(parts)  # type: ignore[arg-type]
-
-
-@dataclass(frozen=True)
-class InvestorFlowDataset:
-    symbol: str
-    provider: str
-    profile: str
-    market: str
-    rows: tuple[InvestorFlowRow, ...]
-    data_state: str
-    coverage: dict
-    warnings: tuple[str, ...]
-    # 값의 이름표. 이게 없으면 수량과 금액이 같은 이름으로 섞인다.
-    measure: str = DEFAULT_MEASURE
-    unit: str = "shares"
-    source_endpoint: str = "kiwoom_kr_investor_daily"
 
 
 def _parse_row(raw: dict, tolerance: int = 0) -> InvestorFlowRow | None:
@@ -201,6 +155,7 @@ def _parse_row(raw: dict, tolerance: int = 0) -> InvestorFlowRow | None:
         data_state="final" if final else "provisional",
         balance_ok=final,
         principal_sum=principal_sum,
+        raw_categories=dict(INVESTOR_CATEGORIES),
     )
 
 
@@ -278,35 +233,6 @@ _SPEC_BY_KIND = {s.kind: s for s in PRESSURE_SPECS}
 # 공급자가 조회 TR 을 제공하지 않는 종류. 빈 성공이 아니라 미지원이다.
 UNSUPPORTED_KINDS = {"cfd": "not_provided_by_provider"}
 PRESSURE_KINDS = tuple(_SPEC_BY_KIND) + tuple(UNSUPPORTED_KINDS)
-
-
-@dataclass(frozen=True)
-class PressureRow:
-    date: date
-    measures: dict[str, Decimal]
-    raw_fields: dict[str, str]
-
-    def value(self, name: str) -> Decimal | None:
-        return self.measures.get(name)
-
-    def raw_field(self, name: str) -> str | None:
-        return self.raw_fields.get(name)
-
-
-@dataclass(frozen=True)
-class PressureBlock:
-    """한 종류의 증거. 다른 종류와 절대 합치지 않는다."""
-
-    kind: str
-    status: str
-    provider: str
-    market: str
-    rows: tuple[PressureRow, ...]
-    data_as_of: date | None
-    data_completeness: str
-    warnings: tuple[str, ...]
-    unavailable_reason: str | None
-    coverage: dict
 
 
 def _pressure_value(raw: object) -> Decimal | None:
@@ -488,6 +414,7 @@ class KiwoomEvidenceProvider:
                 "requested_rows": row_limit,
             },
             warnings=tuple(warnings),
+            source_endpoint="kiwoom_kr_investor_daily",
         )
 
     async def fetch_supply_pressure(
