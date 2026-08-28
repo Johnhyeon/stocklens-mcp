@@ -78,7 +78,10 @@ class MultiBrokerSecretSweep(unittest.TestCase):
         self.service = broker_cli.BrokerService(
             keyring_module=self.keyring, home=self.home)
         self._env = patch.dict(
-            "os.environ", {"STOCKLENS_HOME": str(self.home)})
+            "os.environ", {
+                "STOCKLENS_HOME": str(self.home),
+                "LEETKIT_ENABLE_EXPERIMENTAL_BROKERS": "1",
+            })
         self._env.start()
 
     def tearDown(self):

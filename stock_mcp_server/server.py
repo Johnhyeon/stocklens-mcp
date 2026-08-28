@@ -5,6 +5,7 @@ Claude에서 자연어로 분석할 수 있게 해줍니다.
 """
 
 import functools
+import os
 import re
 from datetime import datetime
 from pathlib import Path
@@ -7936,6 +7937,21 @@ from stock_mcp_server.market_data.toss_client import (  # noqa: E402
 
 _INTRADAY_SOURCES = ("auto",) + _provider_registry.ids() + (
     "naver", "yahoo")
+_EXPERIMENTAL_BROKER_ENV = "LEETKIT_ENABLE_EXPERIMENTAL_BROKERS"
+_EXPERIMENTAL_BROKERS = frozenset({"toss"})
+
+
+def _broker_is_public(provider: str) -> bool:
+    """고객 모드에서는 검증 중인 공급자를 계약 표면에서 감춘다."""
+    return (
+        provider not in _EXPERIMENTAL_BROKERS
+        or os.environ.get(_EXPERIMENTAL_BROKER_ENV) == "1"
+    )
+
+
+def _public_intraday_sources() -> tuple[str, ...]:
+    return tuple(source for source in _INTRADAY_SOURCES
+                 if _broker_is_public(source))
 
 # 완료 거래일 캐시 복원 시 쓰는 공급자별 KR 1m endpoint 이름.
 _BROKER_KR_ENDPOINTS = {
@@ -8083,7 +8099,17 @@ async def _fetch_intraday_dataset(
     """공급원 고정 → 조회(필요 시 다일) → 세션 집계 → 완성 봉 필터."""
     state = _broker_state()
     primary = state.get("active_provider")
-    caps = _broker_capabilities(state)
+    if primary is not None and not _broker_is_public(primary):
+        primary = None
+        caps = {
+            "connected": False,
+            "kr_intraday": False,
+            "us_intraday": False,
+            "kr_daily": False,
+            "us_daily": False,
+        }
+    else:
+        caps = _broker_capabilities(state)
     caps_by_provider = {primary: caps} if primary else {}
     v2 = state.get("state_v2")
     if v2 is not None:
@@ -8092,6 +8118,8 @@ async def _fetch_intraday_dataset(
             registry as _registry,
         )
         for pid in _registry.ids():
+            if not _broker_is_public(pid):
+                continue
             caps_by_provider.setdefault(
                 pid, _provider_capabilities_v2(v2, pid))
     resolution = _resolve_source(
@@ -8366,9 +8394,10 @@ def _validate_intraday_args(market: str, interval: str, source: str,
     if interval not in _INTRADAY_INTERVALS:
         return (f"지원하지 않는 interval입니다: {interval} "
                 f"(지원: {', '.join(_INTRADAY_INTERVALS)})", None)
-    if source not in _INTRADAY_SOURCES:
+    public_sources = _public_intraday_sources()
+    if source not in public_sources:
         return (f"지원하지 않는 source입니다: {source} "
-                f"(지원: {', '.join(_INTRADAY_SOURCES)})", None)
+                f"(지원: {', '.join(public_sources)})", None)
     if date_str is None:
         clock_key = "krx" if market == "KR" else "us"
         raw = build_market_clock()[clock_key].get("last_trading_day")
@@ -8401,10 +8430,10 @@ async def get_intraday_chart(
 ) -> str:
     """분봉차트 — 국내·미국 분봉/시간봉 OHLCV (증권사 연결 필요 구간 있음).
 
-    증권사(한국투자증권·키움증권·토스증권 중 하나) Open API 를 연결한
+    증권사(한국투자증권·키움증권 중 하나) Open API 를 연결한
     사용자는 주 사용 증권사에서 KR·US 분봉을 받는다. 미연결 사용자는
     US 분봉만 Yahoo 에서 받는다 (KR 분봉은 증권사 연결 필요).
-    검증된 능력만 활성화된다 (토스는 US 전용 검증 중, KR 미지원).
+    검증된 능력만 활성화된다.
     일·주·월봉은 기존 get_chart / get_us_chart 를 사용.
 
     Args:
@@ -8416,7 +8445,7 @@ async def get_intraday_chart(
         venue: KR 은 KRX 고정. US 는 증권사 사용 시 NYS|NAS|AMS 필요
         session: "regular" (기타 세션은 능력 검증 후 지원)
         completed_only: 완성 봉만 반환 (기본 True)
-        source: auto|kis|kiwoom|toss|naver|yahoo.
+        source: auto|kis|kiwoom|naver|yahoo.
             auto 는 주 사용 증권사 하나에 고정되고, 증권사 명시는
             strict(실패해도 다른 공급원으로 대체하지 않음)
     """

@@ -153,6 +153,9 @@ class CliStatusMatrixTests(unittest.TestCase):
     active_provider/active_profile/profiles/capability_results 가 있다."""
 
     def setUp(self):
+        self._experimental = patch.dict(
+            "os.environ", {"LEETKIT_ENABLE_EXPERIMENTAL_BROKERS": "1"})
+        self._experimental.start()
         self._tmp = tempfile.TemporaryDirectory()
         self.home = Path(self._tmp.name)
         self.keyring = FakeKeyring()
@@ -161,6 +164,7 @@ class CliStatusMatrixTests(unittest.TestCase):
 
     def tearDown(self):
         self._tmp.cleanup()
+        self._experimental.stop()
 
     def _connect(self, provider):
         schema = registry.require(provider).credential_schema

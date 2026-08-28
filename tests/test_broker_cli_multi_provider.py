@@ -10,10 +10,12 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -57,6 +59,9 @@ _CREDS = {
 
 class MultiProviderCliTests(unittest.TestCase):
     def setUp(self):
+        self._experimental = patch.dict(
+            os.environ, {"LEETKIT_ENABLE_EXPERIMENTAL_BROKERS": "1"})
+        self._experimental.start()
         self._tmp = tempfile.TemporaryDirectory()
         self.home = Path(self._tmp.name)
         self.keyring = FakeKeyring()
@@ -65,6 +70,7 @@ class MultiProviderCliTests(unittest.TestCase):
 
     def tearDown(self):
         self._tmp.cleanup()
+        self._experimental.stop()
 
     def _handle(self, request, verifier=None):
         return broker_cli.handle_request(
@@ -93,6 +99,67 @@ class MultiProviderCliTests(unittest.TestCase):
             [f["name"] for f in kiwoom["credential_fields"]],
             ["app_key", "secret_key"])
         self.assertTrue(kiwoom["signup_url"].startswith("https://"))
+
+    def test_customer_mode_hides_toss_and_rejects_new_actions(self):
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("LEETKIT_ENABLE_EXPERIMENTAL_BROKERS", None)
+            resp = self._handle({
+                "contract_version": 1, "action": "describe_providers",
+                "provider": "kis",
+            })
+            self.assertEqual(
+                [p["provider_id"] for p in resp["providers"]],
+                ["kis", "kiwoom"])
+            blocked = self._handle({
+                "contract_version": 1, "action": "status",
+                "provider": "toss",
+            })
+            self.assertFalse(blocked["ok"])
+            self.assertEqual(blocked["error"]["code"],
+                             "provider_not_public")
+
+    def test_customer_mode_status_hides_hidden_provider_records(self):
+        # 리뷰(2026-08-28): 목록·도구 설명에서 숨겨도 status 계약으로
+        # 토스 레코드와 주 사용 표기가 다시 노출됐다. 고객 모드 status
+        # 는 숨김 공급자 레코드를 빼고, 주 사용이 숨김 공급자면 주 사용
+        # 없음으로 보고한다 (게이트가 닫혀 있어 auto 도 못 쓰는 상태).
+        self._save("kis")
+        self._save("toss")
+        resp = self._handle({
+            "contract_version": 1, "action": "set_primary_provider",
+            "provider": "toss",
+        })
+        self.assertTrue(resp["ok"], resp)
+
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("LEETKIT_ENABLE_EXPERIMENTAL_BROKERS", None)
+            resp = self._handle({
+                "contract_version": 1, "action": "status",
+                "provider": "kis",
+            })
+        st = resp["status"]
+        self.assertNotIn("toss", st["providers"])
+        self.assertIn("kis", st["providers"])
+        self.assertIsNone(st["primary_provider"])
+        self.assertIsNone(st["active_provider"])
+        self.assertIsNone(st["active_profile"])
+
+        # 개발자 모드에서는 레코드와 주 사용이 그대로 보인다.
+        dev = self._handle({
+            "contract_version": 1, "action": "status", "provider": "kis",
+        })
+        self.assertIn("toss", dev["status"]["providers"])
+        self.assertEqual(dev["status"]["primary_provider"], "toss")
+
+    def test_customer_mode_can_cleanup_hidden_toss(self):
+        self._save("toss")
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("LEETKIT_ENABLE_EXPERIMENTAL_BROKERS", None)
+            resp = self._handle({
+                "contract_version": 1, "action": "disconnect_provider",
+                "provider": "toss",
+            })
+        self.assertTrue(resp["ok"], resp)
 
     def test_verify_uses_provider_specific_credentials(self):
         seen = []

@@ -12,6 +12,7 @@ Manager 가 이 명령을 `--json --non-interactive --stdin` 으로 호출한다
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -39,6 +40,18 @@ from stock_mcp_server.market_data.secrets import (
 )
 
 CONTRACT_VERSION = 1
+EXPERIMENTAL_BROKER_ENV = "LEETKIT_ENABLE_EXPERIMENTAL_BROKERS"
+EXPERIMENTAL_BROKERS = frozenset({"toss"})
+HIDDEN_PROVIDER_CLEANUP_ACTIONS = frozenset({
+    "disconnect_profile", "disconnect_provider", "recover_cleanup",
+})
+
+
+def _provider_is_public(provider: str) -> bool:
+    return (
+        provider not in EXPERIMENTAL_BROKERS
+        or os.environ.get(EXPERIMENTAL_BROKER_ENV) == "1"
+    )
 
 ACTIONS = (
     "status",
@@ -112,6 +125,14 @@ class BrokerService:
             for name, rec in record.get("profiles", {}).items()
         }
         primary = state["primary_provider"]
+        # 고객 모드에서는 숨김 공급자 레코드를 상태 계약으로도 노출하지
+        # 않는다 (2026-08-28 리뷰: 목록에서 숨겨도 status 로 다시 샜다).
+        # 주 사용이 숨김 공급자로 남아 있으면 주 사용 없음으로 보고한다
+        # - 그 공급자는 게이트가 닫혀 있어 auto 라우팅도 쓰지 않는다.
+        # 정리(해제·복구)는 HIDDEN_PROVIDER_CLEANUP_ACTIONS 로 계속
+        # 가능하므로 표시만 줄어들 뿐 기능이 막히지 않는다.
+        if primary is not None and not _provider_is_public(primary):
+            primary = None
         primary_record = state["providers"].get(primary) if primary else None
         return {
             "provider": provider,
@@ -142,6 +163,7 @@ class BrokerService:
                     },
                 }
                 for pid, rec in state["providers"].items()
+                if _provider_is_public(pid)
             },
         }
 
@@ -266,6 +288,12 @@ def handle_request(
             "invalid_request",
             f"지원하지 않는 provider입니다 (지원: {registry.ids()})")
 
+    if not _provider_is_public(provider) and \
+            action not in HIDDEN_PROVIDER_CLEANUP_ACTIONS:
+        return _error(
+            "provider_not_public",
+            "고객용 버전에서 제공하지 않는 연결입니다")
+
     if service is None:
         service = _default_service()
 
@@ -276,7 +304,10 @@ def handle_request(
                 "ok": True,
                 "contract_version": CONTRACT_VERSION,
                 "action": action,
-                "providers": registry.describe_public(),
+                "providers": [
+                    item for item in registry.describe_public()
+                    if _provider_is_public(str(item.get("provider_id", "")))
+                ],
             }
 
         if action == "status":

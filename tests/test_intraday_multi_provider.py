@@ -107,18 +107,35 @@ def _run(coro):
 
 
 class SourceValidationTests(unittest.TestCase):
-    def test_kiwoom_and_toss_sources_accepted(self):
-        for source in ("kiwoom", "toss", "kis", "auto", "naver", "yahoo"):
+    def test_customer_sources_hide_toss(self):
+        with patch.dict("os.environ", {}, clear=False):
+            import os
+            os.environ.pop("LEETKIT_ENABLE_EXPERIMENTAL_BROKERS", None)
+            for source in ("kiwoom", "kis", "auto", "naver", "yahoo"):
+                err, _ = server._validate_intraday_args(
+                    "KR", "5m", source, "2026-08-27")
+                self.assertIsNone(err, source)
             err, _ = server._validate_intraday_args(
-                "KR", "5m", source, "2026-08-27")
-            self.assertIsNone(err, source)
+                "KR", "5m", "toss", "2026-08-27")
+            self.assertIsNotNone(err)
+            supported = err.split("(지원:", 1)[-1]
+            self.assertNotIn("toss", supported)
+
+    def test_developer_mode_accepts_toss_source(self):
+        with patch.dict(
+                "os.environ",
+                {"LEETKIT_ENABLE_EXPERIMENTAL_BROKERS": "1"}):
+            err, _ = server._validate_intraday_args(
+                "KR", "5m", "toss", "2026-08-27")
+            self.assertIsNone(err)
 
     def test_unknown_source_rejected_with_full_list(self):
         err, _ = server._validate_intraday_args(
             "KR", "5m", "binance", "2026-08-27")
         self.assertIsNotNone(err)
-        for name in ("kis", "kiwoom", "toss"):
+        for name in ("kis", "kiwoom"):
             self.assertIn(name, err)
+        self.assertNotIn("toss", err)
 
 
 class MultiProviderRoutingTests(unittest.IsolatedAsyncioTestCase):
@@ -127,6 +144,10 @@ class MultiProviderRoutingTests(unittest.IsolatedAsyncioTestCase):
 
     def setUp(self):
         from stock_mcp_server.market_data import provider_registry
+        self._experimental = patch.dict(
+            "os.environ", {"LEETKIT_ENABLE_EXPERIMENTAL_BROKERS": "1"})
+        self._experimental.start()
+        self.addCleanup(self._experimental.stop)
         self._gate = patch.dict(provider_registry._RELEASE_VERIFIED, {
             (pid, cap): True
             for pid in ("kis", "kiwoom", "toss")
@@ -172,6 +193,17 @@ class MultiProviderRoutingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(meta["primary_provider"], "kis")
         self.assertEqual(kis.calls, 0)
 
+    async def test_customer_auto_never_routes_to_hidden_toss(self):
+        import os
+        state = _v2_state("toss", primary="toss")
+        bars = _minute_bars(datetime(2026, 8, 27, 9, 0, tzinfo=KST), 10)
+        toss = Fake("toss", _dataset("toss", bars))
+        with patch.dict("os.environ", {}, clear=False):
+            os.environ.pop("LEETKIT_ENABLE_EXPERIMENTAL_BROKERS", None)
+            with self.assertRaises(server._RouterError):
+                await self._fetch(state, {"toss": toss}, source="auto")
+        self.assertEqual(toss.calls, 0)
+
     async def test_additional_connection_keeps_primary_routing(self):
         state = _v2_state("kis", "kiwoom", "toss", primary="kis")
         bars = _minute_bars(datetime(2026, 8, 27, 9, 0, tzinfo=KST), 10)
@@ -210,13 +242,12 @@ class ProviderCacheKeyTests(unittest.TestCase):
 
 
 class ToolDocContractTests(unittest.TestCase):
-    def test_ai_facing_docs_mention_all_brokers(self):
-        # AI 는 도구 설명으로 능력을 파악한다. 키움·토스가 설명에 없으면
-        # 존재를 모른다 (리뷰 보완 항목).
+    def test_customer_ai_facing_docs_hide_experimental_broker(self):
         doc = server.get_intraday_chart.__doc__ or ""
-        for name in ("키움", "토스", "kiwoom", "toss"):
+        for name in ("키움", "kiwoom"):
             self.assertIn(name, doc, name)
-        self.assertNotIn("auto|kis|naver|yahoo.", doc)
+        for hidden in ("토스", "toss"):
+            self.assertNotIn(hidden, doc, hidden)
 
     def test_unsupported_error_says_not_a_key_problem(self):
         text = server._intraday_error_result(
