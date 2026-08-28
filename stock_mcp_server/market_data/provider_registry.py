@@ -119,8 +119,12 @@ _KIWOOM = ProviderDescriptor(
         "/api/us/chart",
         # 상세 수급 (1.1). 2026-08-28 실측으로 확정한 경로만 올린다.
         # 계좌·주문·잔고 계열 경로는 어떤 이유로도 추가하지 않는다.
+        # (키움 신용 '주문' TR kt100xx 는 조회 TR 과 별개이며 쓰지 않는다.)
         "/api/dostk/stkinfo",
         "/api/dostk/mrkcond",
+        "/api/dostk/shsa",
+        "/api/dostk/slb",
+        "/api/dostk/frgnistt",
     ),
     credential_schema=(
         CredentialField(name="app_key", label="앱 키"),
@@ -143,6 +147,15 @@ _KIWOOM = ProviderDescriptor(
         # ka10063 장중 투자자별 / ka10066 장마감 투자자별 -> /api/dostk/mrkcond
         EndpointSpec("kr_investor_daily", "POST", "/api/dostk/stkinfo"),
         EndpointSpec("kr_investor_market", "POST", "/api/dostk/mrkcond"),
+        # 수급 압력 (1.1, 2026-08-28 실측):
+        # ka90013 프로그램매매(종목별) / ka10014 공매도추이 /
+        # ka10013 신용매매동향 / ka20068 대차거래추이 /
+        # ka10008 주식외국인종목별매매동향
+        EndpointSpec("kr_program_trade", "POST", "/api/dostk/mrkcond"),
+        EndpointSpec("kr_short_selling", "POST", "/api/dostk/shsa"),
+        EndpointSpec("kr_credit_trade", "POST", "/api/dostk/stkinfo"),
+        EndpointSpec("kr_securities_lending", "POST", "/api/dostk/slb"),
+        EndpointSpec("kr_foreign_holding", "POST", "/api/dostk/frgnistt"),
     ),
 )
 

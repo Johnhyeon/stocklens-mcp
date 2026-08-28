@@ -1,0 +1,30 @@
+{
+ "return_code": 0,
+ "return_msg": "정상적으로 처리되었습니다",
+ "dbrt_trde_trnsn": [
+  {
+   "dt": "20260827",
+   "dbrt_trde_cntrcnt": "983500",
+   "dbrt_trde_rpy": "1378602",
+   "dbrt_trde_irds": "-395102",
+   "rmnd": "86161430",
+   "remn_amt": "22918940"
+  },
+  {
+   "dt": "20260826",
+   "dbrt_trde_cntrcnt": "1644191",
+   "dbrt_trde_rpy": "1463791",
+   "dbrt_trde_irds": "180400",
+   "rmnd": "86556532",
+   "remn_amt": "22634533"
+  },
+  {
+   "dt": "20260825",
+   "dbrt_trde_cntrcnt": "1136800",
+   "dbrt_trde_rpy": "1693605",
+   "dbrt_trde_irds": "-556805",
+   "rmnd": "86376132",
+   "remn_amt": "22198666"
+  }
+ ]
+}
