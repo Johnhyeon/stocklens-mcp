@@ -1,0 +1,399 @@
+"""상세 수급 서비스 계층 (1.1 Task 11).
+
+도구와 어댑터 사이. 하는 일은 셋이다.
+
+1. 공급자 하나를 고정한다 (evidence_router). 자동으로 갈아타지 않는다.
+2. **무엇을 못 받았는지 명시한다.** 공급자마다 줄 수 있는 것이 정확히
+   반대로 갈려서(키움=기관 세부 13종·매수매도 없음, KIS=3종·매수매도
+   있음) 한쪽을 상위집합처럼 다루면 응답이 거짓말이 된다.
+3. 요청 도중 연결이 바뀌면 결과를 버린다.
+
+빈 성공을 만들지 않는 것이 이 계층의 존재 이유다. 못 받은 항목은
+`data_availability.unavailable` 에 사유와 함께 남고, 종류별 요청은
+종류마다 독립된 블록으로 남는다. 서로 다른 종류를 하나의 점수로
+합치지 않는다.
+"""
+
+from __future__ import annotations
+
+import asyncio
+from dataclasses import dataclass, field
+from datetime import date
+
+from stock_mcp_server.market_data.evidence_models import (
+    DEFAULT_MEASURE,
+    UNIT_BY_MEASURE,
+    InvestorFlowDataset,
+    PressureBlock,
+)
+from stock_mcp_server.market_data.evidence_router import (
+    PRESSURE_KINDS,
+    EvidenceRouterError,
+    assert_same_generation,
+    capability_state,
+    resolve_evidence_source,
+    select_provider,
+)
+
+MARKET = "KR"
+MAX_BATCH_CODES = 30
+DEFAULT_ROW_LIMIT = 30
+
+# 투자자 수급 요청 하나가 묻는 세부 능력. 호출자가 고르는 것이 아니라
+# 늘 셋 다 묻고, 공급자가 주는 만큼 받고 나머지는 사유와 함께 남긴다.
+FLOW_CAPABILITIES = (
+    "kr.investor_flow.daily.total",
+    "kr.investor_flow.daily.breakdown",
+    "kr.investor_flow.daily.buy_sell",
+)
+
+
+@dataclass(frozen=True)
+class EvidenceResult:
+    """투자자 수급 응답 봉투. 실패해도 같은 모양을 유지한다."""
+
+    ok: bool
+    provider: str | None
+    profile: str | None
+    market: str
+    data_availability: dict
+    records: tuple[InvestorFlowDataset, ...]
+    coverage: dict
+    warnings: tuple[str, ...]
+    error_code: str | None
+    measure: str = DEFAULT_MEASURE
+    unit: str = "shares"
+    alternative_provider: str | None = None
+
+
+@dataclass(frozen=True)
+class BatchEvidenceResult:
+    ok: bool
+    provider: str | None
+    profile: str | None
+    market: str
+    data_availability: dict
+    records: tuple[InvestorFlowDataset, ...]
+    coverage: dict
+    warnings: tuple[str, ...]
+    error_code: str | None
+    entity_failures: list = field(default_factory=list)
+    measure: str = DEFAULT_MEASURE
+    unit: str = "shares"
+    alternative_provider: str | None = None
+
+
+@dataclass(frozen=True)
+class PressureResult:
+    """종류별 블록. 여기에 합산 필드를 추가하지 않는다."""
+
+    ok: bool
+    provider: str | None
+    profile: str | None
+    market: str
+    blocks: dict
+    coverage: dict
+    warnings: tuple[str, ...]
+    error_code: str | None
+
+
+def _error_result(exc: EvidenceRouterError, requested: tuple[str, ...],
+                  measure: str) -> EvidenceResult:
+    return EvidenceResult(
+        ok=False, provider=exc.provider, profile=None, market=MARKET,
+        data_availability={
+            "requested": list(requested), "returned": [],
+            "unavailable": [{"capability": c, "reason": exc.error_code}
+                            for c in requested]},
+        records=(), coverage={"rows": 0, "complete": False},
+        warnings=(str(exc),), error_code=exc.error_code, measure=measure,
+        unit=UNIT_BY_MEASURE.get(measure, "shares"),
+        alternative_provider=exc.alternative)
+
+
+def _flow_availability(adapter) -> tuple[list, list]:
+    """어댑터의 실측 표에서 받은 것과 못 받은 것을 가른다."""
+    caps = adapter.capabilities()
+    returned, unavailable = [], []
+    for name in FLOW_CAPABILITIES:
+        if caps.get(name) == "available":
+            returned.append(name)
+        else:
+            unavailable.append({
+                "capability": name,
+                "reason": "unsupported_by_selected_provider",
+            })
+    return returned, unavailable
+
+
+class EvidenceService:
+    def __init__(self, runtime=None, *, base_date: date | None = None,
+                 public_providers: "tuple[str, ...] | None" = None,
+                 release_override: bool = False) -> None:
+        self._runtime = runtime
+        self._base_date = base_date
+        self._public = public_providers
+        # 테스트에서만 쓴다. 운영 경로에서 출시 게이트를 우회하지 않는다.
+        self._release_override = release_override
+
+    # -- 기준일 -----------------------------------------------------------
+    def _resolve_base_date(self, given: date | None) -> date:
+        if given is not None:
+            return given
+        if self._base_date is not None:
+            return self._base_date
+        from stock_mcp_server.market_clock import build_market_clock
+        raw = build_market_clock()["krx"].get("last_trading_day")
+        return date.fromisoformat(str(raw))
+
+    # -- 공통 -------------------------------------------------------------
+    def _context(self):
+        runtime = self._runtime
+        if runtime is None:
+            from stock_mcp_server.market_data.runtime import ProviderRuntime
+            runtime = self._runtime = ProviderRuntime()
+        snapshot = runtime.snapshot()
+        from stock_mcp_server.market_data.provider_registry import registry
+        ids = self._public if self._public is not None else registry.ids()
+        caps = {pid: snapshot.capabilities(pid) for pid in ids}
+        return runtime, snapshot, caps
+
+    def _adapter(self, runtime, snapshot, provider):
+        adapter = runtime.evidence_provider_for(provider, snapshot=snapshot)
+        if adapter is None:
+            raise EvidenceRouterError(
+                "not_configured",
+                f"{provider} 연결 기록은 있지만 저장된 키를 읽지 못했습니다. "
+                f"LeetKit Manager 에서 {provider} 를 다시 연결해주세요.",
+                error_code="provider_not_configured", provider=provider)
+        return adapter
+
+    # -- 투자자 수급 ------------------------------------------------------
+    async def investor_flow(self, *, code: str, days: int = 20,
+                            measure: str = DEFAULT_MEASURE,
+                            source: str = "auto",
+                            base_date: date | None = None
+                            ) -> EvidenceResult:
+        try:
+            runtime, snapshot, caps = self._context()
+            resolution = resolve_evidence_source(
+                capability="kr_investor_flow", requested_source=source,
+                capabilities=caps,
+                primary_provider=snapshot.primary_provider,
+                public_providers=self._public,
+                release_override=self._release_override)
+            provider = resolution.selected_provider
+            adapter = self._adapter(runtime, snapshot, provider)
+            before = snapshot.provider_generation(provider)
+            dataset = await adapter.fetch_investor_flow(
+                code, base_date=self._resolve_base_date(base_date),
+                measure=measure, row_limit=max(1, min(days, 120)))
+            assert_same_generation(
+                provider, before,
+                runtime.snapshot().provider_generation(provider))
+        except EvidenceRouterError as exc:
+            return _error_result(exc, FLOW_CAPABILITIES, measure)
+
+        returned, unavailable = _flow_availability(adapter)
+        return EvidenceResult(
+            ok=True, provider=provider, profile=adapter.profile,
+            market=MARKET,
+            data_availability={"requested": list(FLOW_CAPABILITIES),
+                               "returned": returned,
+                               "unavailable": unavailable},
+            records=(dataset,), coverage=dict(dataset.coverage),
+            warnings=tuple(dataset.warnings), error_code=None,
+            measure=dataset.measure, unit=dataset.unit)
+
+    async def investor_flow_batch(self, *, codes, days: int = 20,
+                                  measure: str = DEFAULT_MEASURE,
+                                  source: str = "auto",
+                                  base_date: date | None = None
+                                  ) -> BatchEvidenceResult:
+        # 입력 순서를 지키면서 중복만 접는다.
+        unique: list[str] = []
+        for code in codes:
+            if code not in unique:
+                unique.append(code)
+        if len(unique) > MAX_BATCH_CODES:
+            # 공급자를 부르기 전에 막는다. 절반만 조회하고 실패하면
+            # 사용자는 어디까지 진짜인지 알 수 없다.
+            raise ValueError(
+                f"한 번에 조회할 수 있는 종목은 최대 {MAX_BATCH_CODES}개입니다 "
+                f"(요청 {len(unique)}개).")
+
+        try:
+            runtime, snapshot, caps = self._context()
+            resolution = resolve_evidence_source(
+                capability="kr_investor_flow", requested_source=source,
+                capabilities=caps,
+                primary_provider=snapshot.primary_provider,
+                public_providers=self._public,
+                release_override=self._release_override)
+            provider = resolution.selected_provider
+            adapter = self._adapter(runtime, snapshot, provider)
+            before = snapshot.provider_generation(provider)
+        except EvidenceRouterError as exc:
+            base = _error_result(exc, FLOW_CAPABILITIES, measure)
+            return BatchEvidenceResult(
+                ok=False, provider=base.provider, profile=None,
+                market=MARKET, data_availability=base.data_availability,
+                records=(), coverage=base.coverage,
+                warnings=base.warnings, error_code=base.error_code,
+                entity_failures=[], measure=measure, unit=base.unit,
+                alternative_provider=base.alternative_provider)
+
+        day = self._resolve_base_date(base_date)
+        row_limit = max(1, min(days, 120))
+
+        async def _one(code: str):
+            try:
+                return code, await adapter.fetch_investor_flow(
+                    code, base_date=day, measure=measure,
+                    row_limit=row_limit)
+            except Exception as exc:  # noqa: BLE001
+                # 한 종목이 실패해도 다른 공급자로 넘어가지 않는다. 실패한
+                # 종목만 사유와 함께 남긴다.
+                return code, getattr(exc, "provider_status", None) or \
+                    "provider_unavailable"
+
+        settled = await asyncio.gather(*[_one(c) for c in unique])
+
+        try:
+            assert_same_generation(
+                provider, before,
+                runtime.snapshot().provider_generation(provider))
+        except EvidenceRouterError as exc:
+            base = _error_result(exc, FLOW_CAPABILITIES, measure)
+            return BatchEvidenceResult(
+                ok=False, provider=provider, profile=adapter.profile,
+                market=MARKET, data_availability=base.data_availability,
+                records=(), coverage=base.coverage,
+                warnings=base.warnings, error_code=base.error_code,
+                entity_failures=[], measure=measure, unit=base.unit)
+
+        records, failures, warnings = [], [], []
+        for code, outcome in settled:
+            if isinstance(outcome, InvestorFlowDataset):
+                records.append(outcome)
+                warnings.extend(outcome.warnings)
+            else:
+                failures.append({"code": code, "reason": outcome})
+
+        returned, unavailable = _flow_availability(adapter)
+        unit = records[0].unit if records else \
+            UNIT_BY_MEASURE.get(measure, "shares")
+        return BatchEvidenceResult(
+            ok=bool(records), provider=provider, profile=adapter.profile,
+            market=MARKET,
+            data_availability={"requested": list(FLOW_CAPABILITIES),
+                               "returned": returned,
+                               "unavailable": unavailable},
+            records=tuple(records),
+            coverage={"requested_entities": len(unique),
+                      "returned_entities": len(records),
+                      "rows": sum(len(r.rows) for r in records),
+                      "complete": not failures},
+            warnings=tuple(dict.fromkeys(warnings)),
+            error_code=None if records else "all_entities_failed",
+            entity_failures=failures, measure=measure, unit=unit)
+
+    # -- 수급 압력 --------------------------------------------------------
+    async def supply_pressure(self, *, code: str, kinds,
+                              days: int = 30, source: str = "auto",
+                              base_date: date | None = None
+                              ) -> PressureResult:
+        requested = []
+        for kind in kinds:
+            if kind not in PRESSURE_KINDS:
+                raise ValueError(
+                    f"지원하지 않는 수급 종류: {kind} (지원: {PRESSURE_KINDS})")
+            if kind not in requested:
+                requested.append(kind)
+
+        try:
+            runtime, snapshot, caps = self._context()
+            provider = select_provider(
+                requested_source=source, capabilities=caps,
+                primary_provider=snapshot.primary_provider,
+                public_providers=self._public)
+            adapter = self._adapter(runtime, snapshot, provider)
+            before = snapshot.provider_generation(provider)
+        except EvidenceRouterError as exc:
+            return PressureResult(
+                ok=False, provider=exc.provider, profile=None,
+                market=MARKET, blocks={}, coverage={"complete": False},
+                warnings=(str(exc),), error_code=exc.error_code)
+
+        # 종류마다 능력이 다르다. 요청 전체를 하나로 판정하지 않고
+        # 종류별로 가른 뒤, 받을 수 있는 것만 실제로 부른다.
+        blocks: dict[str, PressureBlock] = {}
+        fetchable: list[str] = []
+        reasons = adapter.pressure_unavailable_reasons()
+        for kind in requested:
+            state = capability_state(provider, f"kr_{kind}",
+                                     caps.get(provider))
+            if self._release_override and state == "verifying":
+                state = "available"
+            if state == "available":
+                fetchable.append(kind)
+            else:
+                blocks[kind] = _state_block(
+                    kind, state, provider, reason=reasons.get(kind))
+
+        if fetchable:
+            try:
+                fetched = await adapter.fetch_supply_pressure(
+                    code, kinds=tuple(fetchable),
+                    base_date=self._resolve_base_date(base_date),
+                    lookback_days=max(1, days), row_limit=DEFAULT_ROW_LIMIT)
+                blocks.update(fetched)
+                assert_same_generation(
+                    provider, before,
+                    runtime.snapshot().provider_generation(provider))
+            except EvidenceRouterError as exc:
+                return PressureResult(
+                    ok=False, provider=provider, profile=adapter.profile,
+                    market=MARKET, blocks={},
+                    coverage={"complete": False}, warnings=(str(exc),),
+                    error_code=exc.error_code)
+
+        ordered = {k: blocks[k] for k in requested if k in blocks}
+        return PressureResult(
+            ok=any(b.status == "ok" for b in ordered.values()),
+            provider=provider, profile=adapter.profile, market=MARKET,
+            blocks=ordered,
+            coverage={"requested_kinds": len(requested),
+                      "fetched_kinds": len(fetchable),
+                      "complete": len(fetchable) == len(requested)},
+            warnings=(), error_code=None)
+
+
+def _state_block(kind: str, state: str, provider: str,
+                 reason: str | None) -> PressureBlock:
+    """받지 못한 종류도 자기 자리를 갖는다. 빠뜨리지 않는다.
+
+    사용자가 여섯 종류를 물었는데 셋만 돌아오면 나머지 셋이 '없음'인지
+    '못 물어봄'인지 알 수 없다. 그래서 못 준 것도 사유를 달고 남는다.
+    """
+    if state == "verifying":
+        status, why = "unverified", "release_gate_closed"
+        message = (f"{kind} 는 데이터 계약 검증 중이라 아직 제공하지 "
+                   "않습니다. API 키 문제가 아닙니다.")
+    elif state == "unverified":
+        status, why = "unverified", reason or "not_verified"
+        message = (f"{kind} 는 응답은 오지만 데이터를 확인하지 못했습니다. "
+                   "된다고도 안 된다고도 말하지 않습니다.")
+    elif state == "not_configured":
+        status, why = "not_configured", "provider_not_configured"
+        message = f"{provider} 가 연결되어 있지 않습니다."
+    else:
+        status = "unsupported"
+        why = (reason if reason and reason != "unsupported"
+               else "not_provided_by_provider")
+        message = f"{kind} 는 {provider} 가 제공하지 않습니다."
+    return PressureBlock(
+        kind=kind, status=status, provider=provider, market=MARKET,
+        rows=(), data_as_of=None, data_completeness="none",
+        warnings=(message,), unavailable_reason=why,
+        coverage={"rows": 0, "complete": False})

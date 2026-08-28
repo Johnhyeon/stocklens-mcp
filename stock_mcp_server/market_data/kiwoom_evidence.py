@@ -305,6 +305,11 @@ class KiwoomEvidenceProvider:
         caps.update({k: "unsupported" for k in UNSUPPORTED_KINDS})
         return caps
 
+    @staticmethod
+    def pressure_unavailable_reasons() -> dict[str, str]:
+        """왜 못 주는지. 상태만으로는 복원되지 않는 사실이다."""
+        return dict(UNSUPPORTED_KINDS)
+
     async def fetch_investor_flow(
         self,
         symbol: str,

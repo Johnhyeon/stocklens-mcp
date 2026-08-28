@@ -239,6 +239,19 @@ class KisEvidenceProvider:
         caps.update({k: "unverified" for k in _PRESSURE_UNVERIFIED})
         return caps
 
+    @staticmethod
+    def pressure_unavailable_reasons() -> dict[str, str]:
+        """왜 못 주는지. 상태만으로는 복원되지 않는 사실이다.
+
+        `market_level_only` 와 `not_provided_by_provider` 는 사용자에게
+        전혀 다른 말이다. 앞의 것은 숫자가 있긴 한데 종목 단위가 아니라
+        이 질문의 답으로 쓰면 라벨이 틀리는 경우고, 뒤의 것은 공급자에게
+        아예 없는 경우다. 상태 하나로 뭉개면 이 구분이 사라진다.
+        """
+        reasons = dict(_PRESSURE_UNSUPPORTED)
+        reasons.update(_PRESSURE_UNVERIFIED)
+        return reasons
+
     async def fetch_supply_pressure(
         self, symbol: str, *, kinds, base_date: date,
         lookback_days: int = 30, row_limit: int = 30,

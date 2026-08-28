@@ -184,6 +184,48 @@ def _denied(provider: str, capability: str, state: str, state_of,
         capability=capability, alternative=alternative)
 
 
+def select_provider(
+    *,
+    requested_source: str,
+    capabilities: dict,
+    primary_provider: str | None = None,
+    public_providers: "tuple[str, ...] | None" = None,
+) -> str:
+    """능력을 따지기 전에 **연결된 공급자 하나**만 고른다.
+
+    여러 종류를 한 번에 묻는 요청(수급 압력)에 필요하다. 종류마다 능력이
+    다르니 요청 전체를 하나의 능력으로 판정할 수 없다. 공급자는 하나로
+    고정하고, 종류별 가능 여부는 각 블록이 따로 말한다.
+    """
+    public = _public_ids(public_providers)
+    if requested_source in public:
+        caps = capabilities.get(requested_source)
+        if not caps or not caps.get("connected"):
+            raise EvidenceRouterError(
+                "not_configured",
+                f"{requested_source} 가 연결되어 있지 않습니다. 증권사 "
+                "연결 후 다시 시도하세요.",
+                error_code="provider_not_configured",
+                provider=requested_source)
+        return requested_source
+
+    if requested_source != "auto":
+        raise EvidenceRouterError(
+            "not_configured",
+            f"{requested_source} 로는 상세 수급을 받을 수 없습니다. "
+            "증권사(한국투자증권·키움증권)를 연결해 주세요.",
+            error_code="provider_not_configured", provider=requested_source)
+
+    caps = capabilities.get(primary_provider) if primary_provider else None
+    if primary_provider is None or not caps or not caps.get("connected"):
+        raise EvidenceRouterError(
+            "not_configured",
+            "연결된 증권사가 없습니다. 상세 수급은 증권사 Open API "
+            "연결이 필요합니다.",
+            error_code="provider_not_configured")
+    return primary_provider
+
+
 def assert_same_generation(provider: str, before: int, after: int) -> None:
     """요청 도중 연결이 바뀌었으면 결과를 버린다.
 
