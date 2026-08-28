@@ -154,7 +154,8 @@ class EvidenceCache:
             cleaned = {k: v for k, v in row.items()
                        if k in _ALLOWED_ROW_FIELDS}
             previous = by_date.get(day)
-            if previous is not None and previous != cleaned and                     day not in conflicts:
+            if (previous is not None and previous != cleaned
+                    and day not in conflicts):
                 conflicts.append(day)
             by_date[day] = cleaned
         rows = [by_date[d] for d in sorted(by_date, reverse=True)]

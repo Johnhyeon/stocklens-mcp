@@ -125,7 +125,8 @@ def dedupe_rows(rows) -> "tuple[list[InvestorFlowRow], list]":
         if row is None:
             continue
         previous = by_date.get(row.date)
-        if previous is not None and previous.values != row.values and                 row.date not in conflicts:
+        if (previous is not None and previous != row
+                and row.date not in conflicts):
             conflicts.append(row.date)
         by_date[row.date] = row
     ordered = [by_date[d] for d in sorted(by_date, reverse=True)]

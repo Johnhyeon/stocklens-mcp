@@ -58,6 +58,22 @@ class AdapterDuplicateTests(unittest.TestCase):
         self.assertEqual(len(deduped), 1)
         self.assertEqual(conflicts, [])
 
+    def test_a_difference_outside_the_flow_values_is_still_a_conflict(self):
+        """수급값이 같아도 종가나 거래량이 다르면 같은 행이 아니다.
+
+        `values` 만 비교하면 종가·거래량이 조용히 뒤 행 것으로 바뀐다.
+        어느 쪽이 맞는지 물어볼 기회가 사라지는 건 마찬가지다.
+        """
+        base = _raw("20260827", 100)
+        other = dict(base, cur_prc="80000", acc_trde_qty="999")
+        rows = [kiwoom_evidence._parse_row(base, 0),
+                kiwoom_evidence._parse_row(other, 0)]
+        self.assertEqual(rows[0].values, rows[1].values)
+        self.assertNotEqual(rows[0], rows[1])
+        deduped, conflicts = kiwoom_evidence.dedupe_rows(rows)
+        self.assertEqual(len(deduped), 1)
+        self.assertEqual(conflicts, [date(2026, 8, 27)])
+
     def test_a_clean_page_set_is_untouched(self):
         rows = [kiwoom_evidence._parse_row(_raw("20260827", 100), 0),
                 kiwoom_evidence._parse_row(_raw("20260826", 200), 0)]
