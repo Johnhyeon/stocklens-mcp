@@ -2,8 +2,8 @@
   "kind": "market_evidence_uat",
   "market": "KR",
   "capability": "kr_investor_flow",
-  "started_at": "2026-08-28T19:26:57.899899+09:00",
-  "finished_at": "2026-08-28T19:27:56.352733+09:00",
+  "started_at": "2026-08-28T19:55:29.967572+09:00",
+  "finished_at": "2026-08-28T19:56:11.763336+09:00",
   "base_date": "2026-08-28",
   "cases": 15,
   "failures": 0,
@@ -15,7 +15,10 @@
   "kiwoom_settled_days": 1500,
   "provisional_transition": {
     "state": "no_intraday_snapshot",
+    "verified": false,
+    "required": false,
     "symbols_compared": 0,
+    "observed_transitions": 0,
     "detail": []
   },
   "detail": [

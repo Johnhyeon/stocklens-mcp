@@ -56,14 +56,17 @@ def _with_recomputed(payload: dict, rows: list[dict]) -> dict:
 
     저장 행은 1개인데 coverage.rows=2, data_state=provisional 로 남으면
     캐시가 자기 내용과 다른 말을 하게 된다. 호출자는 그 숫자를 믿는다.
+
+    다만 `complete` 는 **지우지 않는다.** 이 필드는 AI 가 "요청 범위를
+    다 채웠는가"를 판단하는 자리고, 캐시에서 온 응답에만 없으면 같은
+    질문에 완전성 판단만 달라진다. 캐시는 보이지 않아야 한다.
+    원본 응답이 불완전했으면(페이지 예산 소진 등) 그 사실을 그대로
+    물려받는다 - 캐시가 불완전을 완전으로 승격하지 않는다.
     """
     out = dict(payload)
     out["rows"] = rows
     coverage = dict(out.get("coverage") or {})
     coverage["rows"] = len(rows)
-    # 잠정 행을 빼고 남은 것이므로, 원래 요청 범위를 다 채웠다고
-    # 주장하지 않는다. 채웠는지는 읽는 쪽이 row_limit 로 판정한다.
-    coverage.pop("complete", None)
     out["coverage"] = coverage
     # 확정 행만 담기므로 상태는 final 이다.
     out["data_state"] = "final"
@@ -130,9 +133,16 @@ class EvidenceCache:
     # --- 저장 형태 ---
 
     @staticmethod
-    def _final_rows(payload: dict) -> list[dict]:
-        """확정 행만, 날짜 중복 없이, 최신 순으로."""
+    def _final_rows(payload: dict) -> "tuple[list[dict], list[str]]":
+        """확정 행만, 날짜 중복 없이, 최신 순으로.
+
+        같은 응답 안에 같은 날짜가 **값이 다른 채로** 두 번 오면, 그건
+        공급자 이상이다. 저장은 하나만 하되(호출자가 어느 쪽이 맞는지
+        알 수 없게 만들지 않는다) 그 사실을 돌려준다. 조용히 덮으면
+        물어볼 기회조차 사라진다.
+        """
         by_date: dict[str, dict] = {}
+        conflicts: list[str] = []
         for row in payload.get("rows") or []:
             if not isinstance(row, dict):
                 continue
@@ -143,10 +153,12 @@ class EvidenceCache:
                 continue
             cleaned = {k: v for k, v in row.items()
                        if k in _ALLOWED_ROW_FIELDS}
-            # 같은 날짜가 다시 오면 나중 것이 이긴다. 두 줄로 남기지
-            # 않는다 - 호출자가 어느 쪽이 맞는지 알 수 없게 된다.
+            previous = by_date.get(day)
+            if previous is not None and previous != cleaned and                     day not in conflicts:
+                conflicts.append(day)
             by_date[day] = cleaned
-        return [by_date[d] for d in sorted(by_date, reverse=True)]
+        rows = [by_date[d] for d in sorted(by_date, reverse=True)]
+        return rows, conflicts
 
     @staticmethod
     def _clean_payload(payload: dict, rows: list[dict]) -> dict:
@@ -222,7 +234,7 @@ class EvidenceCache:
     def put(self, key: EvidenceCacheKey, payload: dict, *,
             generation: int, final_through: str | None,
             fetched_for: str | None = None) -> None:
-        rows = self._final_rows(payload)
+        rows, conflicts = self._final_rows(payload)
         path = self.path_for(key)
         if not rows:
             # 확정 행이 하나도 없으면 남길 것이 없다. 잠정값을 담으면
@@ -254,14 +266,23 @@ class EvidenceCache:
         anchor = max(filter(None, (fetched_for, prior_fetched, stamp)),
                      default=None)
 
+        stored = self._clean_payload(payload, rows)
+        if conflicts:
+            # 공급자가 같은 날짜에 다른 값을 줬다. 값 하나만 남기되
+            # 그 사실은 응답에 실어 보낸다.
+            warnings = list(stored.get("warnings") or ())
+            warnings.append(
+                "같은 날짜에 값이 다른 행이 중복으로 왔습니다: "
+                + ", ".join(conflicts)
+                + ". 최신 값만 남겼습니다.")
+            stored["warnings"] = warnings
         doc = {
             "schema_version": key.schema_version,
             "generation": int(generation),
             "final_through": stamp,
             # 이 항목을 어느 기준일로 받아왔는가. 적중 판정의 축이다.
             "fetched_for": anchor,
-            "payload": _with_recomputed(self._clean_payload(payload, rows),
-                                        rows),
+            "payload": _with_recomputed(stored, rows),
         }
         path.parent.mkdir(parents=True, exist_ok=True)
         fd, tmp_name = tempfile.mkstemp(

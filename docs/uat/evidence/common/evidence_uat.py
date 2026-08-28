@@ -1,4 +1,4 @@
-"""상세 수급 실계좌 UAT 러너 (1.1 Task 20).
+r"""상세 수급 실계좌 UAT 러너 (1.1 Task 20).
 
 **독립 검증이 이 러너의 존재 이유다.** 어댑터가 자기 계산으로 자기를
 검증하면 같은 오해를 두 번 하고 통과한다. 그래서 여기서는 공급자 원본
@@ -48,12 +48,18 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[4]
 sys.path.insert(0, str(ROOT))
 
-for _stream in ("stdout", "stderr"):
-    _handle = getattr(sys, _stream)
-    if hasattr(_handle, "buffer"):
-        setattr(sys, _stream,
-                io.TextIOWrapper(_handle.buffer, encoding="utf-8",
-                                 errors="strict", line_buffering=True))
+def _force_utf8_streams() -> None:
+    """콘솔이 cp949 여도 한국어를 그대로 낸다.
+
+    import 시점이 아니라 실행 시점에 부른다. import 만으로 전역 stdout 을
+    바꾸면 이 모듈을 불러 쓰는 테스트가 자기 출력을 잃는다 (실제로 그랬다).
+    """
+    for name in ("stdout", "stderr"):
+        handle = getattr(sys, name)
+        if hasattr(handle, "buffer"):
+            setattr(sys, name,
+                    io.TextIOWrapper(handle.buffer, encoding="utf-8",
+                                     errors="strict", line_buffering=True))
 
 KST = timezone(timedelta(hours=9))
 
@@ -178,12 +184,21 @@ def _kiwoom_rows(raw_rows: list[dict]) -> dict[str, dict]:
         got = [values[n] for n in KIWOOM_FOREIGN_PARTS]
         values["foreign"] = (None if any(v is None for v in got)
                              else sum(got))
+        balance = (None if any(p is None for p in principals)
+                   else sum(principals))
+        institution = (None if any(p is None for p in parts)
+                       else sum(parts))
+        # **운영 어댑터와 같은 기준**이다. 어댑터 함수를 부르지는 않지만
+        # (독립 검증) 판정 기준까지 다르면 안 된다. 5주체 합만 보면,
+        # 어댑터가 미정산이라고 하는 행을 러너는 정산됐다고 하게 되고
+        # 장중 전이 판정이 그 행에서 틀린다.
+        settled = (balance == 0 and institution is not None
+                   and institution == values.get("institution_total"))
         out[day] = {
             **values,
-            "_balance": (None if any(p is None for p in principals)
-                         else sum(principals)),
-            "_institution": (None if any(p is None for p in parts)
-                             else sum(parts)),
+            "_balance": balance,
+            "_institution": institution,
+            "_settled": settled,
         }
     return out
 
@@ -269,16 +284,11 @@ async def _case(symbol: str, kis_client, kiwoom_client, day: date) -> dict:
 
     # 2) 키움 검산: 5주체 합 0, 기관 세부 8종 합 = 기관계
     settled = unsettled = 0
-    for day_key, entry in kiwoom.items():
-        balance, institution = entry["_balance"], entry["_institution"]
-        total = entry["institution_total"]
-        if balance is None or institution is None or total is None:
-            unsettled += 1
-            continue
-        if balance == 0 and institution == total:
+    for entry in kiwoom.values():
+        # 정산 전 당일 행은 검산이 깨지는 것이 정상이다.
+        if entry["_settled"]:
             settled += 1
         else:
-            # 정산 전 당일 행은 검산이 깨지는 것이 정상이다.
             unsettled += 1
     result["kiwoom_settled_days"] = settled
     result["kiwoom_unsettled_days"] = unsettled
@@ -289,7 +299,7 @@ async def _case(symbol: str, kis_client, kiwoom_client, day: date) -> dict:
     shared_days = sorted(set(kis) & set(kiwoom), reverse=True)
     compared = mismatched = 0
     for day_key in shared_days:
-        if kiwoom[day_key]["_balance"] != 0:
+        if not kiwoom[day_key]["_settled"]:
             continue  # 정산 전 날은 비교하지 않는다
         for name in SHARED_CATEGORIES:
             left, right = kis[day_key].get(name), kiwoom[day_key].get(name)
@@ -489,6 +499,53 @@ async def _case(symbol: str, kis_client, kiwoom_client, day: date) -> dict:
 # 스냅샷과 대조한다.
 # ---------------------------------------------------------------------------
 
+def transition_verified(state: str, transitions: list) -> bool:
+    """잠정->확정 전이를 **실제로** 확인했는가.
+
+    스냅샷이 없거나, 다른 날 스냅샷이거나, 대조는 했는데 전이가 한 건도
+    없으면 확인한 것이 아니다. 이미 확정된 값을 두 번 읽으면 당연히
+    전이가 없고, 그건 회귀가 없다는 뜻이지 전이가 동작한다는 증거가
+    아니다.
+    """
+    if state != "checked" or not transitions:
+        return False
+    observed = sum(v.get("kis_settled_after", 0) +
+                   v.get("kiwoom_settled_after", 0) for v in transitions)
+    return observed > 0
+
+
+def exit_code(*, case_failures: int, transition_failures: int,
+              require_transition: bool, transition_state: str,
+              transitions: list) -> int:
+    """종료코드. 검증하지 않은 것을 성공으로 끝내지 않는다.
+
+    `--require-transition` 은 게이트용 실행에 쓴다. 그 실행이 전이를
+    확인하지 못했으면 실패다 - 확인 못 한 채로 0 을 돌려주면 그 증거
+    파일을 근거로 게이트를 열게 된다.
+    """
+    if case_failures or transition_failures:
+        return 1
+    if require_transition and not transition_verified(transition_state,
+                                                      transitions):
+        return 1
+    return 0
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--symbols", type=int, default=len(SYMBOLS))
+    parser.add_argument("--out", default=None)
+    parser.add_argument(
+        "--phase", choices=("final", "intraday"), default="final",
+        help="intraday 는 잠정값 스냅샷을 남긴다. 장 마감 후 final 로 "
+             "다시 돌리면 잠정->확정 전이를 검증한다.")
+    parser.add_argument(
+        "--require-transition", action="store_true",
+        help="잠정->확정 전이를 실제로 확인하지 못하면 실패로 끝낸다. "
+             "게이트 증거를 만드는 실행에 쓴다.")
+    return parser
+
+
 def _snapshot_path(out: Path, day: date) -> Path:
     return out.parent / f"phase_intraday_{day:%Y%m%d}.json"
 
@@ -517,7 +574,7 @@ async def _collect_snapshot(symbol: str, kis_client, kiwoom_client,
                 d: {"individual": v.get("individual"),
                     "foreign": v.get("foreign"),
                     "institution_total": v.get("institution_total"),
-                    "settled": v.get("_balance") == 0}
+                    "settled": bool(v.get("_settled"))}
                 for d, v in rows.items()}
     except Exception as exc:  # noqa: BLE001
         entry["kiwoom_error"] = type(exc).__name__
@@ -574,13 +631,8 @@ def _compare_transition(before: dict, after: dict) -> dict:
 
 
 async def _main() -> int:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--symbols", type=int, default=len(SYMBOLS))
-    parser.add_argument("--out", default=None)
-    parser.add_argument(
-        "--phase", choices=("final", "intraday"), default="final",
-        help="intraday 는 잠정값 스냅샷을 남긴다. 장 마감 후 final 로 "
-             "다시 돌리면 잠정->확정 전이를 검증한다.")
+    _force_utf8_streams()
+    parser = build_parser()
     args = parser.parse_args()
 
     if args.symbols > len(SYMBOLS):
@@ -659,8 +711,10 @@ async def _main() -> int:
         elif snapshot:
             transition_state = "snapshot_from_another_day"
 
-    failures = sum(len(c["failures"]) for c in cases) + sum(
-        len(v["failures"]) for v in transitions)
+    case_failures = sum(len(c["failures"]) for c in cases)
+    transition_failures = sum(len(v["failures"]) for v in transitions)
+    verified = transition_verified(transition_state, transitions)
+    failures = case_failures + transition_failures
     report = {
         "kind": "market_evidence_uat",
         "market": "KR",
@@ -681,7 +735,14 @@ async def _main() -> int:
         # 잠정->확정 전이. 장중 스냅샷 없이 돌리면 미판정으로 남는다.
         "provisional_transition": {
             "state": transition_state,
+            # 확인했는가. state 만 보면 'checked' 인데 전이 0건인 실행을
+            # 검증한 것으로 읽게 된다.
+            "verified": verified,
+            "required": bool(args.require_transition),
             "symbols_compared": len(transitions),
+            "observed_transitions": sum(
+                v.get("kis_settled_after", 0) +
+                v.get("kiwoom_settled_after", 0) for v in transitions),
             "detail": transitions,
         },
         "detail": cases,
@@ -693,13 +754,21 @@ async def _main() -> int:
           f"불일치 {report['cross_mismatched']}")
     print(f"  KIS 내부 산술 {report['kis_arithmetic_checked']}건")
     print(f"  잠정->확정 전이: {transition_state} "
-          f"({len(transitions)}종목)")
+          f"({len(transitions)}종목, 검증 "
+          f"{'됨' if verified else '안 됨'})")
+    if args.require_transition and not verified:
+        print("  -> --require-transition 인데 전이를 확인하지 못했다. "
+              "장중에 --phase intraday 를 먼저 돌려야 한다.")
 
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(report, ensure_ascii=False, indent=2),
                    encoding="utf-8")
     print(f"증거: {out}")
-    return 0 if failures == 0 else 1
+    return exit_code(case_failures=case_failures,
+                     transition_failures=transition_failures,
+                     require_transition=args.require_transition,
+                     transition_state=transition_state,
+                     transitions=transitions)
 
 
 if __name__ == "__main__":
