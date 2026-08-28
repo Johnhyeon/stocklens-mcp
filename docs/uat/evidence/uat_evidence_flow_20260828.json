@@ -1,0 +1,94 @@
+{
+  "kind": "market_evidence_uat",
+  "market": "KR",
+  "capability": "kr_investor_flow",
+  "started_at": "2026-08-28T17:31:36.041873+09:00",
+  "finished_at": "2026-08-28T17:31:37.690510+09:00",
+  "base_date": "2026-08-28",
+  "cases": 3,
+  "failures": 3,
+  "cross_compared": 0,
+  "cross_mismatched": 0,
+  "kis_arithmetic_checked": 270,
+  "kiwoom_settled_days": 0,
+  "detail": [
+    {
+      "symbol": "005930",
+      "checks": [
+        {
+          "check": "kis_buy_minus_sell",
+          "detail": "90건 일치"
+        }
+      ],
+      "failures": [
+        {
+          "check": "cross_provider",
+          "detail": "두 번째 공급자가 연결되어 있지 않아 교차 검증을 못 했다"
+        }
+      ],
+      "kis_rows": 30,
+      "kiwoom_rows": 0,
+      "kis_arithmetic_checked": 90,
+      "kiwoom_settled_days": 0,
+      "kiwoom_unsettled_days": 0,
+      "cross_compared": 0,
+      "cross_mismatched": 0,
+      "shared_days": 0,
+      "cross_provider_status": "unavailable_second_provider",
+      "measure_discrimination_status": "skipped_no_kiwoom",
+      "adapter_check_status": "skipped_no_kiwoom"
+    },
+    {
+      "symbol": "000660",
+      "checks": [
+        {
+          "check": "kis_buy_minus_sell",
+          "detail": "90건 일치"
+        }
+      ],
+      "failures": [
+        {
+          "check": "cross_provider",
+          "detail": "두 번째 공급자가 연결되어 있지 않아 교차 검증을 못 했다"
+        }
+      ],
+      "kis_rows": 30,
+      "kiwoom_rows": 0,
+      "kis_arithmetic_checked": 90,
+      "kiwoom_settled_days": 0,
+      "kiwoom_unsettled_days": 0,
+      "cross_compared": 0,
+      "cross_mismatched": 0,
+      "shared_days": 0,
+      "cross_provider_status": "unavailable_second_provider",
+      "measure_discrimination_status": "skipped_no_kiwoom",
+      "adapter_check_status": "skipped_no_kiwoom"
+    },
+    {
+      "symbol": "373220",
+      "checks": [
+        {
+          "check": "kis_buy_minus_sell",
+          "detail": "90건 일치"
+        }
+      ],
+      "failures": [
+        {
+          "check": "cross_provider",
+          "detail": "두 번째 공급자가 연결되어 있지 않아 교차 검증을 못 했다"
+        }
+      ],
+      "kis_rows": 30,
+      "kiwoom_rows": 0,
+      "kis_arithmetic_checked": 90,
+      "kiwoom_settled_days": 0,
+      "kiwoom_unsettled_days": 0,
+      "cross_compared": 0,
+      "cross_mismatched": 0,
+      "shared_days": 0,
+      "cross_provider_status": "unavailable_second_provider",
+      "measure_discrimination_status": "skipped_no_kiwoom",
+      "adapter_check_status": "skipped_no_kiwoom"
+    }
+  ]
+}

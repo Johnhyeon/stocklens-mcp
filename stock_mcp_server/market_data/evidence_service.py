@@ -142,8 +142,10 @@ class EvidenceService:
             return given
         if self._base_date is not None:
             return self._base_date
-        from stock_mcp_server.market_clock import build_market_clock
-        raw = build_market_clock()["krx"].get("last_trading_day")
+        # server.py 는 이 함수를 build_market_clock 이라는 별칭으로 쓴다.
+        # 별칭을 여기서 import 하면 없는 이름이라 ImportError 가 난다.
+        from stock_mcp_server.market_clock import get_market_clock
+        raw = get_market_clock()["krx"].get("last_trading_day")
         return date.fromisoformat(str(raw))
 
     # -- 공통 -------------------------------------------------------------

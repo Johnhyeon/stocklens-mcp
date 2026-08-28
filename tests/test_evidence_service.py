@@ -291,6 +291,39 @@ class BatchTests(unittest.TestCase):
         self.assertEqual(len(result.records), 1)
 
 
+class BaseDateResolutionTests(unittest.TestCase):
+    """기준일을 주지 않았을 때의 경로.
+
+    다른 테스트가 전부 base_date 를 주입해서 이 경로를 한 번도 밟지
+    않았고, 그래서 시장 캘린더 import 오류가 실계좌에서야 드러났다.
+    게이트가 닫혀 있는 동안에는 라우팅이 먼저 막아 여기까지 오지도
+    않는다. 게이트가 열리는 순간 첫 호출에서 터지는 자리다.
+    """
+
+    def _service(self):
+        adapters = {"kiwoom": _FakeAdapter("kiwoom",
+                                           KiwoomEvidenceProvider)}
+        return EvidenceService(
+            runtime=_FakeRuntime(primary="kiwoom", adapters=adapters),
+            release_override=True), adapters
+
+    def test_a_missing_base_date_resolves_from_the_market_calendar(self):
+        service, adapters = self._service()
+        result = _run(service.investor_flow(code="005930", days=20))
+        self.assertTrue(result.ok, result.warnings)
+        self.assertEqual(len(adapters["kiwoom"].flow_calls), 1)
+
+    def test_supply_pressure_also_resolves_its_own_base_date(self):
+        service, _ = self._service()
+        result = _run(service.supply_pressure(
+            code="005930", kinds=["program_trading"]))
+        self.assertEqual(result.blocks["program_trading"].status, "ok")
+
+    def test_the_resolved_date_is_a_real_date(self):
+        service, _ = self._service()
+        self.assertIsInstance(service._resolve_base_date(None), date)
+
+
 class GenerationTests(unittest.TestCase):
     def test_a_connection_change_mid_request_discards_the_result(self):
         class _Changing(_FakeRuntime):
