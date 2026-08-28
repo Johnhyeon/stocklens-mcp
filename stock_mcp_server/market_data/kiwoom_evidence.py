@@ -55,9 +55,24 @@ _PRINCIPALS = ("individual", "foreign", "institution_total",
 _INSTITUTION_PARTS = ("financial_investment", "insurance",
                       "investment_trust", "other_financial", "bank",
                       "pension_fund", "private_equity_fund", "government")
-# 실측 반올림 오차 허용치 (정산일에도 ±1~2 가 관찰된다)
-_PRINCIPAL_TOLERANCE = 2
-_INSTITUTION_TOLERANCE = 2
+# 측정 단위. 라벨과 값이 갈라지지 않게 요청 파라미터와 함께 고정한다.
+#
+# 실측(2026-08-28) + KIS 교차 검증으로 확정:
+# - amt_qty_tp="2", unit_tp="1"  -> 순매매 **수량(단주)**.
+#   키움 개인 -3,223,427 = KIS prsn_ntby_qty -3,223,427 (자릿수까지 일치)
+# - amt_qty_tp="1"               -> 순매매 **금액(백만원)**.
+#   키움 개인 -862,106 = KIS prsn_ntby_tr_pbmn -862,106
+# 단위를 섞으면 같은 이름의 숫자가 3.7 배 달라진다. 그래서 measure 를
+# 호출자가 고르게 하고, 응답에 measure 와 unit 을 함께 싣는다.
+MEASURES: dict[str, dict[str, str]] = {
+    "net_quantity": {"amt_qty_tp": "2", "unit_tp": "1", "unit": "shares"},
+    "net_amount": {"amt_qty_tp": "1", "unit_tp": "1",
+                   "unit": "KRW_million"},
+}
+DEFAULT_MEASURE = "net_quantity"
+
+# 수량은 정확히 0 으로 맞고, 금액은 반올림 때문에 소폭 어긋난다 (실측).
+_TOLERANCE = {"net_quantity": 0, "net_amount": 2}
 
 
 def _int(raw: object) -> int | None:
@@ -129,10 +144,13 @@ class InvestorFlowDataset:
     data_state: str
     coverage: dict
     warnings: tuple[str, ...]
+    # 값의 이름표. 이게 없으면 수량과 금액이 같은 이름으로 섞인다.
+    measure: str = DEFAULT_MEASURE
+    unit: str = "shares"
     source_endpoint: str = "kiwoom_kr_investor_daily"
 
 
-def _parse_row(raw: dict) -> InvestorFlowRow | None:
+def _parse_row(raw: dict, tolerance: int = 0) -> InvestorFlowRow | None:
     day = str(raw.get("dt") or "").strip()
     if len(day) != 8 or not day.isdigit():
         return None
@@ -154,7 +172,7 @@ def _parse_row(raw: dict) -> InvestorFlowRow | None:
     principal_sum = (None if any(p is None for p in principals)
                      else sum(principals))  # type: ignore[arg-type]
     balanced = (principal_sum is not None
-                and abs(principal_sum) <= _PRINCIPAL_TOLERANCE)
+                and abs(principal_sum) <= tolerance)
 
     subtotal_parts = [values.get(p) for p in _INSTITUTION_PARTS]
     institution_total = values.get("institution_total")
@@ -162,7 +180,7 @@ def _parse_row(raw: dict) -> InvestorFlowRow | None:
         institution_total is not None
         and all(p is not None for p in subtotal_parts)
         and abs(sum(subtotal_parts) - institution_total)  # type: ignore
-        <= _INSTITUTION_TOLERANCE)
+        <= tolerance)
 
     final = balanced and institution_ok
     unsettled: tuple[str, ...] = ()
@@ -341,10 +359,21 @@ class KiwoomEvidenceProvider:
         symbol: str,
         *,
         base_date: date,
+        measure: str = DEFAULT_MEASURE,
         max_pages: int = _DEFAULT_MAX_PAGES,
         row_limit: int = 60,
     ) -> InvestorFlowDataset:
-        """종목별 투자자·기관별 일별 순매매 (ka10059)."""
+        """종목별 투자자·기관별 일별 순매매 (ka10059).
+
+        measure 는 수량(net_quantity, 단주)과 금액(net_amount, 백만원)
+        중 하나다. 요청 파라미터와 응답 라벨이 같은 표에서 나오므로
+        둘이 갈라질 수 없다.
+        """
+        if measure not in MEASURES:
+            raise ValueError(
+                f"지원하지 않는 measure: {measure} (지원: {tuple(MEASURES)})")
+        spec = MEASURES[measure]
+        tolerance = _TOLERANCE[measure]
         rows: list[InvestorFlowRow] = []
         warnings: list[str] = []
         dropped = 0
@@ -361,10 +390,9 @@ class KiwoomEvidenceProvider:
                 body={
                     "dt": base_date.strftime("%Y%m%d"),
                     "stk_cd": symbol,
-                    # 실측 기준값: 금액이 아니라 수량(순매매 주수)
-                    "amt_qty_tp": "1",
+                    "amt_qty_tp": spec["amt_qty_tp"],
                     "trde_tp": "0",
-                    "unit_tp": "1000",
+                    "unit_tp": spec["unit_tp"],
                 },
                 cont_yn=cont_yn, next_key=next_key)
 
@@ -388,7 +416,7 @@ class KiwoomEvidenceProvider:
             saw_rows = True
 
             for raw in page_rows:
-                parsed = _parse_row(raw)
+                parsed = _parse_row(raw, tolerance)
                 if parsed is None:
                     dropped += 1
                     continue
@@ -426,6 +454,8 @@ class KiwoomEvidenceProvider:
             market="KR",
             rows=tuple(rows),
             data_state="provisional" if provisional else "final",
+            measure=measure,
+            unit=spec["unit"],
             coverage={
                 "pages": pages,
                 "rows": len(rows),

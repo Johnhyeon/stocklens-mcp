@@ -106,6 +106,32 @@ class InvestorFlowMappingTests(unittest.TestCase):
         self.assertEqual(req.url.path, "/api/dostk/stkinfo")
         self.assertEqual(req.headers["api-id"], "ka10059")
 
+    def test_default_measure_is_shares_and_labelled(self):
+        # 실측: amt_qty_tp=2 + unit_tp=1 이 단주 수량이고, 그 값이 KIS
+        # prsn_ntby_qty 와 자릿수까지 일치한다. 라벨이 요청과 같은 표에서
+        # 나오므로 값과 이름표가 갈라질 수 없다.
+        body = json.loads(self.server.requests[0].content)
+        self.assertEqual(body["amt_qty_tp"], "2")
+        self.assertEqual(body["unit_tp"], "1")
+        self.assertEqual(self.result.measure, "net_quantity")
+        self.assertEqual(self.result.unit, "shares")
+
+    def test_amount_measure_switches_request_and_label_together(self):
+        server = Server([(_DAILY, None, None)])
+        result = _run(_provider(server).fetch_investor_flow(
+            "005930", base_date=date(2026, 8, 28), measure="net_amount"))
+        body = json.loads(server.requests[0].content)
+        self.assertEqual(body["amt_qty_tp"], "1")
+        self.assertEqual(result.measure, "net_amount")
+        self.assertEqual(result.unit, "KRW_million")
+
+    def test_unknown_measure_is_rejected(self):
+        with self.assertRaises(ValueError):
+            _run(_provider(Server([(_DAILY, None, None)]))
+                 .fetch_investor_flow("005930",
+                                      base_date=date(2026, 8, 28),
+                                      measure="net_dollars"))
+
     def test_categories_keep_their_raw_names(self):
         row = self.result.rows[1]  # 20260827 (정산 완료)
         self.assertEqual(row.raw_category("private_equity_fund"),
@@ -118,8 +144,11 @@ class InvestorFlowMappingTests(unittest.TestCase):
         self.assertEqual(row.date, date(2026, 8, 27))
         self.assertEqual(row.data_state, "final")
         self.assertTrue(row.balance_ok)
-        self.assertEqual(row.value("individual"), -862106)
-        self.assertEqual(row.value("foreign"), 374719)
+        # 수량(단주). KIS 교차 확인: prsn_ntby_qty 도 -3,223,427.
+        self.assertEqual(row.value("individual"), -3223427)
+        self.assertEqual(row.value("institution_total"), -97433)
+        # 정산일에는 5주체 순매매 합이 정확히 0 이다.
+        self.assertEqual(row.principal_sum, 0)
         # 기관 세부 8종 합 == 기관계
         self.assertEqual(row.institution_subtotal(),
                          row.value("institution_total"))
@@ -133,7 +162,7 @@ class InvestorFlowMappingTests(unittest.TestCase):
         self.assertIsNone(row.value("individual"))
         self.assertTrue(row.is_unsettled("individual"))
         # 실제로 값이 있는 항목은 그대로 준다.
-        self.assertEqual(row.value("foreign"), 14144)
+        self.assertEqual(row.value("institution_total"), -902000)
 
     def test_dataset_warns_about_the_provisional_day(self):
         joined = " ".join(self.result.warnings)
@@ -143,8 +172,8 @@ class InvestorFlowMappingTests(unittest.TestCase):
     def test_no_silent_correction(self):
         # 어댑터는 합을 맞추려고 값을 만들거나 고치지 않는다.
         row = self.result.rows[0]
-        self.assertEqual(row.value("foreign"), 14144)
-        self.assertEqual(row.value("institution_total"), -231814)
+        self.assertEqual(row.value("institution_total"), -902000)
+        self.assertEqual(row.principal_sum, 842000)
 
 
 class PaginationTests(unittest.TestCase):
