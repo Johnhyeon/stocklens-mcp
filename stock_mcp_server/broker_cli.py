@@ -22,8 +22,12 @@ from stock_mcp_server.market_data.broker_profiles import (
 from stock_mcp_server.market_data.connection_state import (
     DATA_SOURCE_MODES,
     load_state_v2,
+    provider_capabilities_v2 as _provider_capabilities_v2,
     save_state_v2,
     set_primary_v2,
+)
+from stock_mcp_server.market_data.evidence_capabilities import (
+    evidence_projection as _evidence_projection,
 )
 from stock_mcp_server.market_data.credential_store import (
     CleanupReport,
@@ -161,6 +165,10 @@ class BrokerService:
                         "us_intraday": _is_release_verified(
                             pid, "us_intraday"),
                     },
+                    # 1.1 additive: 상세 수급 능력. 도구를 늘리지 않고
+                    # 기존 status 계약을 넓힌다. 위 필드는 그대로다.
+                    **_evidence_projection(
+                        pid, _provider_capabilities_v2(state, pid)),
                 }
                 for pid, rec in state["providers"].items()
                 if _provider_is_public(pid)

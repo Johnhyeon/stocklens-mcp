@@ -466,6 +466,56 @@ def _build_parser():
     return p
 
 
+def broker_evidence_report() -> dict:
+    """증권사 연결별 능력 요약 (1.1 Task 16).
+
+    capability 안내용 MCP 도구를 만들지 않기로 했으므로(대표 결정
+    2026-08-28), 진단 경로가 그 자리를 대신한다. "왜 상세 수급이 안
+    나오지?" 를 사용자가 스스로 확인할 수 있는 유일한 곳이다.
+
+    비밀·endpoint·내부 탐침 결과는 담지 않는다. 공개 허용 목록 투영만
+    올린다. 실패해도 진단 전체를 죽이지 않는다.
+    """
+    from stock_mcp_server.market_data.connection_state import (
+        load_state_v2,
+        provider_capabilities_v2,
+    )
+    from stock_mcp_server.market_data.evidence_capabilities import (
+        EVIDENCE_CONTRACT_VERSION,
+        evidence_projection,
+    )
+    from stock_mcp_server.market_data.provider_registry import registry
+
+    experimental = os.environ.get(
+        "LEETKIT_ENABLE_EXPERIMENTAL_BROKERS") == "1"
+    connections: dict[str, dict] = {}
+    try:
+        state = load_state_v2()
+    except Exception:  # noqa: BLE001
+        state = None
+
+    if state is not None:
+        for provider_id in registry.ids():
+            if provider_id == "toss" and not experimental:
+                continue
+            record = state["providers"].get(provider_id)
+            if record is None:
+                continue
+            try:
+                caps = provider_capabilities_v2(state, provider_id)
+                connections[provider_id] = {
+                    "lifecycle": record["lifecycle"],
+                    **evidence_projection(provider_id, caps),
+                }
+            except Exception:  # noqa: BLE001
+                continue
+
+    return {
+        "evidence_contract_version": EVIDENCE_CONTRACT_VERSION,
+        "provider_connections": connections,
+    }
+
+
 def _run_json_mode(*, online: bool) -> int:
     from stock_mcp_server import diagnostics
 

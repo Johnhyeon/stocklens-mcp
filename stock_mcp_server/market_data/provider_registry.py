@@ -283,12 +283,19 @@ class ProviderRegistry:
         factory·host·path 는 포함하지 않는다. host·path 는 transport
         계층이 레지스트리에서 직접 읽는다.
         """
+        from stock_mcp_server.market_data.evidence_capabilities import (
+            catalog_projection,
+        )
+
         entries = []
         for provider_id in self._order:
             d = self._by_id[provider_id]
             entries.append({
                 "provider_id": d.provider_id,
                 "display_name": d.display_name,
+                # 1.1 additive: 연결하면 무엇이 열리는지. 기존 필드는
+                # 그대로라 구버전 Manager 가 계속 읽는다.
+                **catalog_projection(provider_id),
                 "supported_profiles": list(d.supported_profiles),
                 "signup_url": d.signup_url,
                 "docs_url": d.docs_url,
