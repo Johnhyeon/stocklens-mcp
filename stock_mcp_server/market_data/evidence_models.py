@@ -29,9 +29,19 @@ UNIT_BY_MEASURE = {
 }
 DEFAULT_MEASURE = "net_quantity"
 
-# 정규 투자자 구분 이름. 공급자별 원본 필드명은 어댑터가 함께 싣는다.
-PRINCIPAL_CATEGORIES = ("individual", "foreign", "institution_total",
-                        "other_corporation", "domestic_foreign")
+# 정규 투자자 구분 이름.
+#
+# `foreign` 은 **외국인계**다. KRX·KIS·네이버가 "외국인"이라 부르는 것과
+# 같은 뜻이며, 실측(2026-08-28, 32/32)으로 키움 frgnr_invsr + natfor 와
+# 같다는 것이 확인됐다. 키움의 좁은 쪽은 `foreign_registered` 로 따로
+# 부른다. 같은 이름이 공급자마다 다른 범위를 가리키면, 사용자는 두
+# 숫자의 차이를 시장 현상으로 읽는다.
+#
+# 합이 0 이 되어야 하는 5주체는 **키움 자신의 분해**다. 여기에 파생
+# 합계(foreign)를 넣으면 내외국인을 두 번 세서 검산이 깨진다.
+PRINCIPAL_CATEGORIES = ("individual", "foreign_registered",
+                        "institution_total", "other_corporation",
+                        "domestic_foreign")
 INSTITUTION_PARTS = ("financial_investment", "insurance",
                      "investment_trust", "other_financial", "bank",
                      "pension_fund", "private_equity_fund", "government")

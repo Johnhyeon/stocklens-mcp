@@ -246,18 +246,21 @@ _RELEASE_VERIFIED: dict[tuple[str, str], bool] = {
     # 종류마다 따로 두는 이유: 한 종류를 검증했다고 나머지가 검증된 것이
     # 아니다. 특히 프로그램매매는 KIS 가 장중, 키움이 일별이라 같은 이름의
     # 게이트를 공유하면 한쪽 UAT 로 다른 쪽이 열린다.
-    # KIS 투자자 수급: 실계좌 UAT 14종목 failures=0 (2026-08-28,
-    # docs/uat/evidence/kis/uat_evidence_flow_kis_20260828.json).
-    # 근거 세 겹 - (1) 네이버 교차 812건 불일치 0. 네이버는 증권사와
-    # 무관한 독립 파이프라인이라 라벨이 같은 뜻인지까지 확인된다.
-    # (2) 응답 내부 산술 순매수=매수-매도 1,260건 불일치 0.
-    # (3) 어댑터가 원본을 그대로 옮기는지 14종목 x 30행 대조.
-    # 한계: 네이버는 개인을 주지 않아 individual 은 (2)와 2026-08-27
-    # 키움 교차 1건(005930 -3,223,427 일치)으로만 검증됐다.
+    # 투자자 수급 (KIS·키움): 실계좌 UAT 14종목 failures=0 (2026-08-28,
+    # docs/uat/evidence/common/uat_evidence_flow_20260828.json).
+    # 근거 네 겹 -
+    # (1) 증권사 교차 KIS↔키움 1,260건 불일치 0 (개인·외국인·기관계).
+    # (2) 네이버 교차 812건 불일치 0. 증권사와 무관한 독립 파이프라인.
+    # (3) KIS 응답 내부 산술 순매수=매수-매도 1,260건 불일치 0.
+    # (4) 키움 5주체 합 0 + 기관 세부 8종 합=기관계 검산, 어댑터가
+    #     원본을 그대로 옮기는지 대조.
+    # 이 UAT 가 잡아낸 것: 키움 frgnr_invsr 를 `foreign` 이라 부르면
+    # KIS·네이버의 외국인과 다른 범위가 된다. 실측 32/32 로
+    # frgnr_invsr + natfor 임을 확정하고 이름표를 고친 뒤 열었다.
     ("kis", "kr_investor_flow"): True,
     ("kis", "kr_short_selling"): False,
     ("kis", "kr_program_trading"): False,
-    ("kiwoom", "kr_investor_flow"): False,
+    ("kiwoom", "kr_investor_flow"): True,
     ("kiwoom", "kr_short_selling"): False,
     ("kiwoom", "kr_program_trading"): False,
     ("kiwoom", "kr_credit"): False,

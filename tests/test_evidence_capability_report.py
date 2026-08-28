@@ -56,10 +56,20 @@ class ProjectionTests(unittest.TestCase):
         self.assertNotEqual(groups["supply_pressure"], "available")
 
     def test_closed_release_gates_read_as_checking_not_unsupported(self):
-        # 지금(2026-08-28) 증거 게이트는 전부 닫혀 있다. '지원 안 함'이
-        # 아니라 '검증 중'이다. 둘을 섞으면 사용자가 영영 안 되는 줄 안다.
+        """'지원 안 함'과 '검증 중'을 섞으면 영영 안 되는 줄 안다.
+
+        수급 압력 게이트는 2026-08-28 현재 전부 닫혀 있다. 공급자는
+        데이터를 주는데 출시 검증만 남은 상태다.
+        """
         groups = evidence_projection("kiwoom", CONNECTED)["evidence_groups"]
-        self.assertEqual(groups["detailed_flow"], "checking")
+        self.assertEqual(groups["supply_pressure"], "checking")
+
+    def test_a_gate_opened_by_uat_reads_as_available(self):
+        # 투자자 수급은 2026-08-28 UAT 통과로 열렸다.
+        for provider in ("kis", "kiwoom"):
+            groups = evidence_projection(provider, CONNECTED)[
+                "evidence_groups"]
+            self.assertEqual(groups["detailed_flow"], "available", provider)
 
     def test_basic_market_data_still_reflects_the_1_0_state_file(self):
         self.assertEqual(

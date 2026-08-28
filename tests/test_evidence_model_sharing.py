@@ -85,7 +85,11 @@ class RawFieldPreservationTests(unittest.TestCase):
         }, tolerance=0)
         self.assertIsNotNone(row)
         self.assertEqual(row.raw_category("individual"), "ind_invsr")
-        self.assertEqual(row.raw_category("foreign"), "frgnr_invsr")
+        self.assertEqual(row.raw_category("foreign_registered"),
+                         "frgnr_invsr")
+        # 파생 합계도 출처를 밝힌다 - 자세한 계약은
+        # tests/test_foreign_category_contract.py 참조.
+        self.assertEqual(row.raw_category("foreign"), "frgnr_invsr+natfor")
 
 
 if __name__ == "__main__":

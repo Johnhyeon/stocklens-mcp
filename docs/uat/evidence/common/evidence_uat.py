@@ -62,11 +62,20 @@ NAVER_CATEGORIES = {"foreign": "foreign",
                     "institution_total": "institutional"}
 
 # 키움 원본 필드 (러너가 직접 읽는다. 어댑터 표를 import 하지 않는다).
-KIWOOM_RAW = {
-    "individual": "ind_invsr", "foreign": "frgnr_invsr",
+#
+# 합이 0 이 되어야 하는 키움 자신의 5주체 분해다. 여기서 외국인은
+# **좁은 쪽**(frgnr_invsr)이다.
+KIWOOM_PRINCIPALS = {
+    "individual": "ind_invsr", "foreign_registered": "frgnr_invsr",
     "institution_total": "orgn", "other_corporation": "etc_corp",
     "domestic_foreign": "natfor",
 }
+# KRX·KIS·네이버가 "외국인"이라 부르는 것은 좁은 외국인 + 내외국인이다.
+# 실측(2026-08-28, 4종목 32건): KIS frgn_ntby_qty == frgnr_invsr + natfor,
+# 32/32 일치. 이 합을 쓰지 않고 좁은 쪽을 `foreign` 이라 부르면 두
+# 공급자의 같은 이름 숫자가 달라지고, 사용자는 그 차이를 시장 현상으로
+# 읽는다.
+KIWOOM_FOREIGN_PARTS = ("foreign_registered", "domestic_foreign")
 KIWOOM_INSTITUTION = ("fnnc_invt", "insrnc", "invtrt", "etc_fnnc", "bank",
                       "penfnd_etc", "samo_fund", "natn")
 # KIS 원본 필드 (수량 기준). 순매수·매수·매도.
@@ -150,9 +159,14 @@ def _kiwoom_rows(raw_rows: list[dict]) -> dict[str, dict]:
         if len(day) != 8:
             continue
         values = {name: _int(raw.get(field))
-                  for name, field in KIWOOM_RAW.items()}
+                  for name, field in KIWOOM_PRINCIPALS.items()}
         parts = [_int(raw.get(f)) for f in KIWOOM_INSTITUTION]
+        # 검산은 5주체 분해로만 한다. 아래에서 만드는 파생 합계를
+        # 넣으면 내외국인을 두 번 센다.
         principals = list(values.values())
+        got = [values[n] for n in KIWOOM_FOREIGN_PARTS]
+        values["foreign"] = (None if any(v is None for v in got)
+                             else sum(got))
         out[day] = {
             **values,
             "_balance": (None if any(p is None for p in principals)

@@ -2,17 +2,17 @@
   "kind": "market_evidence_uat",
   "market": "KR",
   "capability": "kr_investor_flow",
-  "started_at": "2026-08-28T17:36:02.973381+09:00",
-  "finished_at": "2026-08-28T17:36:38.362931+09:00",
+  "started_at": "2026-08-28T17:53:55.911168+09:00",
+  "finished_at": "2026-08-28T17:54:35.212940+09:00",
   "base_date": "2026-08-28",
   "cases": 14,
   "failures": 0,
-  "cross_compared": 0,
+  "cross_compared": 1260,
   "cross_mismatched": 0,
   "naver_compared": 812,
   "naver_mismatched": 0,
   "kis_arithmetic_checked": 1260,
-  "kiwoom_settled_days": 0,
+  "kiwoom_settled_days": 1400,
   "detail": [
     {
       "symbol": "005930",
@@ -22,33 +22,49 @@
           "detail": "90건 일치"
         },
         {
+          "check": "kiwoom_balance",
+          "detail": "정산일 100일 검산 통과"
+        },
+        {
+          "check": "cross_provider",
+          "detail": "90건 자릿수까지 일치"
+        },
+        {
           "check": "kis_vs_naver",
           "detail": "58건 자릿수까지 일치"
         },
         {
+          "check": "measure_discrimination",
+          "detail": "100일 모두 다른 값"
+        },
+        {
           "check": "kis_adapter_matches_raw",
           "detail": "30행 일치"
+        },
+        {
+          "check": "adapter_matches_raw",
+          "detail": "60행 일치"
         }
       ],
       "failures": [],
       "kis_rows": 30,
-      "kiwoom_rows": 0,
+      "kiwoom_rows": 100,
       "kis_arithmetic_checked": 90,
-      "kiwoom_settled_days": 0,
+      "kiwoom_settled_days": 100,
       "kiwoom_unsettled_days": 0,
-      "cross_compared": 0,
+      "cross_compared": 90,
       "cross_mismatched": 0,
-      "shared_days": 0,
-      "cross_provider_status": "unavailable_second_provider",
-      "cross_provider_note": "증권사끼리 교차 미수행. individual 은 네이버가 주지 않아 KIS 내부 산술(순매수=매수-매도)로만 검증됨.",
+      "shared_days": 30,
       "naver_compared": 58,
       "naver_mismatched": 0,
-      "measure_discrimination_status": "skipped_no_kiwoom",
+      "measure_distinct_days": 100,
       "kis_adapter_rows": 30,
       "kis_adapter_final_rows": 30,
       "kis_adapter_measure": "net_quantity",
       "kis_adapter_unit": "shares",
-      "adapter_check_status": "skipped_no_kiwoom"
+      "adapter_rows": 60,
+      "adapter_measure": "net_quantity",
+      "adapter_unit": "shares"
     },
     {
       "symbol": "000660",
@@ -58,33 +74,49 @@
           "detail": "90건 일치"
         },
         {
+          "check": "kiwoom_balance",
+          "detail": "정산일 100일 검산 통과"
+        },
+        {
+          "check": "cross_provider",
+          "detail": "90건 자릿수까지 일치"
+        },
+        {
           "check": "kis_vs_naver",
           "detail": "58건 자릿수까지 일치"
         },
         {
+          "check": "measure_discrimination",
+          "detail": "100일 모두 다른 값"
+        },
+        {
           "check": "kis_adapter_matches_raw",
           "detail": "30행 일치"
+        },
+        {
+          "check": "adapter_matches_raw",
+          "detail": "60행 일치"
         }
       ],
       "failures": [],
       "kis_rows": 30,
-      "kiwoom_rows": 0,
+      "kiwoom_rows": 100,
       "kis_arithmetic_checked": 90,
-      "kiwoom_settled_days": 0,
+      "kiwoom_settled_days": 100,
       "kiwoom_unsettled_days": 0,
-      "cross_compared": 0,
+      "cross_compared": 90,
       "cross_mismatched": 0,
-      "shared_days": 0,
-      "cross_provider_status": "unavailable_second_provider",
-      "cross_provider_note": "증권사끼리 교차 미수행. individual 은 네이버가 주지 않아 KIS 내부 산술(순매수=매수-매도)로만 검증됨.",
+      "shared_days": 30,
       "naver_compared": 58,
       "naver_mismatched": 0,
-      "measure_discrimination_status": "skipped_no_kiwoom",
+      "measure_distinct_days": 100,
       "kis_adapter_rows": 30,
       "kis_adapter_final_rows": 30,
       "kis_adapter_measure": "net_quantity",
       "kis_adapter_unit": "shares",
-      "adapter_check_status": "skipped_no_kiwoom"
+      "adapter_rows": 60,
+      "adapter_measure": "net_quantity",
+      "adapter_unit": "shares"
     },
     {
       "symbol": "373220",
@@ -94,33 +126,49 @@
           "detail": "90건 일치"
         },
         {
+          "check": "kiwoom_balance",
+          "detail": "정산일 100일 검산 통과"
+        },
+        {
+          "check": "cross_provider",
+          "detail": "90건 자릿수까지 일치"
+        },
+        {
           "check": "kis_vs_naver",
           "detail": "58건 자릿수까지 일치"
         },
         {
+          "check": "measure_discrimination",
+          "detail": "100일 모두 다른 값"
+        },
+        {
           "check": "kis_adapter_matches_raw",
           "detail": "30행 일치"
+        },
+        {
+          "check": "adapter_matches_raw",
+          "detail": "60행 일치"
         }
       ],
       "failures": [],
       "kis_rows": 30,
-      "kiwoom_rows": 0,
+      "kiwoom_rows": 100,
       "kis_arithmetic_checked": 90,
-      "kiwoom_settled_days": 0,
+      "kiwoom_settled_days": 100,
       "kiwoom_unsettled_days": 0,
-      "cross_compared": 0,
+      "cross_compared": 90,
       "cross_mismatched": 0,
-      "shared_days": 0,
-      "cross_provider_status": "unavailable_second_provider",
-      "cross_provider_note": "증권사끼리 교차 미수행. individual 은 네이버가 주지 않아 KIS 내부 산술(순매수=매수-매도)로만 검증됨.",
+      "shared_days": 30,
       "naver_compared": 58,
       "naver_mismatched": 0,
-      "measure_discrimination_status": "skipped_no_kiwoom",
+      "measure_distinct_days": 100,
       "kis_adapter_rows": 30,
       "kis_adapter_final_rows": 30,
       "kis_adapter_measure": "net_quantity",
       "kis_adapter_unit": "shares",
-      "adapter_check_status": "skipped_no_kiwoom"
+      "adapter_rows": 60,
+      "adapter_measure": "net_quantity",
+      "adapter_unit": "shares"
     },
     {
       "symbol": "035720",
@@ -130,33 +178,49 @@
           "detail": "90건 일치"
         },
         {
+          "check": "kiwoom_balance",
+          "detail": "정산일 100일 검산 통과"
+        },
+        {
+          "check": "cross_provider",
+          "detail": "90건 자릿수까지 일치"
+        },
+        {
           "check": "kis_vs_naver",
           "detail": "58건 자릿수까지 일치"
         },
         {
+          "check": "measure_discrimination",
+          "detail": "100일 모두 다른 값"
+        },
+        {
           "check": "kis_adapter_matches_raw",
           "detail": "30행 일치"
+        },
+        {
+          "check": "adapter_matches_raw",
+          "detail": "60행 일치"
         }
       ],
       "failures": [],
       "kis_rows": 30,
-      "kiwoom_rows": 0,
+      "kiwoom_rows": 100,
       "kis_arithmetic_checked": 90,
-      "kiwoom_settled_days": 0,
+      "kiwoom_settled_days": 100,
       "kiwoom_unsettled_days": 0,
-      "cross_compared": 0,
+      "cross_compared": 90,
       "cross_mismatched": 0,
-      "shared_days": 0,
-      "cross_provider_status": "unavailable_second_provider",
-      "cross_provider_note": "증권사끼리 교차 미수행. individual 은 네이버가 주지 않아 KIS 내부 산술(순매수=매수-매도)로만 검증됨.",
+      "shared_days": 30,
       "naver_compared": 58,
       "naver_mismatched": 0,
-      "measure_discrimination_status": "skipped_no_kiwoom",
+      "measure_distinct_days": 100,
       "kis_adapter_rows": 30,
       "kis_adapter_final_rows": 30,
       "kis_adapter_measure": "net_quantity",
       "kis_adapter_unit": "shares",
-      "adapter_check_status": "skipped_no_kiwoom"
+      "adapter_rows": 60,
+      "adapter_measure": "net_quantity",
+      "adapter_unit": "shares"
     },
     {
       "symbol": "035420",
@@ -166,33 +230,49 @@
           "detail": "90건 일치"
         },
         {
+          "check": "kiwoom_balance",
+          "detail": "정산일 100일 검산 통과"
+        },
+        {
+          "check": "cross_provider",
+          "detail": "90건 자릿수까지 일치"
+        },
+        {
           "check": "kis_vs_naver",
           "detail": "58건 자릿수까지 일치"
         },
         {
+          "check": "measure_discrimination",
+          "detail": "100일 모두 다른 값"
+        },
+        {
           "check": "kis_adapter_matches_raw",
           "detail": "30행 일치"
+        },
+        {
+          "check": "adapter_matches_raw",
+          "detail": "60행 일치"
         }
       ],
       "failures": [],
       "kis_rows": 30,
-      "kiwoom_rows": 0,
+      "kiwoom_rows": 100,
       "kis_arithmetic_checked": 90,
-      "kiwoom_settled_days": 0,
+      "kiwoom_settled_days": 100,
       "kiwoom_unsettled_days": 0,
-      "cross_compared": 0,
+      "cross_compared": 90,
       "cross_mismatched": 0,
-      "shared_days": 0,
-      "cross_provider_status": "unavailable_second_provider",
-      "cross_provider_note": "증권사끼리 교차 미수행. individual 은 네이버가 주지 않아 KIS 내부 산술(순매수=매수-매도)로만 검증됨.",
+      "shared_days": 30,
       "naver_compared": 58,
       "naver_mismatched": 0,
-      "measure_discrimination_status": "skipped_no_kiwoom",
+      "measure_distinct_days": 100,
       "kis_adapter_rows": 30,
       "kis_adapter_final_rows": 30,
       "kis_adapter_measure": "net_quantity",
       "kis_adapter_unit": "shares",
-      "adapter_check_status": "skipped_no_kiwoom"
+      "adapter_rows": 60,
+      "adapter_measure": "net_quantity",
+      "adapter_unit": "shares"
     },
     {
       "symbol": "051910",
@@ -202,33 +282,49 @@
           "detail": "90건 일치"
         },
         {
+          "check": "kiwoom_balance",
+          "detail": "정산일 100일 검산 통과"
+        },
+        {
+          "check": "cross_provider",
+          "detail": "90건 자릿수까지 일치"
+        },
+        {
           "check": "kis_vs_naver",
           "detail": "58건 자릿수까지 일치"
         },
         {
+          "check": "measure_discrimination",
+          "detail": "100일 모두 다른 값"
+        },
+        {
           "check": "kis_adapter_matches_raw",
           "detail": "30행 일치"
+        },
+        {
+          "check": "adapter_matches_raw",
+          "detail": "60행 일치"
         }
       ],
       "failures": [],
       "kis_rows": 30,
-      "kiwoom_rows": 0,
+      "kiwoom_rows": 100,
       "kis_arithmetic_checked": 90,
-      "kiwoom_settled_days": 0,
+      "kiwoom_settled_days": 100,
       "kiwoom_unsettled_days": 0,
-      "cross_compared": 0,
+      "cross_compared": 90,
       "cross_mismatched": 0,
-      "shared_days": 0,
-      "cross_provider_status": "unavailable_second_provider",
-      "cross_provider_note": "증권사끼리 교차 미수행. individual 은 네이버가 주지 않아 KIS 내부 산술(순매수=매수-매도)로만 검증됨.",
+      "shared_days": 30,
       "naver_compared": 58,
       "naver_mismatched": 0,
-      "measure_discrimination_status": "skipped_no_kiwoom",
+      "measure_distinct_days": 100,
       "kis_adapter_rows": 30,
       "kis_adapter_final_rows": 30,
       "kis_adapter_measure": "net_quantity",
       "kis_adapter_unit": "shares",
-      "adapter_check_status": "skipped_no_kiwoom"
+      "adapter_rows": 60,
+      "adapter_measure": "net_quantity",
+      "adapter_unit": "shares"
     },
     {
       "symbol": "950140",
@@ -238,33 +334,49 @@
           "detail": "90건 일치"
         },
         {
+          "check": "kiwoom_balance",
+          "detail": "정산일 100일 검산 통과"
+        },
+        {
+          "check": "cross_provider",
+          "detail": "90건 자릿수까지 일치"
+        },
+        {
           "check": "kis_vs_naver",
           "detail": "58건 자릿수까지 일치"
         },
         {
+          "check": "measure_discrimination",
+          "detail": "100일 모두 다른 값"
+        },
+        {
           "check": "kis_adapter_matches_raw",
           "detail": "30행 일치"
+        },
+        {
+          "check": "adapter_matches_raw",
+          "detail": "60행 일치"
         }
       ],
       "failures": [],
       "kis_rows": 30,
-      "kiwoom_rows": 0,
+      "kiwoom_rows": 100,
       "kis_arithmetic_checked": 90,
-      "kiwoom_settled_days": 0,
+      "kiwoom_settled_days": 100,
       "kiwoom_unsettled_days": 0,
-      "cross_compared": 0,
+      "cross_compared": 90,
       "cross_mismatched": 0,
-      "shared_days": 0,
-      "cross_provider_status": "unavailable_second_provider",
-      "cross_provider_note": "증권사끼리 교차 미수행. individual 은 네이버가 주지 않아 KIS 내부 산술(순매수=매수-매도)로만 검증됨.",
+      "shared_days": 30,
       "naver_compared": 58,
       "naver_mismatched": 0,
-      "measure_discrimination_status": "skipped_no_kiwoom",
+      "measure_distinct_days": 100,
       "kis_adapter_rows": 30,
       "kis_adapter_final_rows": 30,
       "kis_adapter_measure": "net_quantity",
       "kis_adapter_unit": "shares",
-      "adapter_check_status": "skipped_no_kiwoom"
+      "adapter_rows": 60,
+      "adapter_measure": "net_quantity",
+      "adapter_unit": "shares"
     },
     {
       "symbol": "043370",
@@ -274,33 +386,49 @@
           "detail": "90건 일치"
         },
         {
+          "check": "kiwoom_balance",
+          "detail": "정산일 100일 검산 통과"
+        },
+        {
+          "check": "cross_provider",
+          "detail": "90건 자릿수까지 일치"
+        },
+        {
           "check": "kis_vs_naver",
           "detail": "58건 자릿수까지 일치"
         },
         {
+          "check": "measure_discrimination",
+          "detail": "100일 모두 다른 값"
+        },
+        {
           "check": "kis_adapter_matches_raw",
           "detail": "30행 일치"
+        },
+        {
+          "check": "adapter_matches_raw",
+          "detail": "60행 일치"
         }
       ],
       "failures": [],
       "kis_rows": 30,
-      "kiwoom_rows": 0,
+      "kiwoom_rows": 100,
       "kis_arithmetic_checked": 90,
-      "kiwoom_settled_days": 0,
+      "kiwoom_settled_days": 100,
       "kiwoom_unsettled_days": 0,
-      "cross_compared": 0,
+      "cross_compared": 90,
       "cross_mismatched": 0,
-      "shared_days": 0,
-      "cross_provider_status": "unavailable_second_provider",
-      "cross_provider_note": "증권사끼리 교차 미수행. individual 은 네이버가 주지 않아 KIS 내부 산술(순매수=매수-매도)로만 검증됨.",
+      "shared_days": 30,
       "naver_compared": 58,
       "naver_mismatched": 0,
-      "measure_discrimination_status": "skipped_no_kiwoom",
+      "measure_distinct_days": 100,
       "kis_adapter_rows": 30,
       "kis_adapter_final_rows": 30,
       "kis_adapter_measure": "net_quantity",
       "kis_adapter_unit": "shares",
-      "adapter_check_status": "skipped_no_kiwoom"
+      "adapter_rows": 60,
+      "adapter_measure": "net_quantity",
+      "adapter_unit": "shares"
     },
     {
       "symbol": "036560",
@@ -310,33 +438,49 @@
           "detail": "90건 일치"
         },
         {
+          "check": "kiwoom_balance",
+          "detail": "정산일 100일 검산 통과"
+        },
+        {
+          "check": "cross_provider",
+          "detail": "90건 자릿수까지 일치"
+        },
+        {
           "check": "kis_vs_naver",
           "detail": "58건 자릿수까지 일치"
         },
         {
+          "check": "measure_discrimination",
+          "detail": "100일 모두 다른 값"
+        },
+        {
           "check": "kis_adapter_matches_raw",
           "detail": "30행 일치"
+        },
+        {
+          "check": "adapter_matches_raw",
+          "detail": "60행 일치"
         }
       ],
       "failures": [],
       "kis_rows": 30,
-      "kiwoom_rows": 0,
+      "kiwoom_rows": 100,
       "kis_arithmetic_checked": 90,
-      "kiwoom_settled_days": 0,
+      "kiwoom_settled_days": 100,
       "kiwoom_unsettled_days": 0,
-      "cross_compared": 0,
+      "cross_compared": 90,
       "cross_mismatched": 0,
-      "shared_days": 0,
-      "cross_provider_status": "unavailable_second_provider",
-      "cross_provider_note": "증권사끼리 교차 미수행. individual 은 네이버가 주지 않아 KIS 내부 산술(순매수=매수-매도)로만 검증됨.",
+      "shared_days": 30,
       "naver_compared": 58,
       "naver_mismatched": 0,
-      "measure_discrimination_status": "skipped_no_kiwoom",
+      "measure_distinct_days": 100,
       "kis_adapter_rows": 30,
       "kis_adapter_final_rows": 30,
       "kis_adapter_measure": "net_quantity",
       "kis_adapter_unit": "shares",
-      "adapter_check_status": "skipped_no_kiwoom"
+      "adapter_rows": 60,
+      "adapter_measure": "net_quantity",
+      "adapter_unit": "shares"
     },
     {
       "symbol": "069500",
@@ -346,33 +490,49 @@
           "detail": "90건 일치"
         },
         {
+          "check": "kiwoom_balance",
+          "detail": "정산일 100일 검산 통과"
+        },
+        {
+          "check": "cross_provider",
+          "detail": "90건 자릿수까지 일치"
+        },
+        {
           "check": "kis_vs_naver",
           "detail": "58건 자릿수까지 일치"
         },
         {
+          "check": "measure_discrimination",
+          "detail": "100일 모두 다른 값"
+        },
+        {
           "check": "kis_adapter_matches_raw",
           "detail": "30행 일치"
+        },
+        {
+          "check": "adapter_matches_raw",
+          "detail": "60행 일치"
         }
       ],
       "failures": [],
       "kis_rows": 30,
-      "kiwoom_rows": 0,
+      "kiwoom_rows": 100,
       "kis_arithmetic_checked": 90,
-      "kiwoom_settled_days": 0,
+      "kiwoom_settled_days": 100,
       "kiwoom_unsettled_days": 0,
-      "cross_compared": 0,
+      "cross_compared": 90,
       "cross_mismatched": 0,
-      "shared_days": 0,
-      "cross_provider_status": "unavailable_second_provider",
-      "cross_provider_note": "증권사끼리 교차 미수행. individual 은 네이버가 주지 않아 KIS 내부 산술(순매수=매수-매도)로만 검증됨.",
+      "shared_days": 30,
       "naver_compared": 58,
       "naver_mismatched": 0,
-      "measure_discrimination_status": "skipped_no_kiwoom",
+      "measure_distinct_days": 100,
       "kis_adapter_rows": 30,
       "kis_adapter_final_rows": 30,
       "kis_adapter_measure": "net_quantity",
       "kis_adapter_unit": "shares",
-      "adapter_check_status": "skipped_no_kiwoom"
+      "adapter_rows": 60,
+      "adapter_measure": "net_quantity",
+      "adapter_unit": "shares"
     },
     {
       "symbol": "371460",
@@ -382,33 +542,49 @@
           "detail": "90건 일치"
         },
         {
+          "check": "kiwoom_balance",
+          "detail": "정산일 100일 검산 통과"
+        },
+        {
+          "check": "cross_provider",
+          "detail": "90건 자릿수까지 일치"
+        },
+        {
           "check": "kis_vs_naver",
           "detail": "58건 자릿수까지 일치"
         },
         {
+          "check": "measure_discrimination",
+          "detail": "100일 모두 다른 값"
+        },
+        {
           "check": "kis_adapter_matches_raw",
           "detail": "30행 일치"
+        },
+        {
+          "check": "adapter_matches_raw",
+          "detail": "60행 일치"
         }
       ],
       "failures": [],
       "kis_rows": 30,
-      "kiwoom_rows": 0,
+      "kiwoom_rows": 100,
       "kis_arithmetic_checked": 90,
-      "kiwoom_settled_days": 0,
+      "kiwoom_settled_days": 100,
       "kiwoom_unsettled_days": 0,
-      "cross_compared": 0,
+      "cross_compared": 90,
       "cross_mismatched": 0,
-      "shared_days": 0,
-      "cross_provider_status": "unavailable_second_provider",
-      "cross_provider_note": "증권사끼리 교차 미수행. individual 은 네이버가 주지 않아 KIS 내부 산술(순매수=매수-매도)로만 검증됨.",
+      "shared_days": 30,
       "naver_compared": 58,
       "naver_mismatched": 0,
-      "measure_discrimination_status": "skipped_no_kiwoom",
+      "measure_distinct_days": 100,
       "kis_adapter_rows": 30,
       "kis_adapter_final_rows": 30,
       "kis_adapter_measure": "net_quantity",
       "kis_adapter_unit": "shares",
-      "adapter_check_status": "skipped_no_kiwoom"
+      "adapter_rows": 60,
+      "adapter_measure": "net_quantity",
+      "adapter_unit": "shares"
     },
     {
       "symbol": "305720",
@@ -418,33 +594,49 @@
           "detail": "90건 일치"
         },
         {
+          "check": "kiwoom_balance",
+          "detail": "정산일 100일 검산 통과"
+        },
+        {
+          "check": "cross_provider",
+          "detail": "90건 자릿수까지 일치"
+        },
+        {
           "check": "kis_vs_naver",
           "detail": "58건 자릿수까지 일치"
         },
         {
+          "check": "measure_discrimination",
+          "detail": "100일 모두 다른 값"
+        },
+        {
           "check": "kis_adapter_matches_raw",
           "detail": "30행 일치"
+        },
+        {
+          "check": "adapter_matches_raw",
+          "detail": "60행 일치"
         }
       ],
       "failures": [],
       "kis_rows": 30,
-      "kiwoom_rows": 0,
+      "kiwoom_rows": 100,
       "kis_arithmetic_checked": 90,
-      "kiwoom_settled_days": 0,
+      "kiwoom_settled_days": 100,
       "kiwoom_unsettled_days": 0,
-      "cross_compared": 0,
+      "cross_compared": 90,
       "cross_mismatched": 0,
-      "shared_days": 0,
-      "cross_provider_status": "unavailable_second_provider",
-      "cross_provider_note": "증권사끼리 교차 미수행. individual 은 네이버가 주지 않아 KIS 내부 산술(순매수=매수-매도)로만 검증됨.",
+      "shared_days": 30,
       "naver_compared": 58,
       "naver_mismatched": 0,
-      "measure_discrimination_status": "skipped_no_kiwoom",
+      "measure_distinct_days": 100,
       "kis_adapter_rows": 30,
       "kis_adapter_final_rows": 30,
       "kis_adapter_measure": "net_quantity",
       "kis_adapter_unit": "shares",
-      "adapter_check_status": "skipped_no_kiwoom"
+      "adapter_rows": 60,
+      "adapter_measure": "net_quantity",
+      "adapter_unit": "shares"
     },
     {
       "symbol": "005935",
@@ -454,33 +646,49 @@
           "detail": "90건 일치"
         },
         {
+          "check": "kiwoom_balance",
+          "detail": "정산일 100일 검산 통과"
+        },
+        {
+          "check": "cross_provider",
+          "detail": "90건 자릿수까지 일치"
+        },
+        {
           "check": "kis_vs_naver",
           "detail": "58건 자릿수까지 일치"
         },
         {
+          "check": "measure_discrimination",
+          "detail": "100일 모두 다른 값"
+        },
+        {
           "check": "kis_adapter_matches_raw",
           "detail": "30행 일치"
+        },
+        {
+          "check": "adapter_matches_raw",
+          "detail": "60행 일치"
         }
       ],
       "failures": [],
       "kis_rows": 30,
-      "kiwoom_rows": 0,
+      "kiwoom_rows": 100,
       "kis_arithmetic_checked": 90,
-      "kiwoom_settled_days": 0,
+      "kiwoom_settled_days": 100,
       "kiwoom_unsettled_days": 0,
-      "cross_compared": 0,
+      "cross_compared": 90,
       "cross_mismatched": 0,
-      "shared_days": 0,
-      "cross_provider_status": "unavailable_second_provider",
-      "cross_provider_note": "증권사끼리 교차 미수행. individual 은 네이버가 주지 않아 KIS 내부 산술(순매수=매수-매도)로만 검증됨.",
+      "shared_days": 30,
       "naver_compared": 58,
       "naver_mismatched": 0,
-      "measure_discrimination_status": "skipped_no_kiwoom",
+      "measure_distinct_days": 100,
       "kis_adapter_rows": 30,
       "kis_adapter_final_rows": 30,
       "kis_adapter_measure": "net_quantity",
       "kis_adapter_unit": "shares",
-      "adapter_check_status": "skipped_no_kiwoom"
+      "adapter_rows": 60,
+      "adapter_measure": "net_quantity",
+      "adapter_unit": "shares"
     },
     {
       "symbol": "003555",
@@ -490,33 +698,49 @@
           "detail": "90건 일치"
         },
         {
+          "check": "kiwoom_balance",
+          "detail": "정산일 100일 검산 통과"
+        },
+        {
+          "check": "cross_provider",
+          "detail": "90건 자릿수까지 일치"
+        },
+        {
           "check": "kis_vs_naver",
           "detail": "58건 자릿수까지 일치"
         },
         {
+          "check": "measure_discrimination",
+          "detail": "100일 모두 다른 값"
+        },
+        {
           "check": "kis_adapter_matches_raw",
           "detail": "30행 일치"
+        },
+        {
+          "check": "adapter_matches_raw",
+          "detail": "60행 일치"
         }
       ],
       "failures": [],
       "kis_rows": 30,
-      "kiwoom_rows": 0,
+      "kiwoom_rows": 100,
       "kis_arithmetic_checked": 90,
-      "kiwoom_settled_days": 0,
+      "kiwoom_settled_days": 100,
       "kiwoom_unsettled_days": 0,
-      "cross_compared": 0,
+      "cross_compared": 90,
       "cross_mismatched": 0,
-      "shared_days": 0,
-      "cross_provider_status": "unavailable_second_provider",
-      "cross_provider_note": "증권사끼리 교차 미수행. individual 은 네이버가 주지 않아 KIS 내부 산술(순매수=매수-매도)로만 검증됨.",
+      "shared_days": 30,
       "naver_compared": 58,
       "naver_mismatched": 0,
-      "measure_discrimination_status": "skipped_no_kiwoom",
+      "measure_distinct_days": 100,
       "kis_adapter_rows": 30,
       "kis_adapter_final_rows": 30,
       "kis_adapter_measure": "net_quantity",
       "kis_adapter_unit": "shares",
-      "adapter_check_status": "skipped_no_kiwoom"
+      "adapter_rows": 60,
+      "adapter_measure": "net_quantity",
+      "adapter_unit": "shares"
     }
   ]
 }

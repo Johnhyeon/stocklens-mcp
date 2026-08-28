@@ -201,15 +201,26 @@ class NotAnEmptySuccessTests(unittest.TestCase):
         self.assertEqual(result.records, ())
 
     def test_a_closed_release_gate_is_not_reported_as_available(self):
-        # release_override 없이는 게이트가 전부 닫혀 있다 (2026-08-28).
+        """검증 전 능력은 값을 돌려주지 않고 그 상태를 말한다.
+
+        수급 압력 게이트는 2026-08-28 현재 전부 닫혀 있다. 투자자 수급은
+        UAT 를 통과해 열렸으므로 여기서 쓰지 않는다 - 게이트가 열릴
+        때마다 테스트가 깨지지 않도록 '닫힌 것'을 골라 쓴다.
+        """
         adapters = {"kiwoom": _FakeAdapter("kiwoom", KiwoomEvidenceProvider)}
         service = EvidenceService(
             runtime=_FakeRuntime(primary="kiwoom", adapters=adapters),
             base_date=BASE)
-        result = _run(service.investor_flow(code="005930", days=20))
-        self.assertFalse(result.ok)
-        self.assertEqual(result.error_code,
-                         "unverified_by_selected_provider")
+        result = _run(service.supply_pressure(
+            code="005930", kinds=["short_selling"]))
+        block = result.blocks["short_selling"]
+        self.assertEqual(block.status, "unverified")
+        self.assertEqual(block.unavailable_reason, "release_gate_closed")
+        self.assertEqual(block.rows, ())
+        # 공급자가 못 한다는 뜻이 아니다. 키움은 공매도를 준다.
+        self.assertEqual(
+            KiwoomEvidenceProvider.pressure_capabilities()["short_selling"],
+            "available")
 
 
 class PressureBlockTests(unittest.TestCase):

@@ -42,7 +42,8 @@ _DEFAULT_MAX_PAGES = 10
 # 정규 이름 -> 원본 필드명. 원본을 잃지 않는 것이 이 표의 목적이다.
 INVESTOR_CATEGORIES: tuple[tuple[str, str], ...] = (
     ("individual", "ind_invsr"),
-    ("foreign", "frgnr_invsr"),
+    # 키움이 주는 좁은 쪽. KRX 기준 "외국인"은 이것 + natfor 다.
+    ("foreign_registered", "frgnr_invsr"),
     ("institution_total", "orgn"),
     ("financial_investment", "fnnc_invt"),
     ("insurance", "insrnc"),
@@ -56,6 +57,12 @@ INVESTOR_CATEGORIES: tuple[tuple[str, str], ...] = (
     ("domestic_foreign", "natfor"),
 )
 _RAW_BY_NAME = dict(INVESTOR_CATEGORIES)
+
+# 파생 합계. 공급자가 직접 주지는 않지만 정의상의 합이고, KIS·네이버의
+# `foreign` 과 같은 뜻이 되도록 맞춘다 (실측 2026-08-28, 32/32 일치).
+# 만들어낸 값이 아니라는 것을 raw_categories 가 기록한다.
+_DERIVED = {"foreign": ("foreign_registered", "domestic_foreign")}
+_DERIVED_RAW = {"foreign": "frgnr_invsr+natfor"}
 
 # 순매매 합이 0 이어야 하는 5주체 (정산 완료일 검산)
 _PRINCIPALS = PRINCIPAL_CATEGORIES
@@ -136,8 +143,18 @@ def _parse_row(raw: dict, tolerance: int = 0) -> InvestorFlowRow | None:
         and abs(sum(subtotal_parts) - institution_total)  # type: ignore
         <= tolerance)
 
+    # 파생 합계는 부품이 다 있을 때만 만든다. 한쪽만으로 합계를
+    # 흉내 내면 그게 바로 이 이름표 버그의 재발이다.
+    for name, parts in _DERIVED.items():
+        got = [values.get(p) for p in parts]
+        if all(v is not None for v in got):
+            values[name] = sum(got)  # type: ignore[arg-type]
+        else:
+            missing.append(name)
+
     final = balanced and institution_ok
-    unsettled: tuple[str, ...] = ()
+    unsettled: tuple[str, ...] = tuple(
+        n for n in _DERIVED if n in missing)
     if not final:
         # 검산이 깨진 날은 정산 전이다. 그 날의 0 은 확정 수치가 아니라
         # 아직 채워지지 않은 자리다 - 값에서 빼고 상태로 표시한다.
@@ -145,6 +162,12 @@ def _parse_row(raw: dict, tolerance: int = 0) -> InvestorFlowRow | None:
         unsettled = zero_names
         for name in zero_names:
             values.pop(name, None)
+        # 부품이 미정산이면 합계도 확정이 아니다.
+        for name, parts in _DERIVED.items():
+            if any(p not in values for p in parts):
+                values.pop(name, None)
+                if name not in unsettled:
+                    unsettled = unsettled + (name,)
 
     return InvestorFlowRow(
         date=parsed_day,
@@ -155,7 +178,7 @@ def _parse_row(raw: dict, tolerance: int = 0) -> InvestorFlowRow | None:
         data_state="final" if final else "provisional",
         balance_ok=final,
         principal_sum=principal_sum,
-        raw_categories=dict(INVESTOR_CATEGORIES),
+        raw_categories={**dict(INVESTOR_CATEGORIES), **_DERIVED_RAW},
     )
 
 

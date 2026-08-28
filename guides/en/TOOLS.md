@@ -134,6 +134,14 @@ of the other. They split in opposite directions:
 So every response carries **what it returned and what it could not**,
 with a reason. A missing item is never filled in with zero or a blank.
 
+**What `foreign` means**: what KRX, Korea Investment and Naver call
+"foreign" is registered foreign investors plus resident foreigners.
+Kiwoom reports those two separately as `foreign_registered` and
+`domestic_foreign`, so StockLens reports `foreign` as their sum, making
+the name mean **the same thing on both brokers** (verified against live
+data). Use `foreign_registered` if you specifically want Kiwoom's
+narrower figure.
+
 #### `get_detailed_investor_flow`
 Daily net flow by investor category (JSON). A different tool from
 `get_flow` (Naver, 3 categories); `get_flow` keeps working with no broker
