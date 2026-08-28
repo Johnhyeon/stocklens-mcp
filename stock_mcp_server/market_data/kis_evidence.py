@@ -392,16 +392,28 @@ class KisEvidenceProvider:
             # 없는 종목은 빈 목록으로 온다.
             raise KisApiError("entity_not_found")
 
+        from stock_mcp_server.market_data.kiwoom_evidence import (
+            dedupe_rows,
+        )
+
         rows = [r for r in (_parse_row(x, measure) for x in raw_rows)
                 if r is not None]
         dropped = len(raw_rows) - len(rows)
-        rows.sort(key=lambda r: r.date, reverse=True)
+        # 실측상 KIS 는 페이지네이션이 없어 중복이 오지 않는다. 그래도
+        # 같은 계약을 쓴다 - 공급자 응답이 바뀌었을 때 같은 날짜 두 행이
+        # 조용히 나가는 것보다 경고가 뜨는 편이 낫다.
+        rows, duplicate_dates = dedupe_rows(rows)
         if len(rows) > row_limit:
             rows = rows[:row_limit]
 
         warnings: list[str] = []
         if dropped:
             warnings.append(f"해석할 수 없는 행 {dropped}개를 제외했습니다.")
+        if duplicate_dates:
+            warnings.append(
+                "같은 날짜에 값이 다른 행이 중복으로 왔습니다: "
+                + ", ".join(d.isoformat() for d in duplicate_dates[:5])
+                + ". 최신 값만 남겼습니다.")
         provisional = [r for r in rows if r.data_state != "final"]
         if provisional:
             days = ", ".join(r.date.isoformat() for r in provisional[:3])

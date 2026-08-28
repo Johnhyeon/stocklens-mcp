@@ -168,6 +168,31 @@ async def _raw_kiwoom_flow(client, symbol: str, day: date,
 # 독립 계산 (어댑터 함수를 부르지 않는다)
 # ---------------------------------------------------------------------------
 
+def rows_with_conflicts(parser, raw_rows: list[dict]):
+    """파서를 돌리되 **같은 날짜가 값이 다르게 두 번 왔는지** 본다.
+
+    파서는 날짜를 dict 키로 쓰므로 뒤엣것이 조용히 이긴다. 독립 검증기가
+    원본 이상을 못 보면 검증이 아니다. 그래서 한 행씩 따로 파싱해
+    같은 날짜의 결과가 서로 다른지 직접 비교한다.
+    """
+    seen: dict[str, dict] = {}
+    conflicts: list[str] = []
+    for raw in raw_rows:
+        parsed = parser([raw])
+        for day, value in parsed.items():
+            previous = seen.get(day)
+            if previous is not None and previous != value and \
+                    day not in conflicts:
+                conflicts.append(day)
+            seen[day] = value
+    return parser(raw_rows), sorted(conflicts, reverse=True)
+
+
+def duplicate_is_failure() -> bool:
+    """원본에 값이 다른 중복이 있으면 사례를 통과시키지 않는다."""
+    return True
+
+
 def _kiwoom_rows(raw_rows: list[dict]) -> dict[str, dict]:
     """날짜 -> {구분: 값, _balance, _institution}. 여기서 직접 센다."""
     out: dict[str, dict] = {}
@@ -247,8 +272,15 @@ async def _case(symbol: str, kis_client, kiwoom_client, day: date) -> dict:
         except Exception as exc:  # noqa: BLE001
             fail("kiwoom_fetch", type(exc).__name__)
 
-    kis = _kis_rows(kis_raw)
-    kiwoom = _kiwoom_rows(kiwoom_raw)
+    kis, kis_dupes = rows_with_conflicts(_kis_rows, kis_raw)
+    kiwoom, kiwoom_dupes = rows_with_conflicts(_kiwoom_rows, kiwoom_raw)
+    for provider_name, dupes in (("kis", kis_dupes),
+                                 ("kiwoom", kiwoom_dupes)):
+        if dupes and duplicate_is_failure():
+            fail(f"{provider_name}_duplicate_dates",
+                 "같은 날짜에 값이 다른 행이 중복으로 왔다: "
+                 + ", ".join(dupes[:5]))
+    result["duplicate_dates"] = {"kis": kis_dupes, "kiwoom": kiwoom_dupes}
     result["kis_rows"] = len(kis)
     result["kiwoom_rows"] = len(kiwoom)
     # 리뷰 지적: 무엇을 어떤 자격으로 어디서 받았는지 증거에 남긴다.
@@ -531,9 +563,23 @@ def exit_code(*, case_failures: int, transition_failures: int,
     return 0
 
 
+def _positive(text: str) -> int:
+    """0 이나 음수는 거절한다.
+
+    `--symbols 0` 은 0종목 0실패로 끝나서 '통과'로 읽힌다. 아무것도
+    검증하지 않은 실행이 성공으로 끝나면 안 된다.
+    """
+    value = int(text)
+    if value < 1:
+        raise argparse.ArgumentTypeError(
+            f"조회할 종목 수는 1 이상이어야 합니다 (받은 값: {value}). "
+            "0 종목 실행은 아무것도 검증하지 않는다.")
+    return value
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--symbols", type=int, default=len(SYMBOLS))
+    parser.add_argument("--symbols", type=_positive, default=len(SYMBOLS))
     parser.add_argument("--out", default=None)
     parser.add_argument(
         "--phase", choices=("final", "intraday"), default="final",
@@ -543,6 +589,22 @@ def build_parser() -> argparse.ArgumentParser:
         "--require-transition", action="store_true",
         help="잠정->확정 전이를 실제로 확인하지 못하면 실패로 끝낸다. "
              "게이트 증거를 만드는 실행에 쓴다.")
+
+    original_parse = parser.parse_args
+
+    def parse_args(args=None, namespace=None):
+        parsed = original_parse(args, namespace)
+        if parsed.phase == "intraday" and parsed.require_transition:
+            # intraday 는 스냅샷만 남기고 조기 종료한다. 전이를 확인할
+            # 수 없는 실행에 확인을 요구하면 항상 0 으로 끝나 버린다.
+            parser.error(
+                "--phase intraday 는 스냅샷만 남기므로 "
+                "--require-transition 과 함께 쓸 수 없습니다. 장중에 "
+                "--phase intraday 로 돌린 뒤, 마감 후 "
+                "--require-transition 으로 다시 돌리세요.")
+        return parsed
+
+    parser.parse_args = parse_args  # type: ignore[method-assign]
     return parser
 
 
@@ -597,6 +659,16 @@ def _compare_transition(before: dict, after: dict) -> dict:
         if not old_rows or not new_rows:
             continue
         shared = sorted(set(old_rows) & set(new_rows), reverse=True)
+        # 겹치는 날짜가 하나라도 있으면 통과하던 자리다. 기존 날짜가
+        # **사라진 것**을 직접 본다 - 확정된 날이 응답에서 빠지는 것은
+        # 정산 진행이 아니라 계약 위반이다.
+        missing = sorted(set(old_rows) - set(new_rows), reverse=True)
+        if missing:
+            result["failures"].append({
+                "check": f"{provider}_missing_date_keys",
+                "detail": "장중에 있던 날짜가 마감 후 응답에서 사라졌다: "
+                          + ", ".join(missing[:5])})
+        result[f"{provider}_missing_days"] = len(missing)
         if not shared:
             result["failures"].append({
                 "check": f"{provider}_same_date_keys",

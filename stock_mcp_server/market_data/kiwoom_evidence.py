@@ -111,6 +111,27 @@ def _decimal(raw: object) -> Decimal | None:
         return None
 
 
+def dedupe_rows(rows) -> "tuple[list[InvestorFlowRow], list]":
+    """같은 날짜를 한 행으로 접고, 값이 다른 중복은 알린다.
+
+    키움은 페이지로 끊어 주므로 페이지가 겹치면 같은 날짜가 두 번 올 수
+    있다. 두 행 그대로 내보내면 호출자는 어느 쪽이 맞는지 알 수 없다.
+    값이 다른 중복은 공급자 이상이므로 조용히 덮지 않고 경고로 남긴다.
+    같은 값이 두 번 온 것은 알릴 일이 아니다.
+    """
+    by_date: dict = {}
+    conflicts: list = []
+    for row in rows:
+        if row is None:
+            continue
+        previous = by_date.get(row.date)
+        if previous is not None and previous.values != row.values and                 row.date not in conflicts:
+            conflicts.append(row.date)
+        by_date[row.date] = row
+    ordered = [by_date[d] for d in sorted(by_date, reverse=True)]
+    return ordered, sorted(conflicts, reverse=True)
+
+
 def _parse_row(raw: dict, tolerance: int = 0) -> InvestorFlowRow | None:
     day = str(raw.get("dt") or "").strip()
     if len(day) != 8 or not day.isdigit():
@@ -420,7 +441,12 @@ class KiwoomEvidenceProvider:
         if dropped:
             warnings.append(f"해석할 수 없는 행 {dropped}개를 제외했습니다.")
 
-        rows.sort(key=lambda r: r.date, reverse=True)
+        rows, duplicate_dates = dedupe_rows(rows)
+        if duplicate_dates:
+            warnings.append(
+                "같은 날짜에 값이 다른 행이 중복으로 왔습니다: "
+                + ", ".join(d.isoformat() for d in duplicate_dates[:5])
+                + ". 최신 값만 남겼습니다.")
         if len(rows) > row_limit:
             rows = rows[:row_limit]
 

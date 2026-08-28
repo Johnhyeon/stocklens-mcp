@@ -2,8 +2,8 @@
   "kind": "market_evidence_uat",
   "market": "KR",
   "capability": "kr_investor_flow",
-  "started_at": "2026-08-28T19:55:29.967572+09:00",
-  "finished_at": "2026-08-28T19:56:11.763336+09:00",
+  "started_at": "2026-08-28T20:25:11.192018+09:00",
+  "finished_at": "2026-08-28T20:26:05.093227+09:00",
   "base_date": "2026-08-28",
   "cases": 15,
   "failures": 0,
@@ -59,6 +59,10 @@
         }
       ],
       "failures": [],
+      "duplicate_dates": {
+        "kis": [],
+        "kiwoom": []
+      },
       "kis_rows": 30,
       "kiwoom_rows": 100,
       "profile": "real",
@@ -145,6 +149,10 @@
         }
       ],
       "failures": [],
+      "duplicate_dates": {
+        "kis": [],
+        "kiwoom": []
+      },
       "kis_rows": 30,
       "kiwoom_rows": 100,
       "profile": "real",
@@ -231,6 +239,10 @@
         }
       ],
       "failures": [],
+      "duplicate_dates": {
+        "kis": [],
+        "kiwoom": []
+      },
       "kis_rows": 30,
       "kiwoom_rows": 100,
       "profile": "real",
@@ -317,6 +329,10 @@
         }
       ],
       "failures": [],
+      "duplicate_dates": {
+        "kis": [],
+        "kiwoom": []
+      },
       "kis_rows": 30,
       "kiwoom_rows": 100,
       "profile": "real",
@@ -403,6 +419,10 @@
         }
       ],
       "failures": [],
+      "duplicate_dates": {
+        "kis": [],
+        "kiwoom": []
+      },
       "kis_rows": 30,
       "kiwoom_rows": 100,
       "profile": "real",
@@ -489,6 +509,10 @@
         }
       ],
       "failures": [],
+      "duplicate_dates": {
+        "kis": [],
+        "kiwoom": []
+      },
       "kis_rows": 30,
       "kiwoom_rows": 100,
       "profile": "real",
@@ -575,6 +599,10 @@
         }
       ],
       "failures": [],
+      "duplicate_dates": {
+        "kis": [],
+        "kiwoom": []
+      },
       "kis_rows": 30,
       "kiwoom_rows": 100,
       "profile": "real",
@@ -661,6 +689,10 @@
         }
       ],
       "failures": [],
+      "duplicate_dates": {
+        "kis": [],
+        "kiwoom": []
+      },
       "kis_rows": 30,
       "kiwoom_rows": 100,
       "profile": "real",
@@ -747,6 +779,10 @@
         }
       ],
       "failures": [],
+      "duplicate_dates": {
+        "kis": [],
+        "kiwoom": []
+      },
       "kis_rows": 30,
       "kiwoom_rows": 100,
       "profile": "real",
@@ -833,6 +869,10 @@
         }
       ],
       "failures": [],
+      "duplicate_dates": {
+        "kis": [],
+        "kiwoom": []
+      },
       "kis_rows": 30,
       "kiwoom_rows": 100,
       "profile": "real",
@@ -919,6 +959,10 @@
         }
       ],
       "failures": [],
+      "duplicate_dates": {
+        "kis": [],
+        "kiwoom": []
+      },
       "kis_rows": 30,
       "kiwoom_rows": 100,
       "profile": "real",
@@ -1005,6 +1049,10 @@
         }
       ],
       "failures": [],
+      "duplicate_dates": {
+        "kis": [],
+        "kiwoom": []
+      },
       "kis_rows": 30,
       "kiwoom_rows": 100,
       "profile": "real",
@@ -1091,6 +1139,10 @@
         }
       ],
       "failures": [],
+      "duplicate_dates": {
+        "kis": [],
+        "kiwoom": []
+      },
       "kis_rows": 30,
       "kiwoom_rows": 100,
       "profile": "real",
@@ -1177,6 +1229,10 @@
         }
       ],
       "failures": [],
+      "duplicate_dates": {
+        "kis": [],
+        "kiwoom": []
+      },
       "kis_rows": 30,
       "kiwoom_rows": 100,
       "profile": "real",
@@ -1263,6 +1319,10 @@
         }
       ],
       "failures": [],
+      "duplicate_dates": {
+        "kis": [],
+        "kiwoom": []
+      },
       "kis_rows": 30,
       "kiwoom_rows": 100,
       "profile": "real",
