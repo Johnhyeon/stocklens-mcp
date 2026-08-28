@@ -165,6 +165,40 @@ class ProviderRuntime:
             providers[candidate] = adapter
         return providers
 
+    def evidence_provider_for(self, provider: str,
+                              snapshot: RuntimeSnapshot | None = None):
+        """상세 수급 어댑터 하나. 연결·자격 증명이 없으면 None.
+
+        시세 어댑터와 따로 두는 이유는 구성이 다르기 때문이다. 증거는
+        국내만 있고 시장별 분기가 없으며, 네이버·야후는 아예 후보가
+        아니다 (증권사 연결 없이는 받을 수 없는 데이터다).
+
+        클라이언트는 `client()` 가 쓰는 것과 같은 캐시를 공유한다.
+        증거 조회 때문에 토큰을 새로 발급하지 않는다.
+        """
+        if snapshot is None:
+            snapshot = self.snapshot()
+        if not snapshot.capabilities(provider)["connected"]:
+            return None
+        profile = snapshot.active_profile(provider)
+        if not profile:
+            return None
+        client = self.client(provider, profile, snapshot=snapshot)
+        if client is None:
+            return None
+        if provider == "kis":
+            from stock_mcp_server.market_data.kis_evidence import (
+                KisEvidenceProvider,
+            )
+            return KisEvidenceProvider(client, profile)
+        if provider == "kiwoom":
+            from stock_mcp_server.market_data.kiwoom_evidence import (
+                KiwoomEvidenceProvider,
+            )
+            return KiwoomEvidenceProvider(client, profile)
+        # 토스 증거 어댑터는 없다. 개발자 모드에서도 구성하지 않는다.
+        return None
+
     def _build_adapter(self, provider: str, client, profile: str,
                        market: str):
         if provider == "kis":

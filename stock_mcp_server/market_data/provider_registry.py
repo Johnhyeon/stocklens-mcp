@@ -238,6 +238,23 @@ _RELEASE_VERIFIED: dict[tuple[str, str], bool] = {
     ("toss", "kr_intraday"): False,
     ("toss", "us_intraday"): False,
     # 일·주·월봉은 수정주가·기업행위 검증 게이트 전이라 전부 미검증.
+    #
+    # 1.1 상세 수급 증거 (2026-08-28). 어댑터는 실계좌 실측으로 만들었지만
+    # 실계좌 UAT 러너를 아직 돌리지 않았다. **전부 닫아 둔다.** 여는 커밋은
+    # 분봉과 마찬가지로 해당 UAT 증거 커밋과 짝을 이룬다.
+    #
+    # 종류마다 따로 두는 이유: 한 종류를 검증했다고 나머지가 검증된 것이
+    # 아니다. 특히 프로그램매매는 KIS 가 장중, 키움이 일별이라 같은 이름의
+    # 게이트를 공유하면 한쪽 UAT 로 다른 쪽이 열린다.
+    ("kis", "kr_investor_flow"): False,
+    ("kis", "kr_short_selling"): False,
+    ("kis", "kr_program_trading"): False,
+    ("kiwoom", "kr_investor_flow"): False,
+    ("kiwoom", "kr_short_selling"): False,
+    ("kiwoom", "kr_program_trading"): False,
+    ("kiwoom", "kr_credit"): False,
+    ("kiwoom", "kr_securities_lending"): False,
+    ("kiwoom", "kr_foreign_holding"): False,
 }
 
 
