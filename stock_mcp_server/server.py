@@ -7941,6 +7941,9 @@ from stock_mcp_server.market_data.evidence_models import (  # noqa: E402
 from stock_mcp_server.market_data.evidence_router import (  # noqa: E402
     PRESSURE_KINDS as _EVIDENCE_KINDS,
 )
+from stock_mcp_server.market_data.evidence_service import (  # noqa: E402
+    MAX_BATCH_CODES as _MAX_BATCH_CODES,
+)
 
 _INTRADAY_SOURCES = ("auto",) + _provider_registry.ids() + (
     "naver", "yahoo")
@@ -8765,12 +8768,24 @@ def _evidence_status_of(result) -> str:
 
 
 def _validate_evidence_request(code, codes, source):
-    """(오류 문자열 | None, 종목 목록). 공급자를 부르기 전에 거른다."""
+    """(오류 문자열 | None, 종목 목록). 공급자를 부르기 전에 거른다.
+
+    두 도구가 같은 규칙을 쓴다. 상한과 중복 제거를 도구마다 따로 두면
+    한쪽만 지켜지고, 도구 설명이 약속한 "최대 30개"와 실제 동작이
+    갈라진다.
+    """
     entities = [str(c).strip() for c in (codes or []) if str(c).strip()]
     if code:
         entities.insert(0, str(code).strip())
+    # 중복은 상한을 잡아먹지 않는다. 같은 종목을 두 번 적었다고
+    # 요청이 거절되면 사용자는 이유를 알 수 없다.
+    entities = list(dict.fromkeys(entities))
     if not entities:
         return "code 또는 codes 중 하나는 반드시 지정해야 합니다.", []
+    if len(entities) > _EVIDENCE_MAX_CODES:
+        return (f"한 번에 조회할 수 있는 종목은 최대 "
+                f"{_EVIDENCE_MAX_CODES}개입니다 "
+                f"(요청 {len(entities)}개)."), []
     allowed = ("auto",) + _public_broker_ids()
     if source not in allowed:
         return (f"지원하지 않는 source입니다: {source} "
@@ -8781,6 +8796,9 @@ def _validate_evidence_request(code, codes, source):
 # 도구 인자 검증용. 서비스·어댑터와 같은 표에서 나온다.
 _EVIDENCE_MEASURES = tuple(_UNIT_BY_MEASURE)
 _EVIDENCE_PRESSURE_KINDS = _EVIDENCE_KINDS
+# 상한은 서비스에서 가져온다. 숫자를 여기 복제하면 도구 설명·도구 검증·
+# 서비스 세 곳이 따로 놀게 된다.
+_EVIDENCE_MAX_CODES = _MAX_BATCH_CODES
 
 
 @mcp.tool()
@@ -8954,47 +8972,53 @@ async def get_supply_pressure(
 
     service = _evidence_service()
     try:
-        results = [
-            (entity, await service.supply_pressure(
-                code=entity, kinds=wanted, days=days, source=source))
-            for entity in entities
-        ]
+        # 배치 서비스를 단건에도 그대로 쓴다. 종목마다 서비스를 새로
+        # 부르면 요청 도중 주 사용 증권사가 바뀌었을 때 앞 종목과 뒤
+        # 종목이 다른 증권사에서 온다 (1.0 "한 요청은 한 공급자" 위반).
+        result = await service.supply_pressure_batch(
+            codes=entities, kinds=wanted, days=days, source=source)
     except ValueError as exc:
         return _evidence_error(code, str(exc), "entity_not_found")
 
     single = len(entities) == 1
-    first = results[0][1]
+    per_entity = {
+        entity: result.entities.get(entity) or result.fallback_blocks
+        for entity in entities}
     payload: dict = {
-        "ok": any(r.ok for _, r in results),
+        "ok": result.ok,
         "market": "KR",
-        "provider": first.provider,
+        "provider": result.provider,
         "requested_kinds": wanted,
     }
     if single:
         payload["blocks"] = {k: _pressure_block_json(b)
-                             for k, b in first.blocks.items()}
+                             for k, b in per_entity[entities[0]].items()}
     else:
         payload["entities"] = {
             entity: {"blocks": {k: _pressure_block_json(b)
-                                for k, b in result.blocks.items()}}
-            for entity, result in results}
+                                for k, b in blocks.items()}}
+            for entity, blocks in per_entity.items()}
+        payload["entity_failures"] = result.entity_failures
 
-    warnings: list[str] = []
-    for _, result in results:
-        warnings.extend(result.warnings)
-        for block in result.blocks.values():
+    warnings: list[str] = list(result.warnings)
+    for blocks in per_entity.values():
+        for block in blocks.values():
             if block.status != "ok":
                 warnings.extend(block.warnings)
+    for failure in result.entity_failures:
+        warnings.append(
+            f"{failure['code']} 조회 실패({failure['reason']}). 다른 "
+            "증권사로 대체하지 않았습니다.")
 
     as_of = None
-    for _, result in results:
-        for block in result.blocks.values():
+    for blocks in per_entity.values():
+        for block in blocks.values():
             if block.data_as_of:
                 stamp = block.data_as_of.isoformat()
                 as_of = stamp if as_of is None else max(as_of, stamp)
-    served = sum(1 for _, r in results
-                 for b in r.blocks.values() if b.status == "ok")
-    total = sum(len(r.blocks) for _, r in results)
+    served = sum(1 for blocks in per_entity.values()
+                 for b in blocks.values() if b.status == "ok")
+    total = sum(len(blocks) for blocks in per_entity.values())
     if not payload["ok"]:
         completeness = rmeta.NONE
     elif served < total:
@@ -9003,8 +9027,8 @@ async def get_supply_pressure(
         completeness = rmeta.COMPLETE
 
     payload["_meta"] = _evidence_meta(
-        code=entities[0] if single else None, provider=first.provider,
-        profile=first.profile, provider_status=_evidence_status_of(first),
+        code=entities[0] if single else None, provider=result.provider,
+        profile=result.profile, provider_status=_evidence_status_of(result),
         data_as_of=as_of, completeness=completeness,
         warnings=list(dict.fromkeys(warnings)),
         coverage={

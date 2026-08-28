@@ -84,6 +84,40 @@ class BatchEvidenceResult:
 
 
 @dataclass(frozen=True)
+class BatchPressureResult:
+    """여러 종목의 종류별 블록. 공급자는 요청 전체에 하나뿐이다."""
+
+    ok: bool
+    provider: str | None
+    profile: str | None
+    market: str
+    entities: dict
+    entity_failures: list
+    coverage: dict
+    warnings: tuple[str, ...]
+    error_code: str | None
+    # 라우팅이 실패해 종목별 결과가 없을 때 쓸 상태 블록.
+    fallback_blocks: dict = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class BatchPressureResult:
+    """여러 종목의 종류별 블록. 공급자는 요청 전체에 하나뿐이다."""
+
+    ok: bool
+    provider: str | None
+    profile: str | None
+    market: str
+    entities: dict
+    entity_failures: list
+    coverage: dict
+    warnings: tuple[str, ...]
+    error_code: str | None
+    # 라우팅이 실패해 종목별 결과가 없을 때 쓸 상태 블록.
+    fallback_blocks: dict = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
 class PressureResult:
     """종류별 블록. 여기에 합산 필드를 추가하지 않는다."""
 
@@ -95,6 +129,56 @@ class PressureResult:
     coverage: dict
     warnings: tuple[str, ...]
     error_code: str | None
+
+
+def _unique(codes) -> list[str]:
+    """입력 순서를 지키면서 중복만 접는다.
+
+    같은 종목을 두 번 적었다고 API 를 두 번 부르지 않는다. 중복이
+    상한을 잡아먹지도 않는다.
+    """
+    seen: list[str] = []
+    for code in codes:
+        text = str(code).strip()
+        if text and text not in seen:
+            seen.append(text)
+    return seen
+
+
+def _guard_batch_size(unique: list[str]) -> None:
+    """공급자를 부르기 전에 막는다.
+
+    절반만 조회하고 실패하면 사용자는 어디까지가 진짜인지 알 수 없다.
+    """
+    if len(unique) > MAX_BATCH_CODES:
+        raise ValueError(
+            f"한 번에 조회할 수 있는 종목은 최대 {MAX_BATCH_CODES}개입니다 "
+            f"(요청 {len(unique)}개).")
+
+
+def _unique(codes) -> list[str]:
+    """입력 순서를 지키면서 중복만 접는다.
+
+    같은 종목을 두 번 적었다고 API 를 두 번 부르지 않는다. 중복이
+    상한을 잡아먹지도 않는다.
+    """
+    seen: list[str] = []
+    for code in codes:
+        text = str(code).strip()
+        if text and text not in seen:
+            seen.append(text)
+    return seen
+
+
+def _guard_batch_size(unique: list[str]) -> None:
+    """공급자를 부르기 전에 막는다.
+
+    절반만 조회하고 실패하면 사용자는 어디까지가 진짜인지 알 수 없다.
+    """
+    if len(unique) > MAX_BATCH_CODES:
+        raise ValueError(
+            f"한 번에 조회할 수 있는 종목은 최대 {MAX_BATCH_CODES}개입니다 "
+            f"(요청 {len(unique)}개).")
 
 
 def _error_result(exc: EvidenceRouterError, requested: tuple[str, ...],
@@ -212,17 +296,8 @@ class EvidenceService:
                                   source: str = "auto",
                                   base_date: date | None = None
                                   ) -> BatchEvidenceResult:
-        # 입력 순서를 지키면서 중복만 접는다.
-        unique: list[str] = []
-        for code in codes:
-            if code not in unique:
-                unique.append(code)
-        if len(unique) > MAX_BATCH_CODES:
-            # 공급자를 부르기 전에 막는다. 절반만 조회하고 실패하면
-            # 사용자는 어디까지 진짜인지 알 수 없다.
-            raise ValueError(
-                f"한 번에 조회할 수 있는 종목은 최대 {MAX_BATCH_CODES}개입니다 "
-                f"(요청 {len(unique)}개).")
+        unique = _unique(codes)
+        _guard_batch_size(unique)
 
         try:
             runtime, snapshot, caps = self._context()
@@ -306,17 +381,52 @@ class EvidenceService:
             entity_failures=failures, measure=measure, unit=unit)
 
     # -- 수급 압력 --------------------------------------------------------
-    async def supply_pressure(self, *, code: str, kinds,
-                              days: int = 30, source: str = "auto",
-                              base_date: date | None = None
-                              ) -> PressureResult:
-        requested = []
+    @staticmethod
+    def _clean_kinds(kinds) -> list[str]:
+        requested: list[str] = []
         for kind in kinds:
             if kind not in PRESSURE_KINDS:
                 raise ValueError(
                     f"지원하지 않는 수급 종류: {kind} (지원: {PRESSURE_KINDS})")
             if kind not in requested:
                 requested.append(kind)
+        return requested
+
+    async def supply_pressure(self, *, code: str, kinds,
+                              days: int = 30, source: str = "auto",
+                              base_date: date | None = None
+                              ) -> PressureResult:
+        """단건. 배치 경로를 그대로 쓴다.
+
+        단건과 배치가 서로 다른 코드를 타면 한쪽에만 공급자 고정이
+        빠진다. 실제로 그렇게 빠졌었다 - 단건은 고정돼 있었는데 도구가
+        종목마다 이 함수를 새로 불러서 종목별로 상태를 다시 읽었다.
+        """
+        batch = await self.supply_pressure_batch(
+            codes=[code], kinds=kinds, days=days, source=source,
+            base_date=base_date)
+        blocks = batch.entities.get(code) or batch.fallback_blocks
+        return PressureResult(
+            ok=any(b.status == "ok" for b in blocks.values()),
+            provider=batch.provider, profile=batch.profile, market=MARKET,
+            blocks=blocks, coverage=batch.coverage,
+            warnings=batch.warnings, error_code=batch.error_code)
+
+    async def supply_pressure_batch(self, *, codes, kinds,
+                                    days: int = 30, source: str = "auto",
+                                    base_date: date | None = None
+                                    ) -> BatchPressureResult:
+        """여러 종목. **공급자와 generation 을 한 번만 고정한다.**
+
+        종목마다 상태를 다시 읽으면, 조회 도중 Manager 에서 주 사용
+        증권사가 바뀌었을 때 앞 종목과 뒤 종목이 서로 다른 증권사에서
+        온다. 응답 최상위에는 공급자가 하나만 적히므로 사용자는 전부
+        그 증권사 숫자라고 읽는다. 1.0 "한 요청은 한 공급자" 계약이
+        깨지는 자리다.
+        """
+        requested = self._clean_kinds(kinds)
+        unique = _unique(codes)
+        _guard_batch_size(unique)
 
         try:
             runtime, snapshot, caps = self._context()
@@ -329,20 +439,25 @@ class EvidenceService:
         except EvidenceRouterError as exc:
             # 여섯 종류를 물었는데 블록이 0 개면 호출자는 두 가지 모양을
             # 따로 다뤄야 한다. 실패해도 요청한 종류는 자기 자리를 갖는다.
-            return PressureResult(
+            blocks = {k: _state_block(k, "not_configured",
+                                      exc.provider or "none", reason=None,
+                                      granularity="unknown")
+                      for k in requested}
+            return BatchPressureResult(
                 ok=False, provider=exc.provider, profile=None,
                 market=MARKET,
-                blocks={k: _state_block(k, "not_configured",
-                                        exc.provider or "none", reason=None,
-                                        granularity="unknown")
-                        for k in requested},
+                entities={c: dict(blocks) for c in unique},
+                entity_failures=[], fallback_blocks=blocks,
                 coverage={"requested_kinds": len(requested),
-                          "fetched_kinds": 0, "complete": False},
+                          "fetched_kinds": 0,
+                          "requested_entities": len(unique),
+                          "complete": False},
                 warnings=(str(exc),), error_code=exc.error_code)
 
         # 종류마다 능력이 다르다. 요청 전체를 하나로 판정하지 않고
-        # 종류별로 가른 뒤, 받을 수 있는 것만 실제로 부른다.
-        blocks: dict[str, PressureBlock] = {}
+        # 종류별로 가른 뒤, 받을 수 있는 것만 실제로 부른다. 능력은
+        # 공급자 하나에 대한 사실이므로 종목마다 다시 따지지 않는다.
+        state_blocks: dict[str, PressureBlock] = {}
         fetchable: list[str] = []
         reasons = adapter.pressure_unavailable_reasons()
         shapes = adapter.pressure_granularity()
@@ -354,36 +469,65 @@ class EvidenceService:
             if state == "available":
                 fetchable.append(kind)
             else:
-                blocks[kind] = _state_block(
+                state_blocks[kind] = _state_block(
                     kind, state, provider, reason=reasons.get(kind),
                     granularity=shapes.get(kind, "unknown"))
 
-        if fetchable:
-            try:
-                fetched = await adapter.fetch_supply_pressure(
-                    code, kinds=tuple(fetchable),
-                    base_date=self._resolve_base_date(base_date),
-                    lookback_days=max(1, days), row_limit=DEFAULT_ROW_LIMIT)
-                blocks.update(fetched)
-                assert_same_generation(
-                    provider, before,
-                    runtime.snapshot().provider_generation(provider))
-            except EvidenceRouterError as exc:
-                return PressureResult(
-                    ok=False, provider=provider, profile=adapter.profile,
-                    market=MARKET, blocks={},
-                    coverage={"complete": False}, warnings=(str(exc),),
-                    error_code=exc.error_code)
+        day = self._resolve_base_date(base_date)
 
-        ordered = {k: blocks[k] for k in requested if k in blocks}
-        return PressureResult(
-            ok=any(b.status == "ok" for b in ordered.values()),
+        async def _one(code: str):
+            if not fetchable:
+                return code, {}
+            try:
+                return code, await adapter.fetch_supply_pressure(
+                    code, kinds=tuple(fetchable), base_date=day,
+                    lookback_days=max(1, days),
+                    row_limit=DEFAULT_ROW_LIMIT)
+            except Exception as exc:  # noqa: BLE001
+                # 한 종목이 실패해도 다른 공급자로 넘어가지 않는다.
+                reason = getattr(exc, "provider_status", None)
+                return code, reason or "provider_unavailable"
+
+        settled = await asyncio.gather(*[_one(c) for c in unique])
+
+        try:
+            assert_same_generation(
+                provider, before,
+                runtime.snapshot().provider_generation(provider))
+        except EvidenceRouterError as exc:
+            return BatchPressureResult(
+                ok=False, provider=provider, profile=adapter.profile,
+                market=MARKET, entities={}, entity_failures=[
+                    {"code": c, "reason": exc.error_code} for c in unique],
+                fallback_blocks={},
+                coverage={"complete": False}, warnings=(str(exc),),
+                error_code=exc.error_code)
+
+        entities: dict[str, dict] = {}
+        failures: list = []
+        for code, outcome in settled:
+            if isinstance(outcome, dict):
+                merged = {**state_blocks, **outcome}
+                entities[code] = {k: merged[k] for k in requested
+                                  if k in merged}
+            else:
+                failures.append({"code": code, "reason": outcome})
+
+        served = sum(1 for blocks in entities.values()
+                     for b in blocks.values() if b.status == "ok")
+        return BatchPressureResult(
+            ok=served > 0,
             provider=provider, profile=adapter.profile, market=MARKET,
-            blocks=ordered,
+            entities=entities, entity_failures=failures,
+            fallback_blocks=dict(state_blocks),
             coverage={"requested_kinds": len(requested),
                       "fetched_kinds": len(fetchable),
-                      "complete": len(fetchable) == len(requested)},
-            warnings=(), error_code=None)
+                      "requested_entities": len(unique),
+                      "returned_entities": len(entities),
+                      "complete": (len(fetchable) == len(requested)
+                                   and not failures)},
+            warnings=(),
+            error_code=None if entities else "all_entities_failed")
 
 
 def _state_block(kind: str, state: str, provider: str,

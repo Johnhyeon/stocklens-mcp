@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
 
 import httpx
@@ -75,6 +76,10 @@ class KisClient:
         self._token: str | None = None
         self._token_expires_at: float = 0.0
         self._token_generation: int | None = None
+        # single-flight. 배치가 30종목을 동시에 부르는데 토큰이 없으면
+        # 발급 요청이 30번 나가고, KIS 는 1분 1회 제한이라 첫 배치가
+        # 통째로 실패한다. 키움·토스와 같은 계약이다.
+        self._lock = asyncio.Lock()
 
     def __repr__(self) -> str:  # noqa: D105
         return f"KisClient(profile={self.profile}, base_url={self.base_url})"
@@ -174,10 +179,13 @@ class KisClient:
         return True
 
     async def _ensure_token(self, http: httpx.AsyncClient) -> str:
-        if not self._token_valid() and not self._load_shared_token("kis"):
-            await self._issue_token(http)
-        assert self._token is not None
-        return self._token
+        # lock 을 잡은 뒤 조건을 다시 본다. 앞선 요청이 이미 받아 뒀으면
+        # 대기하던 요청들이 차례로 재발급하는 일이 없다.
+        async with self._lock:
+            if not self._token_valid() and                     not self._load_shared_token("kis"):
+                await self._issue_token(http)
+            assert self._token is not None
+            return self._token
 
     # --- API 요청 ---
 
