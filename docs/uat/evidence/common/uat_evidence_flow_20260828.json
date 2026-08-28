@@ -2,8 +2,8 @@
   "kind": "market_evidence_uat",
   "market": "KR",
   "capability": "kr_investor_flow",
-  "started_at": "2026-08-28T18:52:28.190175+09:00",
-  "finished_at": "2026-08-28T18:53:49.410330+09:00",
+  "started_at": "2026-08-28T19:26:57.899899+09:00",
+  "finished_at": "2026-08-28T19:27:56.352733+09:00",
   "base_date": "2026-08-28",
   "cases": 15,
   "failures": 0,
@@ -13,6 +13,11 @@
   "naver_mismatched": 0,
   "kis_arithmetic_checked": 1350,
   "kiwoom_settled_days": 1500,
+  "provisional_transition": {
+    "state": "no_intraday_snapshot",
+    "symbols_compared": 0,
+    "detail": []
+  },
   "detail": [
     {
       "symbol": "005930",

@@ -51,6 +51,25 @@ _ALLOWED_ROW_FIELDS = frozenset({
 })
 
 
+def _with_recomputed(payload: dict, rows: list[dict]) -> dict:
+    """행을 걸러냈으면 개수도 상태도 같이 고친다.
+
+    저장 행은 1개인데 coverage.rows=2, data_state=provisional 로 남으면
+    캐시가 자기 내용과 다른 말을 하게 된다. 호출자는 그 숫자를 믿는다.
+    """
+    out = dict(payload)
+    out["rows"] = rows
+    coverage = dict(out.get("coverage") or {})
+    coverage["rows"] = len(rows)
+    # 잠정 행을 빼고 남은 것이므로, 원래 요청 범위를 다 채웠다고
+    # 주장하지 않는다. 채웠는지는 읽는 쪽이 row_limit 로 판정한다.
+    coverage.pop("complete", None)
+    out["coverage"] = coverage
+    # 확정 행만 담기므로 상태는 final 이다.
+    out["data_state"] = "final"
+    return out
+
+
 def _home(home: Path | str | None) -> Path:
     if home is not None:
         return Path(home)
@@ -139,7 +158,23 @@ class EvidenceCache:
     # --- 조회·저장 ---
 
     def get(self, key: EvidenceCacheKey, *, connected: bool,
-            generation: int) -> dict | None:
+            generation: int, base_date: str | None = None,
+            row_limit: int | None = None) -> dict | None:
+        """요청한 창을 **덮을 때만** 돌려준다.
+
+        같은 종목이라고 아무 항목이나 주면, 5일치를 캐시한 뒤 20일치를
+        물었을 때 5일치가 돌아오고 다음 거래일에도 어제 값이 돌아온다.
+        빠르지만 답이 틀린다.
+
+        적중 조건 셋:
+        1. 이 항목을 받아온 기준일이 요청 기준일보다 이르지 않다
+        2. 요청 기준일 이하 행이 요청한 개수만큼 있다
+        3. generation·schema 가 같고 연결돼 있다
+
+        행 날짜가 아니라 '받아온 기준일'을 쓰는 이유는 휴장일 때문이다.
+        휴장일에 조회하면 최신 행이 전 거래일이라, 행 날짜로 판정하면
+        영원히 미적중이 된다.
+        """
         if not connected:
             # 캐시가 연결을 대신하지 않는다 (1.0 분봉 캐시와 같은 계약).
             return None
@@ -156,16 +191,37 @@ class EvidenceCache:
                 doc.get("generation") != generation:
             self._remove(path)
             return None
+
+        payload = doc.get("payload") or {}
+        rows = [r for r in (payload.get("rows") or []) if isinstance(r, dict)]
+
+        if base_date is not None:
+            fetched_for = doc.get("fetched_for")
+            if not fetched_for or str(fetched_for) < str(base_date):
+                # 더 최근 거래일이 빠져 있을 수 있다.
+                return None
+            # 요청 기준일 이후 행을 섞어 주지 않는다.
+            rows = [r for r in rows if str(r.get("date") or "") <=
+                    str(base_date)]
+        if row_limit is not None and len(rows) < row_limit:
+            return None
+        if row_limit is not None:
+            rows = rows[:row_limit]
+        if not rows:
+            return None
+
         try:
             os.utime(path, None)
         except OSError:
             pass
-        return {"payload": doc.get("payload") or {},
-                "final_through": doc.get("final_through"),
-                "generation": doc.get("generation")}
+        return {"payload": _with_recomputed(payload, rows),
+                "final_through": rows[0].get("date"),
+                "generation": doc.get("generation"),
+                "fetched_for": doc.get("fetched_for")}
 
     def put(self, key: EvidenceCacheKey, payload: dict, *,
-            generation: int, final_through: str | None) -> None:
+            generation: int, final_through: str | None,
+            fetched_for: str | None = None) -> None:
         rows = self._final_rows(payload)
         path = self.path_for(key)
         if not rows:
@@ -179,9 +235,11 @@ class EvidenceCache:
             previous = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             previous = None
+        prior_fetched = None
         if isinstance(previous, dict) and \
                 previous.get("schema_version") == key.schema_version and \
                 previous.get("generation") == generation:
+            prior_fetched = previous.get("fetched_for")
             merged: dict[str, dict] = {
                 str(r.get("date")): r
                 for r in (previous.get("payload") or {}).get("rows") or []
@@ -193,12 +251,17 @@ class EvidenceCache:
         newest = rows[0]["date"] if rows else None
         # 늦게 도착한 짧은 응답이 이미 가진 확정 구간을 줄이지 않는다.
         stamp = max(filter(None, (final_through, newest)), default=None)
+        anchor = max(filter(None, (fetched_for, prior_fetched, stamp)),
+                     default=None)
 
         doc = {
             "schema_version": key.schema_version,
             "generation": int(generation),
             "final_through": stamp,
-            "payload": self._clean_payload(payload, rows),
+            # 이 항목을 어느 기준일로 받아왔는가. 적중 판정의 축이다.
+            "fetched_for": anchor,
+            "payload": _with_recomputed(self._clean_payload(payload, rows),
+                                        rows),
         }
         path.parent.mkdir(parents=True, exist_ok=True)
         fd, tmp_name = tempfile.mkstemp(

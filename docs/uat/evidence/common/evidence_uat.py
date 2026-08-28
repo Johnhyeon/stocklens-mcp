@@ -481,6 +481,97 @@ async def _case(symbol: str, kis_client, kiwoom_client, day: date) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# 잠정 -> 확정 전이
+#
+# 정산 전 값은 나중에 바뀐다. 그 전이가 실제로 일어나는지, 그리고 바뀔 때
+# 날짜 키가 그대로이고 행이 중복되지 않는지는 **장중 한 번, 마감 후 한 번**
+# 돌려야 확인된다. 그래서 장중 실행은 스냅샷만 남기고, 마감 후 실행이 그
+# 스냅샷과 대조한다.
+# ---------------------------------------------------------------------------
+
+def _snapshot_path(out: Path, day: date) -> Path:
+    return out.parent / f"phase_intraday_{day:%Y%m%d}.json"
+
+
+async def _collect_snapshot(symbol: str, kis_client, kiwoom_client,
+                            day: date) -> dict:
+    """그 시점의 행 상태. 값과 상태를 같이 남긴다."""
+    entry: dict = {"symbol": symbol, "kis": {}, "kiwoom": {}}
+    try:
+        if kis_client is not None:
+            rows = _kis_rows(await _raw_kis_flow(kis_client, symbol))
+            entry["kis"] = {
+                d: {"individual": v.get("individual"),
+                    "foreign": v.get("foreign"),
+                    "institution_total": v.get("institution_total"),
+                    "settled": all(v.get(n) is not None
+                                   for n in SHARED_CATEGORIES)}
+                for d, v in rows.items()}
+    except Exception as exc:  # noqa: BLE001
+        entry["kis_error"] = type(exc).__name__
+    try:
+        if kiwoom_client is not None:
+            rows = _kiwoom_rows(
+                await _raw_kiwoom_flow(kiwoom_client, symbol, day))
+            entry["kiwoom"] = {
+                d: {"individual": v.get("individual"),
+                    "foreign": v.get("foreign"),
+                    "institution_total": v.get("institution_total"),
+                    "settled": v.get("_balance") == 0}
+                for d, v in rows.items()}
+    except Exception as exc:  # noqa: BLE001
+        entry["kiwoom_error"] = type(exc).__name__
+    return entry
+
+
+def _compare_transition(before: dict, after: dict) -> dict:
+    """스냅샷 두 개를 대조한다.
+
+    확인하는 것:
+    - 같은 날짜 키가 유지되는가 (새 날짜로 갈아치우지 않는가)
+    - 미정산이던 날이 정산으로 바뀌었는가
+    - 이미 정산된 날의 값이 조용히 바뀌지 않았는가
+    - 날짜가 중복되지 않는가
+    """
+    result = {"symbol": after["symbol"], "checks": [], "failures": []}
+    for provider in ("kis", "kiwoom"):
+        old_rows = before.get(provider) or {}
+        new_rows = after.get(provider) or {}
+        if not old_rows or not new_rows:
+            continue
+        shared = sorted(set(old_rows) & set(new_rows), reverse=True)
+        if not shared:
+            result["failures"].append({
+                "check": f"{provider}_same_date_keys",
+                "detail": "겹치는 날짜가 없다. 날짜 키가 갈아치워졌다"})
+            continue
+        settled_now = 0
+        drifted = []
+        for day_key in shared:
+            was, now = old_rows[day_key], new_rows[day_key]
+            if not was.get("settled") and now.get("settled"):
+                settled_now += 1
+            if was.get("settled") and now.get("settled"):
+                for name in SHARED_CATEGORIES:
+                    if was.get(name) != now.get(name):
+                        drifted.append(f"{day_key}/{name} "
+                                       f"{was.get(name)} -> {now.get(name)}")
+        result[f"{provider}_shared_days"] = len(shared)
+        result[f"{provider}_settled_after"] = settled_now
+        if drifted:
+            result["failures"].append({
+                "check": f"{provider}_settled_value_changed",
+                "detail": "; ".join(drifted[:5])})
+        elif settled_now:
+            result["checks"].append({
+                "check": f"{provider}_provisional_became_final",
+                "detail": f"{settled_now}일"})
+        else:
+            result["checks"].append({
+                "check": f"{provider}_no_regression",
+                "detail": f"공유 {len(shared)}일, 확정값 변동 없음"})
+    return result
+
 
 async def _main() -> int:
     parser = argparse.ArgumentParser()
@@ -502,6 +593,29 @@ async def _main() -> int:
     day = date.today()
     kis_client, kiwoom_client = _client("kis"), _client("kiwoom")
     started = datetime.now(KST).isoformat()
+    out = Path(args.out) if args.out else (
+        Path(__file__).resolve().parents[1] /
+        f"uat_evidence_flow_{day:%Y%m%d}.json")
+    snapshot_path = _snapshot_path(out, day)
+
+    if args.phase == "intraday":
+        # 장중 실행은 스냅샷만 남긴다. 판정은 마감 후 실행이 한다.
+        snapshot = {"taken_at": started, "base_date": day.isoformat(),
+                    "symbols": {}}
+        for symbol in SYMBOLS[:args.symbols]:
+            entry = await _collect_snapshot(symbol, kis_client,
+                                            kiwoom_client, day)
+            snapshot["symbols"][symbol] = entry
+            print(f"  [SNAP] {symbol}  KIS {len(entry['kis'])}행  "
+                  f"키움 {len(entry['kiwoom'])}행")
+        snapshot_path.parent.mkdir(parents=True, exist_ok=True)
+        snapshot_path.write_text(
+            json.dumps(snapshot, ensure_ascii=False, indent=2),
+            encoding="utf-8")
+        print(f"\n장중 스냅샷 {len(snapshot['symbols'])}종목 저장: "
+              f"{snapshot_path}")
+        print("장 마감 후 --phase final 로 다시 돌리면 전이를 판정합니다.")
+        return 0
 
     cases = []
     for symbol in SYMBOLS[:args.symbols]:
@@ -516,7 +630,37 @@ async def _main() -> int:
         for failure in case["failures"]:
             print(f"         - {failure['check']}: {failure['detail']}")
 
-    failures = sum(len(c["failures"]) for c in cases)
+    # 장중 스냅샷이 있으면 잠정->확정 전이를 판정한다.
+    transitions: list = []
+    transition_state = "no_intraday_snapshot"
+    if snapshot_path.exists():
+        try:
+            snapshot = json.loads(snapshot_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            snapshot = None
+        if snapshot and snapshot.get("base_date") == day.isoformat():
+            print("\n장중 스냅샷과 대조:")
+            for symbol in SYMBOLS[:args.symbols]:
+                before = (snapshot.get("symbols") or {}).get(symbol)
+                if not before:
+                    continue
+                after = await _collect_snapshot(symbol, kis_client,
+                                                kiwoom_client, day)
+                verdict = _compare_transition(before, after)
+                transitions.append(verdict)
+                mark = "OK  " if not verdict["failures"] else "FAIL"
+                print(f"  [{mark}] {symbol}  "
+                      + "  ".join(f"{c['check']}={c['detail']}"
+                                  for c in verdict["checks"]))
+                for f in verdict["failures"]:
+                    print(f"         - {f['check']}: {f['detail']}")
+            transition_state = ("checked" if transitions
+                                else "snapshot_had_no_symbols")
+        elif snapshot:
+            transition_state = "snapshot_from_another_day"
+
+    failures = sum(len(c["failures"]) for c in cases) + sum(
+        len(v["failures"]) for v in transitions)
     report = {
         "kind": "market_evidence_uat",
         "market": "KR",
@@ -534,6 +678,12 @@ async def _main() -> int:
             c.get("kis_arithmetic_checked", 0) for c in cases),
         "kiwoom_settled_days": sum(
             c.get("kiwoom_settled_days", 0) for c in cases),
+        # 잠정->확정 전이. 장중 스냅샷 없이 돌리면 미판정으로 남는다.
+        "provisional_transition": {
+            "state": transition_state,
+            "symbols_compared": len(transitions),
+            "detail": transitions,
+        },
         "detail": cases,
     }
     print(f"\n사례 {len(cases)}  실패 {failures}")
@@ -542,10 +692,9 @@ async def _main() -> int:
     print(f"  증권사 교차 {report['cross_compared']}건 "
           f"불일치 {report['cross_mismatched']}")
     print(f"  KIS 내부 산술 {report['kis_arithmetic_checked']}건")
+    print(f"  잠정->확정 전이: {transition_state} "
+          f"({len(transitions)}종목)")
 
-    out = Path(args.out) if args.out else (
-        Path(__file__).resolve().parents[1] /
-        f"uat_evidence_flow_{day:%Y%m%d}.json")
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(report, ensure_ascii=False, indent=2),
                    encoding="utf-8")

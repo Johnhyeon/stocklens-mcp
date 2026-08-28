@@ -50,10 +50,13 @@ class ServiceCacheTests(unittest.TestCase):
             base_date=BASE, release_override=True, cache=self.cache)
 
     def test_a_second_identical_request_does_not_call_the_provider(self):
-        first = _run(self.service.investor_flow(code="005930", days=20))
+        # 이 대역은 row_limit 과 무관하게 1행만 준다. 그래서 1일치를
+        # 묻는다 - 20일치를 물으면 캐시가 창을 못 덮어 정당하게
+        # 미적중이 된다 (창 판정은 test_evidence_cache_correctness).
+        first = _run(self.service.investor_flow(code="005930", days=1))
         self.assertTrue(first.ok)
         calls_after_first = len(self.adapters["kiwoom"].flow_calls)
-        second = _run(self.service.investor_flow(code="005930", days=20))
+        second = _run(self.service.investor_flow(code="005930", days=1))
         self.assertTrue(second.ok)
         self.assertEqual(len(self.adapters["kiwoom"].flow_calls),
                          calls_after_first,

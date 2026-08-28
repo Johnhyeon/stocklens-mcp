@@ -102,23 +102,6 @@ class BatchPressureResult:
 
 
 @dataclass(frozen=True)
-class BatchPressureResult:
-    """여러 종목의 종류별 블록. 공급자는 요청 전체에 하나뿐이다."""
-
-    ok: bool
-    provider: str | None
-    profile: str | None
-    market: str
-    entities: dict
-    entity_failures: list
-    coverage: dict
-    warnings: tuple[str, ...]
-    error_code: str | None
-    # 라우팅이 실패해 종목별 결과가 없을 때 쓸 상태 블록.
-    fallback_blocks: dict = field(default_factory=dict)
-
-
-@dataclass(frozen=True)
 class PressureResult:
     """종류별 블록. 여기에 합산 필드를 추가하지 않는다."""
 
@@ -187,31 +170,6 @@ def _dataset_from_cache(payload: dict, symbol: str, provider: str,
         measure=payload.get("measure", measure),
         unit=payload.get("unit", UNIT_BY_MEASURE.get(measure, "shares")),
         source_endpoint=payload.get("source_endpoint", ""))
-
-
-def _unique(codes) -> list[str]:
-    """입력 순서를 지키면서 중복만 접는다.
-
-    같은 종목을 두 번 적었다고 API 를 두 번 부르지 않는다. 중복이
-    상한을 잡아먹지도 않는다.
-    """
-    seen: list[str] = []
-    for code in codes:
-        text = str(code).strip()
-        if text and text not in seen:
-            seen.append(text)
-    return seen
-
-
-def _guard_batch_size(unique: list[str]) -> None:
-    """공급자를 부르기 전에 막는다.
-
-    절반만 조회하고 실패하면 사용자는 어디까지가 진짜인지 알 수 없다.
-    """
-    if len(unique) > MAX_BATCH_CODES:
-        raise ValueError(
-            f"한 번에 조회할 수 있는 종목은 최대 {MAX_BATCH_CODES}개입니다 "
-            f"(요청 {len(unique)}개).")
 
 
 def _unique(codes) -> list[str]:
@@ -320,41 +278,31 @@ class EvidenceService:
                             source: str = "auto",
                             base_date: date | None = None
                             ) -> EvidenceResult:
-        try:
-            runtime, snapshot, caps = self._context()
-            resolution = resolve_evidence_source(
-                capability="kr_investor_flow", requested_source=source,
-                capabilities=caps,
-                primary_provider=snapshot.primary_provider,
-                public_providers=self._public,
-                release_override=self._release_override)
-            provider = resolution.selected_provider
-            adapter = self._adapter(runtime, snapshot, provider)
-            before = snapshot.provider_generation(provider)
-            row_limit = max(1, min(days, 120))
-            cached = self._cached_flow(provider, adapter, code, measure,
-                                       before)
-            if cached is not None:
-                dataset = cached
-            else:
-                dataset = await adapter.fetch_investor_flow(
-                    code, base_date=self._resolve_base_date(base_date),
-                    measure=measure, row_limit=row_limit)
-                assert_same_generation(
-                    provider, before,
-                    runtime.snapshot().provider_generation(provider))
-                self._store_flow(provider, adapter, code, measure, before,
-                                 dataset)
-        except EvidenceRouterError as exc:
-            return _error_result(exc, FLOW_CAPABILITIES, measure)
+        """단건. 배치 경로를 그대로 쓴다.
 
-        returned, unavailable = _flow_availability(adapter)
+        단건과 배치가 서로 다른 코드를 타면 캐시가 한쪽에만 붙는다.
+        실제로 그랬다 - 단건만 캐시를 쓰고 배치는 매번 다시 불렀다.
+        """
+        batch = await self.investor_flow_batch(
+            codes=[code], days=days, measure=measure, source=source,
+            base_date=base_date)
+        if not batch.ok and not batch.records:
+            failure = next((f for f in batch.entity_failures
+                            if f["code"] == code), None)
+            return EvidenceResult(
+                ok=False, provider=batch.provider, profile=batch.profile,
+                market=MARKET,
+                data_availability=batch.data_availability,
+                records=(), coverage=batch.coverage,
+                warnings=batch.warnings,
+                error_code=(failure or {}).get("reason") or
+                batch.error_code,
+                measure=measure, unit=batch.unit,
+                alternative_provider=batch.alternative_provider)
+        dataset = batch.records[0]
         return EvidenceResult(
-            ok=True, provider=provider, profile=adapter.profile,
-            market=MARKET,
-            data_availability={"requested": list(FLOW_CAPABILITIES),
-                               "returned": returned,
-                               "unavailable": unavailable},
+            ok=True, provider=batch.provider, profile=batch.profile,
+            market=MARKET, data_availability=batch.data_availability,
             records=(dataset,), coverage=dict(dataset.coverage),
             warnings=tuple(dataset.warnings), error_code=None,
             measure=dataset.measure, unit=dataset.unit)
@@ -379,12 +327,16 @@ class EvidenceService:
         except ValueError:
             return None
 
-    def _cached_flow(self, provider, adapter, code, measure, generation):
+    def _cached_flow(self, provider, adapter, code, measure, generation,
+                     day: date, row_limit: int):
+        """요청한 창을 덮는 항목만 쓴다. 아니면 미적중이다."""
         key = self._flow_key(provider, adapter.profile, code, measure)
         if key is None:
             return None
         try:
-            got = self._cache.get(key, connected=True, generation=generation)
+            got = self._cache.get(
+                key, connected=True, generation=generation,
+                base_date=day.isoformat(), row_limit=row_limit)
         except Exception:  # noqa: BLE001  캐시 실패가 조회를 막지 않는다
             return None
         if not got:
@@ -393,7 +345,7 @@ class EvidenceService:
                                    adapter.profile, measure)
 
     def _store_flow(self, provider, adapter, code, measure, generation,
-                    dataset) -> None:
+                    day: date, dataset) -> None:
         key = self._flow_key(provider, adapter.profile, code, measure)
         if key is None:
             return
@@ -402,7 +354,9 @@ class EvidenceService:
             self._cache.put(
                 key, _dataset_to_cache(dataset), generation=generation,
                 final_through=(max(r.date for r in final).isoformat()
-                               if final else None))
+                               if final else None),
+                # 어느 기준일로 받아왔는지가 적중 판정의 축이다.
+                fetched_for=day.isoformat())
         except Exception:  # noqa: BLE001
             pass
 
@@ -443,6 +397,17 @@ class EvidenceService:
         day = self._resolve_base_date(base_date)
         row_limit = max(1, min(days, 120))
 
+        # 캐시가 덮는 종목은 부르지 않는다. 나머지만 실제로 조회한다.
+        cached: dict[str, InvestorFlowDataset] = {}
+        pending: list[str] = []
+        for code in unique:
+            hit = self._cached_flow(provider, adapter, code, measure,
+                                    before, day, row_limit)
+            if hit is None:
+                pending.append(code)
+            else:
+                cached[code] = hit
+
         async def _one(code: str):
             try:
                 return code, await adapter.fetch_investor_flow(
@@ -451,31 +416,43 @@ class EvidenceService:
             except Exception as exc:  # noqa: BLE001
                 # 한 종목이 실패해도 다른 공급자로 넘어가지 않는다. 실패한
                 # 종목만 사유와 함께 남긴다.
-                return code, getattr(exc, "provider_status", None) or \
-                    "provider_unavailable"
+                reason = getattr(exc, "provider_status", None)
+                return code, reason or "provider_unavailable"
 
-        settled = await asyncio.gather(*[_one(c) for c in unique])
+        settled = await asyncio.gather(*[_one(c) for c in pending])
 
-        try:
-            assert_same_generation(
-                provider, before,
-                runtime.snapshot().provider_generation(provider))
-        except EvidenceRouterError as exc:
-            base = _error_result(exc, FLOW_CAPABILITIES, measure)
-            return BatchEvidenceResult(
-                ok=False, provider=provider, profile=adapter.profile,
-                market=MARKET, data_availability=base.data_availability,
-                records=(), coverage=base.coverage,
-                warnings=base.warnings, error_code=base.error_code,
-                entity_failures=[], measure=measure, unit=base.unit)
+        if pending:
+            try:
+                assert_same_generation(
+                    provider, before,
+                    runtime.snapshot().provider_generation(provider))
+            except EvidenceRouterError as exc:
+                base = _error_result(exc, FLOW_CAPABILITIES, measure)
+                return BatchEvidenceResult(
+                    ok=False, provider=provider, profile=adapter.profile,
+                    market=MARKET, data_availability=base.data_availability,
+                    records=(), coverage=base.coverage,
+                    warnings=base.warnings, error_code=base.error_code,
+                    entity_failures=[{"code": c, "reason": exc.error_code}
+                                     for c in unique],
+                    measure=measure, unit=base.unit)
 
-        records, failures, warnings = [], [], []
+        fetched: dict[str, InvestorFlowDataset] = {}
+        failures: list = []
         for code, outcome in settled:
             if isinstance(outcome, InvestorFlowDataset):
-                records.append(outcome)
-                warnings.extend(outcome.warnings)
+                fetched[code] = outcome
+                self._store_flow(provider, adapter, code, measure, before,
+                                 day, outcome)
             else:
                 failures.append({"code": code, "reason": outcome})
+
+        # 입력 순서를 지킨다. 캐시 적중과 신규 조회가 섞여도 마찬가지다.
+        records = [cached.get(c) or fetched[c] for c in unique
+                   if c in cached or c in fetched]
+        warnings: list[str] = []
+        for dataset in records:
+            warnings.extend(dataset.warnings)
 
         returned, unavailable = _flow_availability(adapter)
         unit = records[0].unit if records else \
@@ -490,6 +467,7 @@ class EvidenceService:
             coverage={"requested_entities": len(unique),
                       "returned_entities": len(records),
                       "rows": sum(len(r.rows) for r in records),
+                      "from_cache_entities": len(cached),
                       "complete": not failures},
             warnings=tuple(dict.fromkeys(warnings)),
             error_code=None if records else "all_entities_failed",
