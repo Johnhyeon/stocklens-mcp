@@ -8811,7 +8811,7 @@ async def get_detailed_investor_flow(
     measure: str = "net_quantity",
     source: str = "auto",
 ) -> str:
-    """상세수급 — 투자자·기관별 일별 순매매 (증권사 연결 필요, JSON).
+    """상세수급 - 투자자·기관별 일별 순매매 (증권사 연결 필요, JSON).
 
     기존 get_flow 와 다른 도구다. get_flow 는 기본 데이터의 개인·외국인·
     기관 3종이고, 이 도구는 증권사 Open API 로 받는 상세 구분이다.
@@ -8929,7 +8929,7 @@ async def get_supply_pressure(
     days: int = 30,
     source: str = "auto",
 ) -> str:
-    """수급압력 — 프로그램매매·공매도·신용·대차·외국인보유 (JSON).
+    """수급압력 - 프로그램매매·공매도·신용·대차·외국인보유 (JSON).
 
     종류를 여러 개 물어도 응답은 **종류별 블록으로 나뉜다.** 각 블록이
     자기 status·provider·granularity·data_as_of·경고를 따로 갖는다.

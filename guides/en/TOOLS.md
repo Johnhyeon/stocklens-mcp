@@ -1,12 +1,14 @@
 # StockLens Tool Reference
 
-**50 tools total** — Market calendar 1 + Korean 29 + US 20.
+**68 tools are installed**; this reference covers the **52** most
+commonly used (Korean 32 + US 20). The rest follow the same rules and
+carry their usage in the tool description.
 
 [🇰🇷 한국어](../ko/TOOLS.md) | [USAGE](USAGE.md) | [INSTALL](INSTALL.md)
 
 ---
 
-## 🇰🇷 Korean Stocks (29)
+## 🇰🇷 Korean Stocks (32)
 
 Data source: Naver Finance (public data, no API key).
 
