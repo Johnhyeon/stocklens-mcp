@@ -22,9 +22,17 @@
 증거 파일에 자격 증명·헤더·토큰·계좌 식별자·원본 오류 본문을 남기지
 않는다. 종목코드·날짜·숫자·상태만 남긴다.
 
-사용:
-    python docs/uat/evidence/common/evidence_uat.py --provider kis
-    python docs/uat/evidence/common/evidence_uat.py --provider both
+이 러너는 두 증권사를 **함께** 쓴다. 교차 검증이 목적이라 공급자를
+하나만 고르는 모드가 없다. 한쪽이 연결돼 있지 않으면 그 사실을 결과에
+남기고 네이버 교차로만 판정한다.
+
+    $env:STOCKLENS_HOME="D:\project\stocklens\.uat-home-1.0"
+    python docs/uat/evidence/common/evidence_uat.py
+    python docs/uat/evidence/common/evidence_uat.py --symbols 3   # 빠른 확인
+    python docs/uat/evidence/common/evidence_uat.py --phase intraday
+
+기본 홈에는 KIS 만 연결돼 있어 증권사 교차가 빈 채로 돈다. UAT 홈을
+지정해야 한다.
 """
 
 from __future__ import annotations
@@ -53,7 +61,10 @@ KST = timezone(timedelta(hours=9))
 # 놓고 볼 수 없다. 우선주·ETF·ETN 이 섞여 있는 것이 의도다.
 SYMBOLS = ["005930", "000660", "373220", "035720", "035420", "051910",
            "950140", "043370", "036560", "069500", "371460", "305720",
-           "005935", "003555"]
+           "005935", "003555",
+           # 15번째. 계획이 요구하는 공급자별 15종목을 채운다.
+           # 코스닥 대형주를 하나 넣어 시장 구분도 섞는다.
+           "247540"]
 
 # 증권사끼리 교차 가능한 구분. 키움 13종 중 KIS 가 주는 것은 이 셋뿐이다.
 SHARED_CATEGORIES = ("individual", "foreign", "institution_total")
@@ -225,6 +236,20 @@ async def _case(symbol: str, kis_client, kiwoom_client, day: date) -> dict:
     kiwoom = _kiwoom_rows(kiwoom_raw)
     result["kis_rows"] = len(kis)
     result["kiwoom_rows"] = len(kiwoom)
+    # 리뷰 지적: 무엇을 어떤 자격으로 어디서 받았는지 증거에 남긴다.
+    result["profile"] = "real"
+    result["endpoints"] = {
+        "kis": {"path": _KIS_FLOW_PATH, "tr_id": "FHKST01010900",
+                "paginated": False, "rows": len(kis)},
+        "kiwoom": {"endpoint_id": "kr_investor_daily", "api_id": "ka10059",
+                   "paginated": True, "rows": len(kiwoom)},
+    }
+    # 공급자가 주지 않는 것. 무엇이 검증 대상이 아니었는지 남긴다.
+    result["unsupported"] = {
+        "kis": ["kr.investor_flow.daily.breakdown"],
+        "kiwoom": ["kr.investor_flow.daily.buy_sell"],
+        "naver_cross": ["individual"],
+    }
 
     # 1) KIS 응답 내부 산술: 순매수 = 매수 - 매도
     arith_checked = arith_bad = 0
@@ -419,6 +444,34 @@ async def _case(symbol: str, kis_client, kiwoom_client, day: date) -> dict:
     except Exception as exc:  # noqa: BLE001
         fail("adapter_matches_raw", type(exc).__name__)
 
+    # 6) 공개 도구의 배치 경로. 서비스만 검증하고 도구를 안 밟으면
+    #    도구에서만 나는 오류(직렬화·인자 검증)를 못 잡는다.
+    if kis_client is not None or kiwoom_client is not None:
+        try:
+            import json as _json
+
+            from stock_mcp_server import server as _server
+
+            # 짝 종목은 대상과 겹치면 안 된다. 겹치면 중복 제거로
+            # 1종목이 되고 도구가 단건 모양을 돌려준다 (정상 동작).
+            partner = "005930" if symbol != "005930" else "000660"
+            raw = await _server.get_detailed_investor_flow(
+                codes=[symbol, partner], days=5)
+            parsed = _json.loads(raw)
+            accounted = set(parsed.get("entities") or {}) | {
+                f["code"] for f in parsed.get("entity_failures") or []}
+            result["public_batch_entities"] = sorted(accounted)
+            if accounted != {symbol, partner}:
+                fail("public_batch",
+                     f"요청 종목이 응답에서 사라졌다: {sorted(accounted)}")
+            elif not parsed.get("ok"):
+                fail("public_batch",
+                     " ".join(parsed["_meta"]["warnings"])[:120])
+            else:
+                ok("public_batch", f"{len(accounted)}종목 응답")
+        except Exception as exc:  # noqa: BLE001
+            fail("public_batch", type(exc).__name__)
+
     passed = {c["check"] for c in result["checks"]}
     if not ({"cross_provider", "kis_vs_naver"} & passed):
         fail("independent_cross_check",
@@ -433,7 +486,18 @@ async def _main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--symbols", type=int, default=len(SYMBOLS))
     parser.add_argument("--out", default=None)
+    parser.add_argument(
+        "--phase", choices=("final", "intraday"), default="final",
+        help="intraday 는 잠정값 스냅샷을 남긴다. 장 마감 후 final 로 "
+             "다시 돌리면 잠정->확정 전이를 검증한다.")
     args = parser.parse_args()
+
+    if args.symbols > len(SYMBOLS):
+        # 15개를 요구했는데 14개만 돌고 성공으로 끝나면, 증거 파일의
+        # 사례 수를 믿고 게이트를 열게 된다.
+        parser.error(
+            f"목록에 {len(SYMBOLS)}종목뿐인데 {args.symbols}종목을 "
+            "요청했습니다. SYMBOLS 를 늘리거나 요청 수를 줄이세요.")
 
     day = date.today()
     kis_client, kiwoom_client = _client("kis"), _client("kiwoom")

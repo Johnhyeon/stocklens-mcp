@@ -2,17 +2,17 @@
   "kind": "market_evidence_uat",
   "market": "KR",
   "capability": "kr_investor_flow",
-  "started_at": "2026-08-28T17:53:55.911168+09:00",
-  "finished_at": "2026-08-28T17:54:35.212940+09:00",
+  "started_at": "2026-08-28T18:52:28.190175+09:00",
+  "finished_at": "2026-08-28T18:53:49.410330+09:00",
   "base_date": "2026-08-28",
-  "cases": 14,
+  "cases": 15,
   "failures": 0,
-  "cross_compared": 1260,
+  "cross_compared": 1350,
   "cross_mismatched": 0,
-  "naver_compared": 812,
+  "naver_compared": 900,
   "naver_mismatched": 0,
-  "kis_arithmetic_checked": 1260,
-  "kiwoom_settled_days": 1400,
+  "kis_arithmetic_checked": 1350,
+  "kiwoom_settled_days": 1500,
   "detail": [
     {
       "symbol": "005930",
@@ -31,7 +31,7 @@
         },
         {
           "check": "kis_vs_naver",
-          "detail": "58건 자릿수까지 일치"
+          "detail": "60건 자릿수까지 일치"
         },
         {
           "check": "measure_discrimination",
@@ -44,18 +44,48 @@
         {
           "check": "adapter_matches_raw",
           "detail": "60행 일치"
+        },
+        {
+          "check": "public_batch",
+          "detail": "2종목 응답"
         }
       ],
       "failures": [],
       "kis_rows": 30,
       "kiwoom_rows": 100,
+      "profile": "real",
+      "endpoints": {
+        "kis": {
+          "path": "/uapi/domestic-stock/v1/quotations/inquire-investor",
+          "tr_id": "FHKST01010900",
+          "paginated": false,
+          "rows": 30
+        },
+        "kiwoom": {
+          "endpoint_id": "kr_investor_daily",
+          "api_id": "ka10059",
+          "paginated": true,
+          "rows": 100
+        }
+      },
+      "unsupported": {
+        "kis": [
+          "kr.investor_flow.daily.breakdown"
+        ],
+        "kiwoom": [
+          "kr.investor_flow.daily.buy_sell"
+        ],
+        "naver_cross": [
+          "individual"
+        ]
+      },
       "kis_arithmetic_checked": 90,
       "kiwoom_settled_days": 100,
       "kiwoom_unsettled_days": 0,
       "cross_compared": 90,
       "cross_mismatched": 0,
       "shared_days": 30,
-      "naver_compared": 58,
+      "naver_compared": 60,
       "naver_mismatched": 0,
       "measure_distinct_days": 100,
       "kis_adapter_rows": 30,
@@ -64,7 +94,11 @@
       "kis_adapter_unit": "shares",
       "adapter_rows": 60,
       "adapter_measure": "net_quantity",
-      "adapter_unit": "shares"
+      "adapter_unit": "shares",
+      "public_batch_entities": [
+        "000660",
+        "005930"
+      ]
     },
     {
       "symbol": "000660",
@@ -83,7 +117,7 @@
         },
         {
           "check": "kis_vs_naver",
-          "detail": "58건 자릿수까지 일치"
+          "detail": "60건 자릿수까지 일치"
         },
         {
           "check": "measure_discrimination",
@@ -96,18 +130,48 @@
         {
           "check": "adapter_matches_raw",
           "detail": "60행 일치"
+        },
+        {
+          "check": "public_batch",
+          "detail": "2종목 응답"
         }
       ],
       "failures": [],
       "kis_rows": 30,
       "kiwoom_rows": 100,
+      "profile": "real",
+      "endpoints": {
+        "kis": {
+          "path": "/uapi/domestic-stock/v1/quotations/inquire-investor",
+          "tr_id": "FHKST01010900",
+          "paginated": false,
+          "rows": 30
+        },
+        "kiwoom": {
+          "endpoint_id": "kr_investor_daily",
+          "api_id": "ka10059",
+          "paginated": true,
+          "rows": 100
+        }
+      },
+      "unsupported": {
+        "kis": [
+          "kr.investor_flow.daily.breakdown"
+        ],
+        "kiwoom": [
+          "kr.investor_flow.daily.buy_sell"
+        ],
+        "naver_cross": [
+          "individual"
+        ]
+      },
       "kis_arithmetic_checked": 90,
       "kiwoom_settled_days": 100,
       "kiwoom_unsettled_days": 0,
       "cross_compared": 90,
       "cross_mismatched": 0,
       "shared_days": 30,
-      "naver_compared": 58,
+      "naver_compared": 60,
       "naver_mismatched": 0,
       "measure_distinct_days": 100,
       "kis_adapter_rows": 30,
@@ -116,7 +180,11 @@
       "kis_adapter_unit": "shares",
       "adapter_rows": 60,
       "adapter_measure": "net_quantity",
-      "adapter_unit": "shares"
+      "adapter_unit": "shares",
+      "public_batch_entities": [
+        "000660",
+        "005930"
+      ]
     },
     {
       "symbol": "373220",
@@ -135,7 +203,7 @@
         },
         {
           "check": "kis_vs_naver",
-          "detail": "58건 자릿수까지 일치"
+          "detail": "60건 자릿수까지 일치"
         },
         {
           "check": "measure_discrimination",
@@ -148,18 +216,48 @@
         {
           "check": "adapter_matches_raw",
           "detail": "60행 일치"
+        },
+        {
+          "check": "public_batch",
+          "detail": "2종목 응답"
         }
       ],
       "failures": [],
       "kis_rows": 30,
       "kiwoom_rows": 100,
+      "profile": "real",
+      "endpoints": {
+        "kis": {
+          "path": "/uapi/domestic-stock/v1/quotations/inquire-investor",
+          "tr_id": "FHKST01010900",
+          "paginated": false,
+          "rows": 30
+        },
+        "kiwoom": {
+          "endpoint_id": "kr_investor_daily",
+          "api_id": "ka10059",
+          "paginated": true,
+          "rows": 100
+        }
+      },
+      "unsupported": {
+        "kis": [
+          "kr.investor_flow.daily.breakdown"
+        ],
+        "kiwoom": [
+          "kr.investor_flow.daily.buy_sell"
+        ],
+        "naver_cross": [
+          "individual"
+        ]
+      },
       "kis_arithmetic_checked": 90,
       "kiwoom_settled_days": 100,
       "kiwoom_unsettled_days": 0,
       "cross_compared": 90,
       "cross_mismatched": 0,
       "shared_days": 30,
-      "naver_compared": 58,
+      "naver_compared": 60,
       "naver_mismatched": 0,
       "measure_distinct_days": 100,
       "kis_adapter_rows": 30,
@@ -168,7 +266,11 @@
       "kis_adapter_unit": "shares",
       "adapter_rows": 60,
       "adapter_measure": "net_quantity",
-      "adapter_unit": "shares"
+      "adapter_unit": "shares",
+      "public_batch_entities": [
+        "005930",
+        "373220"
+      ]
     },
     {
       "symbol": "035720",
@@ -187,7 +289,7 @@
         },
         {
           "check": "kis_vs_naver",
-          "detail": "58건 자릿수까지 일치"
+          "detail": "60건 자릿수까지 일치"
         },
         {
           "check": "measure_discrimination",
@@ -200,18 +302,48 @@
         {
           "check": "adapter_matches_raw",
           "detail": "60행 일치"
+        },
+        {
+          "check": "public_batch",
+          "detail": "2종목 응답"
         }
       ],
       "failures": [],
       "kis_rows": 30,
       "kiwoom_rows": 100,
+      "profile": "real",
+      "endpoints": {
+        "kis": {
+          "path": "/uapi/domestic-stock/v1/quotations/inquire-investor",
+          "tr_id": "FHKST01010900",
+          "paginated": false,
+          "rows": 30
+        },
+        "kiwoom": {
+          "endpoint_id": "kr_investor_daily",
+          "api_id": "ka10059",
+          "paginated": true,
+          "rows": 100
+        }
+      },
+      "unsupported": {
+        "kis": [
+          "kr.investor_flow.daily.breakdown"
+        ],
+        "kiwoom": [
+          "kr.investor_flow.daily.buy_sell"
+        ],
+        "naver_cross": [
+          "individual"
+        ]
+      },
       "kis_arithmetic_checked": 90,
       "kiwoom_settled_days": 100,
       "kiwoom_unsettled_days": 0,
       "cross_compared": 90,
       "cross_mismatched": 0,
       "shared_days": 30,
-      "naver_compared": 58,
+      "naver_compared": 60,
       "naver_mismatched": 0,
       "measure_distinct_days": 100,
       "kis_adapter_rows": 30,
@@ -220,7 +352,11 @@
       "kis_adapter_unit": "shares",
       "adapter_rows": 60,
       "adapter_measure": "net_quantity",
-      "adapter_unit": "shares"
+      "adapter_unit": "shares",
+      "public_batch_entities": [
+        "005930",
+        "035720"
+      ]
     },
     {
       "symbol": "035420",
@@ -239,7 +375,7 @@
         },
         {
           "check": "kis_vs_naver",
-          "detail": "58건 자릿수까지 일치"
+          "detail": "60건 자릿수까지 일치"
         },
         {
           "check": "measure_discrimination",
@@ -252,18 +388,48 @@
         {
           "check": "adapter_matches_raw",
           "detail": "60행 일치"
+        },
+        {
+          "check": "public_batch",
+          "detail": "2종목 응답"
         }
       ],
       "failures": [],
       "kis_rows": 30,
       "kiwoom_rows": 100,
+      "profile": "real",
+      "endpoints": {
+        "kis": {
+          "path": "/uapi/domestic-stock/v1/quotations/inquire-investor",
+          "tr_id": "FHKST01010900",
+          "paginated": false,
+          "rows": 30
+        },
+        "kiwoom": {
+          "endpoint_id": "kr_investor_daily",
+          "api_id": "ka10059",
+          "paginated": true,
+          "rows": 100
+        }
+      },
+      "unsupported": {
+        "kis": [
+          "kr.investor_flow.daily.breakdown"
+        ],
+        "kiwoom": [
+          "kr.investor_flow.daily.buy_sell"
+        ],
+        "naver_cross": [
+          "individual"
+        ]
+      },
       "kis_arithmetic_checked": 90,
       "kiwoom_settled_days": 100,
       "kiwoom_unsettled_days": 0,
       "cross_compared": 90,
       "cross_mismatched": 0,
       "shared_days": 30,
-      "naver_compared": 58,
+      "naver_compared": 60,
       "naver_mismatched": 0,
       "measure_distinct_days": 100,
       "kis_adapter_rows": 30,
@@ -272,7 +438,11 @@
       "kis_adapter_unit": "shares",
       "adapter_rows": 60,
       "adapter_measure": "net_quantity",
-      "adapter_unit": "shares"
+      "adapter_unit": "shares",
+      "public_batch_entities": [
+        "005930",
+        "035420"
+      ]
     },
     {
       "symbol": "051910",
@@ -291,7 +461,7 @@
         },
         {
           "check": "kis_vs_naver",
-          "detail": "58건 자릿수까지 일치"
+          "detail": "60건 자릿수까지 일치"
         },
         {
           "check": "measure_discrimination",
@@ -304,18 +474,48 @@
         {
           "check": "adapter_matches_raw",
           "detail": "60행 일치"
+        },
+        {
+          "check": "public_batch",
+          "detail": "2종목 응답"
         }
       ],
       "failures": [],
       "kis_rows": 30,
       "kiwoom_rows": 100,
+      "profile": "real",
+      "endpoints": {
+        "kis": {
+          "path": "/uapi/domestic-stock/v1/quotations/inquire-investor",
+          "tr_id": "FHKST01010900",
+          "paginated": false,
+          "rows": 30
+        },
+        "kiwoom": {
+          "endpoint_id": "kr_investor_daily",
+          "api_id": "ka10059",
+          "paginated": true,
+          "rows": 100
+        }
+      },
+      "unsupported": {
+        "kis": [
+          "kr.investor_flow.daily.breakdown"
+        ],
+        "kiwoom": [
+          "kr.investor_flow.daily.buy_sell"
+        ],
+        "naver_cross": [
+          "individual"
+        ]
+      },
       "kis_arithmetic_checked": 90,
       "kiwoom_settled_days": 100,
       "kiwoom_unsettled_days": 0,
       "cross_compared": 90,
       "cross_mismatched": 0,
       "shared_days": 30,
-      "naver_compared": 58,
+      "naver_compared": 60,
       "naver_mismatched": 0,
       "measure_distinct_days": 100,
       "kis_adapter_rows": 30,
@@ -324,7 +524,11 @@
       "kis_adapter_unit": "shares",
       "adapter_rows": 60,
       "adapter_measure": "net_quantity",
-      "adapter_unit": "shares"
+      "adapter_unit": "shares",
+      "public_batch_entities": [
+        "005930",
+        "051910"
+      ]
     },
     {
       "symbol": "950140",
@@ -343,7 +547,7 @@
         },
         {
           "check": "kis_vs_naver",
-          "detail": "58건 자릿수까지 일치"
+          "detail": "60건 자릿수까지 일치"
         },
         {
           "check": "measure_discrimination",
@@ -356,18 +560,48 @@
         {
           "check": "adapter_matches_raw",
           "detail": "60행 일치"
+        },
+        {
+          "check": "public_batch",
+          "detail": "2종목 응답"
         }
       ],
       "failures": [],
       "kis_rows": 30,
       "kiwoom_rows": 100,
+      "profile": "real",
+      "endpoints": {
+        "kis": {
+          "path": "/uapi/domestic-stock/v1/quotations/inquire-investor",
+          "tr_id": "FHKST01010900",
+          "paginated": false,
+          "rows": 30
+        },
+        "kiwoom": {
+          "endpoint_id": "kr_investor_daily",
+          "api_id": "ka10059",
+          "paginated": true,
+          "rows": 100
+        }
+      },
+      "unsupported": {
+        "kis": [
+          "kr.investor_flow.daily.breakdown"
+        ],
+        "kiwoom": [
+          "kr.investor_flow.daily.buy_sell"
+        ],
+        "naver_cross": [
+          "individual"
+        ]
+      },
       "kis_arithmetic_checked": 90,
       "kiwoom_settled_days": 100,
       "kiwoom_unsettled_days": 0,
       "cross_compared": 90,
       "cross_mismatched": 0,
       "shared_days": 30,
-      "naver_compared": 58,
+      "naver_compared": 60,
       "naver_mismatched": 0,
       "measure_distinct_days": 100,
       "kis_adapter_rows": 30,
@@ -376,7 +610,11 @@
       "kis_adapter_unit": "shares",
       "adapter_rows": 60,
       "adapter_measure": "net_quantity",
-      "adapter_unit": "shares"
+      "adapter_unit": "shares",
+      "public_batch_entities": [
+        "005930",
+        "950140"
+      ]
     },
     {
       "symbol": "043370",
@@ -395,7 +633,7 @@
         },
         {
           "check": "kis_vs_naver",
-          "detail": "58건 자릿수까지 일치"
+          "detail": "60건 자릿수까지 일치"
         },
         {
           "check": "measure_discrimination",
@@ -408,18 +646,48 @@
         {
           "check": "adapter_matches_raw",
           "detail": "60행 일치"
+        },
+        {
+          "check": "public_batch",
+          "detail": "2종목 응답"
         }
       ],
       "failures": [],
       "kis_rows": 30,
       "kiwoom_rows": 100,
+      "profile": "real",
+      "endpoints": {
+        "kis": {
+          "path": "/uapi/domestic-stock/v1/quotations/inquire-investor",
+          "tr_id": "FHKST01010900",
+          "paginated": false,
+          "rows": 30
+        },
+        "kiwoom": {
+          "endpoint_id": "kr_investor_daily",
+          "api_id": "ka10059",
+          "paginated": true,
+          "rows": 100
+        }
+      },
+      "unsupported": {
+        "kis": [
+          "kr.investor_flow.daily.breakdown"
+        ],
+        "kiwoom": [
+          "kr.investor_flow.daily.buy_sell"
+        ],
+        "naver_cross": [
+          "individual"
+        ]
+      },
       "kis_arithmetic_checked": 90,
       "kiwoom_settled_days": 100,
       "kiwoom_unsettled_days": 0,
       "cross_compared": 90,
       "cross_mismatched": 0,
       "shared_days": 30,
-      "naver_compared": 58,
+      "naver_compared": 60,
       "naver_mismatched": 0,
       "measure_distinct_days": 100,
       "kis_adapter_rows": 30,
@@ -428,7 +696,11 @@
       "kis_adapter_unit": "shares",
       "adapter_rows": 60,
       "adapter_measure": "net_quantity",
-      "adapter_unit": "shares"
+      "adapter_unit": "shares",
+      "public_batch_entities": [
+        "005930",
+        "043370"
+      ]
     },
     {
       "symbol": "036560",
@@ -447,7 +719,7 @@
         },
         {
           "check": "kis_vs_naver",
-          "detail": "58건 자릿수까지 일치"
+          "detail": "60건 자릿수까지 일치"
         },
         {
           "check": "measure_discrimination",
@@ -460,18 +732,48 @@
         {
           "check": "adapter_matches_raw",
           "detail": "60행 일치"
+        },
+        {
+          "check": "public_batch",
+          "detail": "2종목 응답"
         }
       ],
       "failures": [],
       "kis_rows": 30,
       "kiwoom_rows": 100,
+      "profile": "real",
+      "endpoints": {
+        "kis": {
+          "path": "/uapi/domestic-stock/v1/quotations/inquire-investor",
+          "tr_id": "FHKST01010900",
+          "paginated": false,
+          "rows": 30
+        },
+        "kiwoom": {
+          "endpoint_id": "kr_investor_daily",
+          "api_id": "ka10059",
+          "paginated": true,
+          "rows": 100
+        }
+      },
+      "unsupported": {
+        "kis": [
+          "kr.investor_flow.daily.breakdown"
+        ],
+        "kiwoom": [
+          "kr.investor_flow.daily.buy_sell"
+        ],
+        "naver_cross": [
+          "individual"
+        ]
+      },
       "kis_arithmetic_checked": 90,
       "kiwoom_settled_days": 100,
       "kiwoom_unsettled_days": 0,
       "cross_compared": 90,
       "cross_mismatched": 0,
       "shared_days": 30,
-      "naver_compared": 58,
+      "naver_compared": 60,
       "naver_mismatched": 0,
       "measure_distinct_days": 100,
       "kis_adapter_rows": 30,
@@ -480,7 +782,11 @@
       "kis_adapter_unit": "shares",
       "adapter_rows": 60,
       "adapter_measure": "net_quantity",
-      "adapter_unit": "shares"
+      "adapter_unit": "shares",
+      "public_batch_entities": [
+        "005930",
+        "036560"
+      ]
     },
     {
       "symbol": "069500",
@@ -499,7 +805,7 @@
         },
         {
           "check": "kis_vs_naver",
-          "detail": "58건 자릿수까지 일치"
+          "detail": "60건 자릿수까지 일치"
         },
         {
           "check": "measure_discrimination",
@@ -512,18 +818,48 @@
         {
           "check": "adapter_matches_raw",
           "detail": "60행 일치"
+        },
+        {
+          "check": "public_batch",
+          "detail": "2종목 응답"
         }
       ],
       "failures": [],
       "kis_rows": 30,
       "kiwoom_rows": 100,
+      "profile": "real",
+      "endpoints": {
+        "kis": {
+          "path": "/uapi/domestic-stock/v1/quotations/inquire-investor",
+          "tr_id": "FHKST01010900",
+          "paginated": false,
+          "rows": 30
+        },
+        "kiwoom": {
+          "endpoint_id": "kr_investor_daily",
+          "api_id": "ka10059",
+          "paginated": true,
+          "rows": 100
+        }
+      },
+      "unsupported": {
+        "kis": [
+          "kr.investor_flow.daily.breakdown"
+        ],
+        "kiwoom": [
+          "kr.investor_flow.daily.buy_sell"
+        ],
+        "naver_cross": [
+          "individual"
+        ]
+      },
       "kis_arithmetic_checked": 90,
       "kiwoom_settled_days": 100,
       "kiwoom_unsettled_days": 0,
       "cross_compared": 90,
       "cross_mismatched": 0,
       "shared_days": 30,
-      "naver_compared": 58,
+      "naver_compared": 60,
       "naver_mismatched": 0,
       "measure_distinct_days": 100,
       "kis_adapter_rows": 30,
@@ -532,7 +868,11 @@
       "kis_adapter_unit": "shares",
       "adapter_rows": 60,
       "adapter_measure": "net_quantity",
-      "adapter_unit": "shares"
+      "adapter_unit": "shares",
+      "public_batch_entities": [
+        "005930",
+        "069500"
+      ]
     },
     {
       "symbol": "371460",
@@ -551,7 +891,7 @@
         },
         {
           "check": "kis_vs_naver",
-          "detail": "58건 자릿수까지 일치"
+          "detail": "60건 자릿수까지 일치"
         },
         {
           "check": "measure_discrimination",
@@ -564,18 +904,48 @@
         {
           "check": "adapter_matches_raw",
           "detail": "60행 일치"
+        },
+        {
+          "check": "public_batch",
+          "detail": "2종목 응답"
         }
       ],
       "failures": [],
       "kis_rows": 30,
       "kiwoom_rows": 100,
+      "profile": "real",
+      "endpoints": {
+        "kis": {
+          "path": "/uapi/domestic-stock/v1/quotations/inquire-investor",
+          "tr_id": "FHKST01010900",
+          "paginated": false,
+          "rows": 30
+        },
+        "kiwoom": {
+          "endpoint_id": "kr_investor_daily",
+          "api_id": "ka10059",
+          "paginated": true,
+          "rows": 100
+        }
+      },
+      "unsupported": {
+        "kis": [
+          "kr.investor_flow.daily.breakdown"
+        ],
+        "kiwoom": [
+          "kr.investor_flow.daily.buy_sell"
+        ],
+        "naver_cross": [
+          "individual"
+        ]
+      },
       "kis_arithmetic_checked": 90,
       "kiwoom_settled_days": 100,
       "kiwoom_unsettled_days": 0,
       "cross_compared": 90,
       "cross_mismatched": 0,
       "shared_days": 30,
-      "naver_compared": 58,
+      "naver_compared": 60,
       "naver_mismatched": 0,
       "measure_distinct_days": 100,
       "kis_adapter_rows": 30,
@@ -584,7 +954,11 @@
       "kis_adapter_unit": "shares",
       "adapter_rows": 60,
       "adapter_measure": "net_quantity",
-      "adapter_unit": "shares"
+      "adapter_unit": "shares",
+      "public_batch_entities": [
+        "005930",
+        "371460"
+      ]
     },
     {
       "symbol": "305720",
@@ -603,7 +977,7 @@
         },
         {
           "check": "kis_vs_naver",
-          "detail": "58건 자릿수까지 일치"
+          "detail": "60건 자릿수까지 일치"
         },
         {
           "check": "measure_discrimination",
@@ -616,18 +990,48 @@
         {
           "check": "adapter_matches_raw",
           "detail": "60행 일치"
+        },
+        {
+          "check": "public_batch",
+          "detail": "2종목 응답"
         }
       ],
       "failures": [],
       "kis_rows": 30,
       "kiwoom_rows": 100,
+      "profile": "real",
+      "endpoints": {
+        "kis": {
+          "path": "/uapi/domestic-stock/v1/quotations/inquire-investor",
+          "tr_id": "FHKST01010900",
+          "paginated": false,
+          "rows": 30
+        },
+        "kiwoom": {
+          "endpoint_id": "kr_investor_daily",
+          "api_id": "ka10059",
+          "paginated": true,
+          "rows": 100
+        }
+      },
+      "unsupported": {
+        "kis": [
+          "kr.investor_flow.daily.breakdown"
+        ],
+        "kiwoom": [
+          "kr.investor_flow.daily.buy_sell"
+        ],
+        "naver_cross": [
+          "individual"
+        ]
+      },
       "kis_arithmetic_checked": 90,
       "kiwoom_settled_days": 100,
       "kiwoom_unsettled_days": 0,
       "cross_compared": 90,
       "cross_mismatched": 0,
       "shared_days": 30,
-      "naver_compared": 58,
+      "naver_compared": 60,
       "naver_mismatched": 0,
       "measure_distinct_days": 100,
       "kis_adapter_rows": 30,
@@ -636,7 +1040,11 @@
       "kis_adapter_unit": "shares",
       "adapter_rows": 60,
       "adapter_measure": "net_quantity",
-      "adapter_unit": "shares"
+      "adapter_unit": "shares",
+      "public_batch_entities": [
+        "005930",
+        "305720"
+      ]
     },
     {
       "symbol": "005935",
@@ -655,7 +1063,7 @@
         },
         {
           "check": "kis_vs_naver",
-          "detail": "58건 자릿수까지 일치"
+          "detail": "60건 자릿수까지 일치"
         },
         {
           "check": "measure_discrimination",
@@ -668,18 +1076,48 @@
         {
           "check": "adapter_matches_raw",
           "detail": "60행 일치"
+        },
+        {
+          "check": "public_batch",
+          "detail": "2종목 응답"
         }
       ],
       "failures": [],
       "kis_rows": 30,
       "kiwoom_rows": 100,
+      "profile": "real",
+      "endpoints": {
+        "kis": {
+          "path": "/uapi/domestic-stock/v1/quotations/inquire-investor",
+          "tr_id": "FHKST01010900",
+          "paginated": false,
+          "rows": 30
+        },
+        "kiwoom": {
+          "endpoint_id": "kr_investor_daily",
+          "api_id": "ka10059",
+          "paginated": true,
+          "rows": 100
+        }
+      },
+      "unsupported": {
+        "kis": [
+          "kr.investor_flow.daily.breakdown"
+        ],
+        "kiwoom": [
+          "kr.investor_flow.daily.buy_sell"
+        ],
+        "naver_cross": [
+          "individual"
+        ]
+      },
       "kis_arithmetic_checked": 90,
       "kiwoom_settled_days": 100,
       "kiwoom_unsettled_days": 0,
       "cross_compared": 90,
       "cross_mismatched": 0,
       "shared_days": 30,
-      "naver_compared": 58,
+      "naver_compared": 60,
       "naver_mismatched": 0,
       "measure_distinct_days": 100,
       "kis_adapter_rows": 30,
@@ -688,7 +1126,11 @@
       "kis_adapter_unit": "shares",
       "adapter_rows": 60,
       "adapter_measure": "net_quantity",
-      "adapter_unit": "shares"
+      "adapter_unit": "shares",
+      "public_batch_entities": [
+        "005930",
+        "005935"
+      ]
     },
     {
       "symbol": "003555",
@@ -707,7 +1149,7 @@
         },
         {
           "check": "kis_vs_naver",
-          "detail": "58건 자릿수까지 일치"
+          "detail": "60건 자릿수까지 일치"
         },
         {
           "check": "measure_discrimination",
@@ -720,18 +1162,48 @@
         {
           "check": "adapter_matches_raw",
           "detail": "60행 일치"
+        },
+        {
+          "check": "public_batch",
+          "detail": "2종목 응답"
         }
       ],
       "failures": [],
       "kis_rows": 30,
       "kiwoom_rows": 100,
+      "profile": "real",
+      "endpoints": {
+        "kis": {
+          "path": "/uapi/domestic-stock/v1/quotations/inquire-investor",
+          "tr_id": "FHKST01010900",
+          "paginated": false,
+          "rows": 30
+        },
+        "kiwoom": {
+          "endpoint_id": "kr_investor_daily",
+          "api_id": "ka10059",
+          "paginated": true,
+          "rows": 100
+        }
+      },
+      "unsupported": {
+        "kis": [
+          "kr.investor_flow.daily.breakdown"
+        ],
+        "kiwoom": [
+          "kr.investor_flow.daily.buy_sell"
+        ],
+        "naver_cross": [
+          "individual"
+        ]
+      },
       "kis_arithmetic_checked": 90,
       "kiwoom_settled_days": 100,
       "kiwoom_unsettled_days": 0,
       "cross_compared": 90,
       "cross_mismatched": 0,
       "shared_days": 30,
-      "naver_compared": 58,
+      "naver_compared": 60,
       "naver_mismatched": 0,
       "measure_distinct_days": 100,
       "kis_adapter_rows": 30,
@@ -740,7 +1212,97 @@
       "kis_adapter_unit": "shares",
       "adapter_rows": 60,
       "adapter_measure": "net_quantity",
-      "adapter_unit": "shares"
+      "adapter_unit": "shares",
+      "public_batch_entities": [
+        "003555",
+        "005930"
+      ]
+    },
+    {
+      "symbol": "247540",
+      "checks": [
+        {
+          "check": "kis_buy_minus_sell",
+          "detail": "90건 일치"
+        },
+        {
+          "check": "kiwoom_balance",
+          "detail": "정산일 100일 검산 통과"
+        },
+        {
+          "check": "cross_provider",
+          "detail": "90건 자릿수까지 일치"
+        },
+        {
+          "check": "kis_vs_naver",
+          "detail": "60건 자릿수까지 일치"
+        },
+        {
+          "check": "measure_discrimination",
+          "detail": "100일 모두 다른 값"
+        },
+        {
+          "check": "kis_adapter_matches_raw",
+          "detail": "30행 일치"
+        },
+        {
+          "check": "adapter_matches_raw",
+          "detail": "60행 일치"
+        },
+        {
+          "check": "public_batch",
+          "detail": "2종목 응답"
+        }
+      ],
+      "failures": [],
+      "kis_rows": 30,
+      "kiwoom_rows": 100,
+      "profile": "real",
+      "endpoints": {
+        "kis": {
+          "path": "/uapi/domestic-stock/v1/quotations/inquire-investor",
+          "tr_id": "FHKST01010900",
+          "paginated": false,
+          "rows": 30
+        },
+        "kiwoom": {
+          "endpoint_id": "kr_investor_daily",
+          "api_id": "ka10059",
+          "paginated": true,
+          "rows": 100
+        }
+      },
+      "unsupported": {
+        "kis": [
+          "kr.investor_flow.daily.breakdown"
+        ],
+        "kiwoom": [
+          "kr.investor_flow.daily.buy_sell"
+        ],
+        "naver_cross": [
+          "individual"
+        ]
+      },
+      "kis_arithmetic_checked": 90,
+      "kiwoom_settled_days": 100,
+      "kiwoom_unsettled_days": 0,
+      "cross_compared": 90,
+      "cross_mismatched": 0,
+      "shared_days": 30,
+      "naver_compared": 60,
+      "naver_mismatched": 0,
+      "measure_distinct_days": 100,
+      "kis_adapter_rows": 30,
+      "kis_adapter_final_rows": 30,
+      "kis_adapter_measure": "net_quantity",
+      "kis_adapter_unit": "shares",
+      "adapter_rows": 60,
+      "adapter_measure": "net_quantity",
+      "adapter_unit": "shares",
+      "public_batch_entities": [
+        "005930",
+        "247540"
+      ]
     }
   ]
 }
