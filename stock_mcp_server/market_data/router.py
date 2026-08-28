@@ -246,7 +246,20 @@ async def fetch_with_failover(
     함수 이름의 failover 는 역사적 이름이다 - meta 의 fallback_used 는
     하위 호환을 위해 항상 False 로 남는다.
     """
-    primary = providers[resolution.selected_provider]
+    selected = resolution.selected_provider
+    primary = providers.get(selected)
+    if primary is None:
+        # 상태 파일은 "연결됨"인데 공급자를 만들지 못한 경우다. 자격
+        # 증명 슬롯을 읽지 못했다는 뜻이고(다른 계정으로 실행, 키체인
+        # 잠김, 슬롯 삭제 등), 키가 틀린 것과는 다르다. 예전에는 여기서
+        # KeyError 로 죽어 사용자가 원인도 다음 행동도 알 수 없었다.
+        # 다른 공급자가 준비돼 있어도 대신 쓰지 않는다 (1.0 정책).
+        raise RouterError(
+            "not_configured",
+            f"{selected} 연결 기록은 있지만 저장된 키를 읽지 못했습니다. "
+            "키 자체의 문제가 아니라 이 컴퓨터·계정에서 자격 증명 저장소를 "
+            f"열지 못한 것입니다. LeetKit Manager 에서 {selected} 를 "
+            "다시 연결해주세요.")
     meta = {
         "requested_source": resolution.requested_source,
         "selected_provider": resolution.selected_provider,

@@ -1,9 +1,13 @@
 # -*- coding: utf-8 -*-
 """1.0.0rc1 설치본 스모크 (Phase 1 step 6).
 
-깨끗한 venv 에 설치된 산출물만 호출한다. 워크트리 소스는 쓰지 않는다.
-읽기 전용 검사만 하며, UAT 홈 상태를 바꾸지 않는다.
+경로를 인자나 환경변수로 받는다 (임시 폴더 하드코딩 금지).
+
+    python rc1_smoke.py --venv <venv경로> [--home <STOCKLENS_HOME>]
+
+    RC1_VENV / RC1_STOCKLENS_HOME 환경변수로도 지정할 수 있다.
 """
+import argparse
 import io
 import json
 import os
@@ -12,23 +16,58 @@ import sys
 from pathlib import Path
 
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
-VENV = Path(r"C:\Users\whdqj\AppData\Local\Temp\claude"
-            r"\D--project-stocklens\1bbc70bb-4455-422e-8819-ab68fa1e67cb"
-            r"\scratchpad\rc1-clean\Scripts")
-UAT = r"D:\project\stocklens\.uat-home-1.0"
+# argparse 의 안내·오류는 stderr 로 나간다. 여기를 감싸지 않으면
+# 코드페이지 949 콘솔에서 한국어 안내가 깨져 나온다.
+sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8")
+
+
+def _resolve_paths() -> "tuple[Path, str]":
+    parser = argparse.ArgumentParser(add_help=True)
+    parser.add_argument("--venv", default=os.environ.get("RC1_VENV"),
+                        help="산출물을 설치한 venv 경로 (Scripts 상위)")
+    parser.add_argument("--home",
+                        default=os.environ.get("RC1_STOCKLENS_HOME"),
+                        help="검증에 쓸 STOCKLENS_HOME")
+    args = parser.parse_args()
+    if not args.venv:
+        parser.error("--venv 또는 RC1_VENV 가 필요합니다 "
+                     "(예: --venv C:/tmp/rc1-clean)")
+    venv = Path(args.venv)
+    scripts = venv / "Scripts" if (venv / "Scripts").exists() else venv
+    if not (scripts / "python.exe").exists() and             not (scripts / "python").exists():
+        parser.error(f"venv 에서 python 을 찾지 못했습니다: {scripts}")
+    home = args.home or os.environ.get("STOCKLENS_HOME") or ""
+    if not home:
+        parser.error("--home 또는 RC1_STOCKLENS_HOME 이 필요합니다")
+    return scripts, home
+
+
+VENV, UAT = _resolve_paths()
 fails = []
+# 자식 출력이 깨진 채로 검증을 통과시키지 않기 위한 목록
+_mojibake: list = []
 
 
 def run(exe, args, request=None, flag=False, home=UAT):
     env = dict(os.environ)
     env["STOCKLENS_HOME"] = home
+    # 자식 출력을 UTF-8 로 읽으므로 자식도 UTF-8 로 쓰게 한다. 이게 없으면
+    # 코드페이지 949 환경에서 한국어 출력이 CP949 로 나와 여기서
+    # UnicodeDecodeError 로 죽는다 (2026-08-28 재현 확인).
+    env["PYTHONIOENCODING"] = "utf-8"
     env.pop("LEETKIT_ENABLE_EXPERIMENTAL_BROKERS", None)
     if flag:
         env["LEETKIT_ENABLE_EXPERIMENTAL_BROKERS"] = "1"
     p = subprocess.run([str(VENV / exe)] + args,
                        input=json.dumps(request) if request else None,
                        capture_output=True, text=True, encoding="utf-8",
+                       # 깨진 바이트를 조용히 넘기지 않는다. 대체 문자가
+                       # 나오면 아래에서 검증을 실패시킨다 - 증거가
+                       # 읽히지 않는 채로 통과하면 안 된다.
+                       errors="replace",
                        env=env)
+    if "�" in (p.stdout or "") or "�" in (p.stderr or ""):
+        _mojibake.append(" ".join([exe] + args))
     return p
 
 
@@ -114,5 +153,8 @@ check("manager selftest 통과", p.returncode == 0,
       (p.stdout + p.stderr).strip()[-120:])
 
 print()
+if _mojibake:
+    print("DECODE 실패:", len(_mojibake), _mojibake[:3])
+    fails.append("child-output-decode")
 print("FAILURES:", len(fails), fails)
 sys.exit(1 if fails else 0)

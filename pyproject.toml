@@ -88,4 +88,11 @@ exclude = [
     "README.en.md",
     "install.ps1",
     "install.sh",
+    # 고객 배포물에는 내부 자료를 넣지 않는다 (2026-08-28 rc1 검수).
+    # 설계·구현 계획서, UAT 원본 JSON, 릴리스 증거, 내부 실행기가
+    # docs/ 아래에 있고 고객이 쓸 일이 없다.
+    "docs/",
+    ".playwright-mcp/",
+    "*.png",
+    "*.gif",
 ]
