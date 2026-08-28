@@ -18,6 +18,9 @@ import sys
 from pathlib import Path
 
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
+# argparse 의 안내·오류는 stderr 로 나간다. 여기를 감싸지 않으면
+# 코드페이지 949 콘솔에서 한국어 안내가 깨져 나온다.
+sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8")
 
 
 def _resolve_paths() -> "tuple[Path, str]":
@@ -43,6 +46,7 @@ def _resolve_paths() -> "tuple[Path, str]":
 
 VENV, UAT = _resolve_paths()
 fails = []
+_mojibake: list = []
 
 
 def run_py(code, home, flag=False):
@@ -53,10 +57,13 @@ def run_py(code, home, flag=False):
     env.pop("LEETKIT_ENABLE_EXPERIMENTAL_BROKERS", None)
     if flag:
         env["LEETKIT_ENABLE_EXPERIMENTAL_BROKERS"] = "1"
-    return subprocess.run([str(VENV / "python.exe"), "-c", code],
+    done = subprocess.run([str(VENV / "python.exe"), "-c", code],
                           capture_output=True, text=True,
                           encoding="utf-8", errors="replace",
                           env=env)
+    if "�" in (done.stdout or "") or "�" in (done.stderr or ""):
+        _mojibake.append(code[:40])
+    return done
 
 
 def only(provider: str, tmp: Path) -> Path:
@@ -136,5 +143,8 @@ with tempfile.TemporaryDirectory() as td:
                   ok, json.dumps(got, ensure_ascii=False))
 
 print()
+if _mojibake:
+    print("DECODE 실패:", len(_mojibake))
+    fails.append("child-output-decode")
 print("FAILURES:", len(fails), fails)
 sys.exit(1 if fails else 0)

@@ -16,6 +16,9 @@ import sys
 from pathlib import Path
 
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
+# argparse 의 안내·오류는 stderr 로 나간다. 여기를 감싸지 않으면
+# 코드페이지 949 콘솔에서 한국어 안내가 깨져 나온다.
+sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8")
 
 
 def _resolve_paths() -> "tuple[Path, str]":
@@ -41,6 +44,8 @@ def _resolve_paths() -> "tuple[Path, str]":
 
 VENV, UAT = _resolve_paths()
 fails = []
+# 자식 출력이 깨진 채로 검증을 통과시키지 않기 위한 목록
+_mojibake: list = []
 
 
 def run(exe, args, request=None, flag=False, home=UAT):
@@ -56,8 +61,13 @@ def run(exe, args, request=None, flag=False, home=UAT):
     p = subprocess.run([str(VENV / exe)] + args,
                        input=json.dumps(request) if request else None,
                        capture_output=True, text=True, encoding="utf-8",
+                       # 깨진 바이트를 조용히 넘기지 않는다. 대체 문자가
+                       # 나오면 아래에서 검증을 실패시킨다 - 증거가
+                       # 읽히지 않는 채로 통과하면 안 된다.
                        errors="replace",
                        env=env)
+    if "�" in (p.stdout or "") or "�" in (p.stderr or ""):
+        _mojibake.append(" ".join([exe] + args))
     return p
 
 
@@ -143,5 +153,8 @@ check("manager selftest 통과", p.returncode == 0,
       (p.stdout + p.stderr).strip()[-120:])
 
 print()
+if _mojibake:
+    print("DECODE 실패:", len(_mojibake), _mojibake[:3])
+    fails.append("child-output-decode")
 print("FAILURES:", len(fails), fails)
 sys.exit(1 if fails else 0)
