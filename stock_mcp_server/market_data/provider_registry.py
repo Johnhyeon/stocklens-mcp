@@ -117,6 +117,10 @@ _KIWOOM = ProviderDescriptor(
         "/oauth2/token",
         "/api/dostk/chart",
         "/api/us/chart",
+        # 상세 수급 (1.1). 2026-08-28 실측으로 확정한 경로만 올린다.
+        # 계좌·주문·잔고 계열 경로는 어떤 이유로도 추가하지 않는다.
+        "/api/dostk/stkinfo",
+        "/api/dostk/mrkcond",
     ),
     credential_schema=(
         CredentialField(name="app_key", label="앱 키"),
@@ -134,6 +138,11 @@ _KIWOOM = ProviderDescriptor(
         EndpointSpec("kr_chart", "POST", "/api/dostk/chart"),
         # 공식 스펙(usa06011): 미국주식 분 차트. POST /api/us/chart
         EndpointSpec("us_chart", "POST", "/api/us/chart"),
+        # 상세 수급 (1.1, 2026-08-28 실측):
+        # ka10059 종목별 투자자·기관별 일별 -> /api/dostk/stkinfo
+        # ka10063 장중 투자자별 / ka10066 장마감 투자자별 -> /api/dostk/mrkcond
+        EndpointSpec("kr_investor_daily", "POST", "/api/dostk/stkinfo"),
+        EndpointSpec("kr_investor_market", "POST", "/api/dostk/mrkcond"),
     ),
 )
 
