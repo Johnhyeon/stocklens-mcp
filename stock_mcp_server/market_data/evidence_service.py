@@ -24,6 +24,7 @@ from stock_mcp_server.market_data.evidence_models import (
     DEFAULT_MEASURE,
     UNIT_BY_MEASURE,
     InvestorFlowDataset,
+    InvestorFlowRow,
     PressureBlock,
 )
 from stock_mcp_server.market_data.evidence_router import (
@@ -131,6 +132,63 @@ class PressureResult:
     error_code: str | None
 
 
+def _dataset_to_cache(dataset: InvestorFlowDataset) -> dict:
+    """캐시에 담을 모양. 허용 목록 밖은 캐시가 다시 한 번 버린다."""
+    return {
+        "rows": [{
+            "date": row.date.isoformat(),
+            "data_state": row.data_state,
+            "values": dict(row.values),
+            "unsettled": list(row.unsettled),
+            "raw_categories": dict(row.raw_categories),
+            "close": str(row.close) if row.close is not None else None,
+            "volume": row.volume,
+            "balance_ok": row.balance_ok,
+            "principal_sum": row.principal_sum,
+        } for row in dataset.rows],
+        "coverage": dict(dataset.coverage),
+        "measure": dataset.measure,
+        "unit": dataset.unit,
+        "market": dataset.market,
+        "data_state": dataset.data_state,
+        "source_endpoint": dataset.source_endpoint,
+        "warnings": list(dataset.warnings),
+    }
+
+
+def _dataset_from_cache(payload: dict, symbol: str, provider: str,
+                        profile: str, measure: str) -> InvestorFlowDataset:
+    from decimal import Decimal
+
+    rows = []
+    for raw in payload.get("rows") or []:
+        close = raw.get("close")
+        rows.append(InvestorFlowRow(
+            date=date.fromisoformat(raw["date"]),
+            close=Decimal(close) if close is not None else None,
+            volume=raw.get("volume"),
+            values=dict(raw.get("values") or {}),
+            unsettled=tuple(raw.get("unsettled") or ()),
+            # 캐시에는 확정 행만 담긴다. 상태를 다시 만들지 않고
+            # 저장된 값을 그대로 쓴다.
+            data_state=raw.get("data_state", "final"),
+            balance_ok=bool(raw.get("balance_ok")),
+            principal_sum=raw.get("principal_sum"),
+            raw_categories=dict(raw.get("raw_categories") or {}),
+        ))
+    coverage = dict(payload.get("coverage") or {})
+    coverage["from_cache"] = True
+    return InvestorFlowDataset(
+        symbol=symbol, provider=provider, profile=profile,
+        market=payload.get("market", MARKET), rows=tuple(rows),
+        data_state=payload.get("data_state", "final"),
+        coverage=coverage,
+        warnings=tuple(payload.get("warnings") or ()),
+        measure=payload.get("measure", measure),
+        unit=payload.get("unit", UNIT_BY_MEASURE.get(measure, "shares")),
+        source_endpoint=payload.get("source_endpoint", ""))
+
+
 def _unique(codes) -> list[str]:
     """입력 순서를 지키면서 중복만 접는다.
 
@@ -213,12 +271,14 @@ def _flow_availability(adapter) -> tuple[list, list]:
 class EvidenceService:
     def __init__(self, runtime=None, *, base_date: date | None = None,
                  public_providers: "tuple[str, ...] | None" = None,
-                 release_override: bool = False) -> None:
+                 release_override: bool = False, cache=None) -> None:
         self._runtime = runtime
         self._base_date = base_date
         self._public = public_providers
         # 테스트에서만 쓴다. 운영 경로에서 출시 게이트를 우회하지 않는다.
         self._release_override = release_override
+        # None 이면 캐시 없이 동작한다. 기존 호출부를 깨지 않는다.
+        self._cache = cache
 
     # -- 기준일 -----------------------------------------------------------
     def _resolve_base_date(self, given: date | None) -> date:
@@ -271,12 +331,20 @@ class EvidenceService:
             provider = resolution.selected_provider
             adapter = self._adapter(runtime, snapshot, provider)
             before = snapshot.provider_generation(provider)
-            dataset = await adapter.fetch_investor_flow(
-                code, base_date=self._resolve_base_date(base_date),
-                measure=measure, row_limit=max(1, min(days, 120)))
-            assert_same_generation(
-                provider, before,
-                runtime.snapshot().provider_generation(provider))
+            row_limit = max(1, min(days, 120))
+            cached = self._cached_flow(provider, adapter, code, measure,
+                                       before)
+            if cached is not None:
+                dataset = cached
+            else:
+                dataset = await adapter.fetch_investor_flow(
+                    code, base_date=self._resolve_base_date(base_date),
+                    measure=measure, row_limit=row_limit)
+                assert_same_generation(
+                    provider, before,
+                    runtime.snapshot().provider_generation(provider))
+                self._store_flow(provider, adapter, code, measure, before,
+                                 dataset)
         except EvidenceRouterError as exc:
             return _error_result(exc, FLOW_CAPABILITIES, measure)
 
@@ -290,6 +358,53 @@ class EvidenceService:
             records=(dataset,), coverage=dict(dataset.coverage),
             warnings=tuple(dataset.warnings), error_code=None,
             measure=dataset.measure, unit=dataset.unit)
+
+    # -- 캐시 -------------------------------------------------------------
+    def _flow_key(self, provider: str, profile: str, code: str,
+                  measure: str):
+        if self._cache is None:
+            return None
+        from stock_mcp_server.market_data.evidence_cache import (
+            EVIDENCE_SCHEMA_VERSION,
+        )
+
+        try:
+            return self._cache.key(
+                provider=provider, profile=profile,
+                schema_version=EVIDENCE_SCHEMA_VERSION,
+                capability="kr.investor_flow.daily", symbol=code,
+                # measure 를 섞으면 수량과 금액이 같은 칸에서 서로를
+                # 덮는다. 실측상 같은 항목이 3.7배 차이난다.
+                variant=measure)
+        except ValueError:
+            return None
+
+    def _cached_flow(self, provider, adapter, code, measure, generation):
+        key = self._flow_key(provider, adapter.profile, code, measure)
+        if key is None:
+            return None
+        try:
+            got = self._cache.get(key, connected=True, generation=generation)
+        except Exception:  # noqa: BLE001  캐시 실패가 조회를 막지 않는다
+            return None
+        if not got:
+            return None
+        return _dataset_from_cache(got["payload"], code, provider,
+                                   adapter.profile, measure)
+
+    def _store_flow(self, provider, adapter, code, measure, generation,
+                    dataset) -> None:
+        key = self._flow_key(provider, adapter.profile, code, measure)
+        if key is None:
+            return
+        final = [r for r in dataset.rows if r.data_state == "final"]
+        try:
+            self._cache.put(
+                key, _dataset_to_cache(dataset), generation=generation,
+                final_through=(max(r.date for r in final).isoformat()
+                               if final else None))
+        except Exception:  # noqa: BLE001
+            pass
 
     async def investor_flow_batch(self, *, codes, days: int = 20,
                                   measure: str = DEFAULT_MEASURE,

@@ -387,8 +387,28 @@ def handle_request(
                 resp["cache_error"] = type(exc).__name__
                 resp["status"], _ = _safe_status(service, provider)
                 return resp
+            # 증거 캐시는 분봉 캐시와 **따로** 지우고 따로 보고한다.
+            # 하나가 실패했는데 둘 다 지웠다고 말하면 Manager 의
+            # '완전 정리'가 거짓이 된다.
+            from stock_mcp_server.market_data.evidence_cache import (
+                EvidenceCache,
+            )
+            try:
+                EvidenceCache(home=service.home).remove_provider(provider)
+            except Exception as exc:  # noqa: BLE001
+                resp = _error(
+                    "evidence_cache_cleanup_failed",
+                    "자격 증명과 분봉 캐시는 삭제됐지만 상세 수급 캐시 "
+                    "삭제에 실패했습니다. 다시 시도해주세요.")
+                resp["credentials_removed"] = True
+                resp["cache_removed"] = True
+                resp["evidence_cache_removed"] = False
+                resp["cache_error"] = type(exc).__name__
+                resp["status"], _ = _safe_status(service, provider)
+                return resp
             return _ok(action, service, provider,
-                       extra={"cache_removed": True})
+                       extra={"cache_removed": True,
+                              "evidence_cache_removed": True})
 
         if action == "set_data_source_mode":
             mode = request.get("mode")

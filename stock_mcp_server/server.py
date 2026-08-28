@@ -8667,9 +8667,16 @@ def _public_broker_ids() -> tuple[str, ...]:
 
 
 def _evidence_service():
+    from stock_mcp_server.market_data.evidence_cache import EvidenceCache
     from stock_mcp_server.market_data.evidence_service import EvidenceService
+
+    try:
+        cache = EvidenceCache(home=_PROVIDER_RUNTIME.home)
+    except Exception:  # noqa: BLE001  캐시를 못 만들어도 조회는 된다
+        cache = None
     return EvidenceService(runtime=_PROVIDER_RUNTIME,
-                           public_providers=_public_broker_ids())
+                           public_providers=_public_broker_ids(),
+                           cache=cache)
 
 
 def _flow_row_json(row) -> dict:

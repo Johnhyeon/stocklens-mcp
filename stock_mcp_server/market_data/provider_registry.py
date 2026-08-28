@@ -162,9 +162,12 @@ _KIWOOM = ProviderDescriptor(
         EndpointSpec("us_chart", "POST", "/api/us/chart"),
         # 상세 수급 (1.1, 2026-08-28 실측):
         # ka10059 종목별 투자자·기관별 일별 -> /api/dostk/stkinfo
-        # ka10063 장중 투자자별 / ka10066 장마감 투자자별 -> /api/dostk/mrkcond
+        #
+        # 시장 단위 투자자 수급 endpoint 는 등록하지 않는다. ka10063·
+        # ka10066 은 이름과 달리 시장 집계가 아니라 종목별 행(stk_cd)을
+        # 돌려주고, mrkt_tp 를 바꿔도 결과가 같다 (2026-08-28 실측).
+        # 상위 100종목을 더해 '시장 전체'라고 부를 수 없다.
         EndpointSpec("kr_investor_daily", "POST", "/api/dostk/stkinfo"),
-        EndpointSpec("kr_investor_market", "POST", "/api/dostk/mrkcond"),
         # 수급 압력 (1.1, 2026-08-28 실측):
         # ka90013 프로그램매매(종목별) / ka10014 공매도추이 /
         # ka10013 신용매매동향 / ka20068 대차거래추이 /
