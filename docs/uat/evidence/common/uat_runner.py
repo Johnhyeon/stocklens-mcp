@@ -483,13 +483,17 @@ def _primary_switch_leg(provider):
                 "ok": False, "error": type(exc).__name__}
 
 
-def _kis_cross_check(market, symbol, venue, provider_direct_ds):
+def _kis_cross_check(market, symbol, venue, provider_direct_ds,
+                     provider_fetched_at=None):
     """실사용 홈 자격 증명의 KIS 를 기준으로 같은 날·종목 1m 을 직접
     받아와 raw-vs-raw 로 대조한다 (전 종목). 서버 리샘플을 거치지 않은
     어댑터 원본끼리 비교해야 라벨 규칙 차이가 끼어들지 않는다.
 
     양쪽에만 있는 타임스탬프는 정확히 기록하고, KR 은 어떤 비대칭도
-    실패다 (정당한 예외가 발견되면 규칙으로 고정한 뒤에만 허용).
+    실패다. 고정된 예외 규칙 하나(2026-08-28 장중 실측으로 확정):
+    provider 조회 시각에 아직 형성 중이던 분(end_at > 조회 시각)은
+    두 조회 사이 몇 초의 시차 동안 스냅샷이 달라지는 것이 당연하므로
+    비교에서 제외하고, 제외한 분을 정확히 기록한다.
     """
     if not provider_direct_ds or not provider_direct_ds.bars:
         return None
@@ -499,10 +503,19 @@ def _kis_cross_check(market, symbol, venue, provider_direct_ds):
         home=Path.home() / ".stocklens")
     if kis_ds is None:
         return {"available": False, "error": err}
+
+    def _completed(bar) -> bool:
+        if provider_fetched_at is None:
+            return True
+        return bar.end_at <= provider_fetched_at
+
+    forming_excluded = sorted(
+        b.start_at.isoformat() for b in provider_direct_ds.bars
+        if b.start_at.date() == target_day and not _completed(b))
     kis = {b.start_at.isoformat(): b for b in kis_ds.bars
-           if b.start_at.date() == target_day}
+           if b.start_at.date() == target_day and _completed(b)}
     mine = {b.start_at.isoformat(): b for b in provider_direct_ds.bars
-            if b.start_at.date() == target_day}
+            if b.start_at.date() == target_day and _completed(b)}
     if not kis:
         return {"available": False, "error": "kis_empty"}
     common = sorted(set(kis) & set(mine))
@@ -527,6 +540,7 @@ def _kis_cross_check(market, symbol, venue, provider_direct_ds):
     return {
         "available": True,
         "kis_rows": len(kis), "provider_rows": len(mine),
+        "forming_excluded": forming_excluded,
         "common": len(common),
         "only_kis": len(only_kis),
         "only_provider": len(only_provider),
@@ -617,7 +631,10 @@ def _run_inner(provider: str, market: str, out_dir: Path) -> int:
         # 직접 어댑터 raw 조회: 페이지네이션 증거 + KIS 교차 대조의
         # provider 쪽 원본. 서버 캐시·리샘플을 거치지 않는다.
         direct_ds = None
+        direct_fetched_at = None
         if base_1m and base_1m.bars:
+            direct_fetched_at = dt.datetime.now(
+                base_1m.bars[-1].start_at.tzinfo)
             direct_ds, direct_err = _direct_fetch_1m(
                 provider, market, symbol, venue,
                 base_1m.bars[-1].start_at.date())
@@ -642,21 +659,33 @@ def _run_inner(provider: str, market: str, out_dir: Path) -> int:
                 record["pagination"] = {"error": direct_err}
                 failures += 1
 
-        # 완료 거래일이면 캐시 2회차 leg (KR 만 일 단위 캐시 대상)
+        # 완료 거래일이면 캐시 2회차 leg (KR 만 일 단위 캐시 대상).
+        # 진행 중인 거래일은 제품이 설계상 캐시하지 않는다 (캐시 오염
+        # 방지 - 미완성 하루를 완전한 하루로 재사용하면 안 된다).
+        # 그 동작을 실패로 세지 않고 skip 으로 기록한다. 완료일 캐시
+        # 증명은 장마감 실행 증거가 담당한다.
         if market == "KR" and base_1m and base_1m.bars:
-            try:
-                record["cache_second_read"] = _cache_second_read_leg(
-                    provider, market, symbol, venue,
-                    base_1m.bars[-1].start_at.date())
-                csr = record["cache_second_read"]
-                if not csr.get("cache_hit") or csr.get("provider_calls"):
-                    failures += 1
-            except Exception as exc:  # noqa: BLE001
+            base_day = base_1m.bars[-1].start_at.date()
+            if not server._trading_day_completed(
+                    market, base_day,
+                    dt.datetime.now(base_1m.bars[-1].start_at.tzinfo)):
                 record["cache_second_read"] = {
-                    "error": type(exc).__name__}
-                failures += 1
+                    "skipped": "진행 중 거래일 - 설계상 캐시 금지"}
+            else:
+                try:
+                    record["cache_second_read"] = _cache_second_read_leg(
+                        provider, market, symbol, venue, base_day)
+                    csr = record["cache_second_read"]
+                    if not csr.get("cache_hit") or \
+                            csr.get("provider_calls"):
+                        failures += 1
+                except Exception as exc:  # noqa: BLE001
+                    record["cache_second_read"] = {
+                        "error": type(exc).__name__}
+                    failures += 1
         if provider != "kis":
-            cross = _kis_cross_check(market, symbol, venue, direct_ds)
+            cross = _kis_cross_check(market, symbol, venue, direct_ds,
+                                     provider_fetched_at=direct_fetched_at)
             record["kis_cross_check"] = cross
             if cross and cross.get("available"):
                 # KR 은 KRX 단일 기준: 타임스탬프 집합·OHLC·거래량이

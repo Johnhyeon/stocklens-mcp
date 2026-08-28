@@ -1,0 +1,1774 @@
+{
+ "summary": {
+  "provider": "kiwoom",
+  "market": "KR",
+  "ran_at": "2026-08-28T09:41:36.764467+09:00",
+  "release_gate_opened_for_verification": true,
+  "auto_route": {
+   "gate_preview": true,
+   "selected_provider": "kiwoom",
+   "primary_provider": "kiwoom",
+   "selection_reason": "broker_connected_and_intraday_supported",
+   "rows": 200,
+   "provider_matches": true
+  },
+  "error_classification": {
+   "bad_symbol": "entity_not_found",
+   "bad_key_auth": "credential_invalid"
+  },
+  "primary_switch": {
+   "before": "kiwoom",
+   "via": "toss",
+   "steps": [
+    "toss",
+    "kiwoom"
+   ],
+   "ok": true
+  },
+  "pagination_continuation": {
+   "market": "KR",
+   "page1_rows": 900,
+   "page2_rows": 900,
+   "cont_yn": "Y",
+   "cursor_progressed": true,
+   "ok": true
+  },
+  "failures": 16
+ },
+ "symbols": [
+  {
+   "symbol": "005930",
+   "venue": null,
+   "trading_date": "latest",
+   "intervals": {
+    "1m": {
+     "rows": 500,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 1,
+     "warnings": [],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 500,
+     "first": "2026-08-26T14:01:00+09:00",
+     "last": "2026-08-28T09:38:00+09:00"
+    },
+    "5m": {
+     "rows": 200,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 1,
+     "warnings": [],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 100,
+     "first": "2026-08-25T12:10:00+09:00",
+     "last": "2026-08-28T09:30:00+09:00"
+    },
+    "15m": {
+     "rows": 200,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 1,
+     "warnings": [],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 33,
+     "first": "2026-08-18T11:30:00+09:00",
+     "last": "2026-08-28T09:15:00+09:00"
+    },
+    "60m": {
+     "rows": 63,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 1,
+     "warnings": [],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 8,
+     "first": "2026-08-14T09:00:00+09:00",
+     "last": "2026-08-27T15:00:00+09:00"
+    },
+    "120m": {
+     "rows": 36,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 1,
+     "warnings": [],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 5,
+     "first": "2026-08-14T09:00:00+09:00",
+     "last": "2026-08-27T15:00:00+09:00"
+    },
+    "240m": {
+     "rows": 18,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 1,
+     "warnings": [],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 2,
+     "first": "2026-08-14T09:00:00+09:00",
+     "last": "2026-08-27T13:00:00+09:00"
+    }
+   },
+   "pagination": {
+    "pages": 1,
+    "rows": 40,
+    "complete": true
+   },
+   "cache_second_read": {
+    "cache_hit": false,
+    "provider_calls": 1,
+    "rows": 50
+   },
+   "kis_cross_check": {
+    "available": true,
+    "kis_rows": 40,
+    "provider_rows": 40,
+    "common": 40,
+    "only_kis": 0,
+    "only_provider": 0,
+    "only_kis_timestamps": [],
+    "only_provider_timestamps": [],
+    "ohlc_diff_minutes": 0,
+    "ohlc_diff_samples": [],
+    "volume_ratio_median": 1.0
+   }
+  },
+  {
+   "symbol": "000660",
+   "venue": null,
+   "trading_date": "latest",
+   "intervals": {
+    "1m": {
+     "rows": 500,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 1,
+     "warnings": [],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 500,
+     "first": "2026-08-26T14:01:00+09:00",
+     "last": "2026-08-28T09:38:00+09:00"
+    },
+    "5m": {
+     "rows": 200,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 1,
+     "warnings": [],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 100,
+     "first": "2026-08-25T12:10:00+09:00",
+     "last": "2026-08-28T09:30:00+09:00"
+    },
+    "15m": {
+     "rows": 200,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 1,
+     "warnings": [],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 33,
+     "first": "2026-08-18T11:30:00+09:00",
+     "last": "2026-08-28T09:15:00+09:00"
+    },
+    "60m": {
+     "rows": 63,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 1,
+     "warnings": [],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 8,
+     "first": "2026-08-14T09:00:00+09:00",
+     "last": "2026-08-27T15:00:00+09:00"
+    },
+    "120m": {
+     "rows": 36,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 1,
+     "warnings": [],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 5,
+     "first": "2026-08-14T09:00:00+09:00",
+     "last": "2026-08-27T15:00:00+09:00"
+    },
+    "240m": {
+     "rows": 18,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 1,
+     "warnings": [],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 2,
+     "first": "2026-08-14T09:00:00+09:00",
+     "last": "2026-08-27T13:00:00+09:00"
+    }
+   },
+   "pagination": {
+    "pages": 1,
+    "rows": 40,
+    "complete": true
+   },
+   "cache_second_read": {
+    "cache_hit": false,
+    "provider_calls": 1,
+    "rows": 50
+   },
+   "kis_cross_check": {
+    "available": true,
+    "kis_rows": 40,
+    "provider_rows": 40,
+    "common": 40,
+    "only_kis": 0,
+    "only_provider": 0,
+    "only_kis_timestamps": [],
+    "only_provider_timestamps": [],
+    "ohlc_diff_minutes": 1,
+    "ohlc_diff_samples": [
+     "2026-08-28T09:39:00+09:00 close: kis 1710000 != 1711000"
+    ],
+    "volume_ratio_median": 1.0
+   }
+  },
+  {
+   "symbol": "373220",
+   "venue": null,
+   "trading_date": "latest",
+   "intervals": {
+    "1m": {
+     "rows": 500,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 1,
+     "warnings": [],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 500,
+     "first": "2026-08-26T14:01:00+09:00",
+     "last": "2026-08-28T09:38:00+09:00"
+    },
+    "5m": {
+     "rows": 200,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 1,
+     "warnings": [],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 100,
+     "first": "2026-08-25T12:10:00+09:00",
+     "last": "2026-08-28T09:30:00+09:00"
+    },
+    "15m": {
+     "rows": 200,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 1,
+     "warnings": [],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 33,
+     "first": "2026-08-18T11:30:00+09:00",
+     "last": "2026-08-28T09:15:00+09:00"
+    },
+    "60m": {
+     "rows": 63,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 1,
+     "warnings": [],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 8,
+     "first": "2026-08-14T09:00:00+09:00",
+     "last": "2026-08-27T15:00:00+09:00"
+    },
+    "120m": {
+     "rows": 36,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 1,
+     "warnings": [],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 5,
+     "first": "2026-08-14T09:00:00+09:00",
+     "last": "2026-08-27T15:00:00+09:00"
+    },
+    "240m": {
+     "rows": 18,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 1,
+     "warnings": [],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 2,
+     "first": "2026-08-14T09:00:00+09:00",
+     "last": "2026-08-27T13:00:00+09:00"
+    }
+   },
+   "pagination": {
+    "pages": 1,
+    "rows": 40,
+    "complete": true
+   },
+   "cache_second_read": {
+    "cache_hit": false,
+    "provider_calls": 1,
+    "rows": 50
+   },
+   "kis_cross_check": {
+    "available": true,
+    "kis_rows": 40,
+    "provider_rows": 40,
+    "common": 40,
+    "only_kis": 0,
+    "only_provider": 0,
+    "only_kis_timestamps": [],
+    "only_provider_timestamps": [],
+    "ohlc_diff_minutes": 0,
+    "ohlc_diff_samples": [],
+    "volume_ratio_median": 1.0
+   }
+  },
+  {
+   "symbol": "035720",
+   "venue": null,
+   "trading_date": "latest",
+   "intervals": {
+    "1m": {
+     "rows": 500,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 1,
+     "warnings": [],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 500,
+     "first": "2026-08-26T14:01:00+09:00",
+     "last": "2026-08-28T09:38:00+09:00"
+    },
+    "5m": {
+     "rows": 200,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 1,
+     "warnings": [],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 100,
+     "first": "2026-08-25T12:10:00+09:00",
+     "last": "2026-08-28T09:30:00+09:00"
+    },
+    "15m": {
+     "rows": 200,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 1,
+     "warnings": [],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 33,
+     "first": "2026-08-18T11:15:00+09:00",
+     "last": "2026-08-28T09:15:00+09:00"
+    },
+    "60m": {
+     "rows": 63,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 1,
+     "warnings": [],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 8,
+     "first": "2026-08-14T09:00:00+09:00",
+     "last": "2026-08-27T15:00:00+09:00"
+    },
+    "120m": {
+     "rows": 36,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 1,
+     "warnings": [],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 5,
+     "first": "2026-08-14T09:00:00+09:00",
+     "last": "2026-08-27T15:00:00+09:00"
+    },
+    "240m": {
+     "rows": 18,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 1,
+     "warnings": [],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 2,
+     "first": "2026-08-14T09:00:00+09:00",
+     "last": "2026-08-27T13:00:00+09:00"
+    }
+   },
+   "pagination": {
+    "pages": 1,
+    "rows": 40,
+    "complete": true
+   },
+   "cache_second_read": {
+    "cache_hit": false,
+    "provider_calls": 1,
+    "rows": 50
+   },
+   "kis_cross_check": {
+    "available": true,
+    "kis_rows": 40,
+    "provider_rows": 40,
+    "common": 40,
+    "only_kis": 0,
+    "only_provider": 0,
+    "only_kis_timestamps": [],
+    "only_provider_timestamps": [],
+    "ohlc_diff_minutes": 0,
+    "ohlc_diff_samples": [],
+    "volume_ratio_median": 1.0
+   }
+  },
+  {
+   "symbol": "035420",
+   "venue": null,
+   "trading_date": "latest",
+   "intervals": {
+    "1m": {
+     "rows": 500,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 1,
+     "warnings": [],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 500,
+     "first": "2026-08-26T14:01:00+09:00",
+     "last": "2026-08-28T09:38:00+09:00"
+    },
+    "5m": {
+     "rows": 200,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 1,
+     "warnings": [],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 100,
+     "first": "2026-08-25T12:10:00+09:00",
+     "last": "2026-08-28T09:30:00+09:00"
+    },
+    "15m": {
+     "rows": 200,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 1,
+     "warnings": [],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 33,
+     "first": "2026-08-18T11:30:00+09:00",
+     "last": "2026-08-28T09:15:00+09:00"
+    },
+    "60m": {
+     "rows": 63,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 1,
+     "warnings": [],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 8,
+     "first": "2026-08-14T09:00:00+09:00",
+     "last": "2026-08-27T15:00:00+09:00"
+    },
+    "120m": {
+     "rows": 36,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 1,
+     "warnings": [],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 5,
+     "first": "2026-08-14T09:00:00+09:00",
+     "last": "2026-08-27T15:00:00+09:00"
+    },
+    "240m": {
+     "rows": 18,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 1,
+     "warnings": [],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 2,
+     "first": "2026-08-14T09:00:00+09:00",
+     "last": "2026-08-27T13:00:00+09:00"
+    }
+   },
+   "pagination": {
+    "pages": 1,
+    "rows": 40,
+    "complete": true
+   },
+   "cache_second_read": {
+    "cache_hit": false,
+    "provider_calls": 1,
+    "rows": 50
+   },
+   "kis_cross_check": {
+    "available": true,
+    "kis_rows": 40,
+    "provider_rows": 40,
+    "common": 40,
+    "only_kis": 0,
+    "only_provider": 0,
+    "only_kis_timestamps": [],
+    "only_provider_timestamps": [],
+    "ohlc_diff_minutes": 0,
+    "ohlc_diff_samples": [],
+    "volume_ratio_median": 1.0
+   }
+  },
+  {
+   "symbol": "051910",
+   "venue": null,
+   "trading_date": "latest",
+   "intervals": {
+    "1m": {
+     "rows": 500,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 1,
+     "warnings": [],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 500,
+     "first": "2026-08-26T14:01:00+09:00",
+     "last": "2026-08-28T09:38:00+09:00"
+    },
+    "5m": {
+     "rows": 200,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 1,
+     "warnings": [],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 100,
+     "first": "2026-08-25T12:15:00+09:00",
+     "last": "2026-08-28T09:35:00+09:00"
+    },
+    "15m": {
+     "rows": 200,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 1,
+     "warnings": [],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 33,
+     "first": "2026-08-18T11:30:00+09:00",
+     "last": "2026-08-28T09:15:00+09:00"
+    },
+    "60m": {
+     "rows": 63,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 1,
+     "warnings": [],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 8,
+     "first": "2026-08-14T09:00:00+09:00",
+     "last": "2026-08-27T15:00:00+09:00"
+    },
+    "120m": {
+     "rows": 36,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 1,
+     "warnings": [],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 5,
+     "first": "2026-08-14T09:00:00+09:00",
+     "last": "2026-08-27T15:00:00+09:00"
+    },
+    "240m": {
+     "rows": 18,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 1,
+     "warnings": [],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 2,
+     "first": "2026-08-14T09:00:00+09:00",
+     "last": "2026-08-27T13:00:00+09:00"
+    }
+   },
+   "pagination": {
+    "pages": 1,
+    "rows": 41,
+    "complete": true
+   },
+   "cache_second_read": {
+    "cache_hit": false,
+    "provider_calls": 1,
+    "rows": 50
+   },
+   "kis_cross_check": {
+    "available": true,
+    "kis_rows": 41,
+    "provider_rows": 41,
+    "common": 41,
+    "only_kis": 0,
+    "only_provider": 0,
+    "only_kis_timestamps": [],
+    "only_provider_timestamps": [],
+    "ohlc_diff_minutes": 0,
+    "ohlc_diff_samples": [],
+    "volume_ratio_median": 1.0
+   }
+  },
+  {
+   "symbol": "950140",
+   "venue": null,
+   "trading_date": "latest",
+   "intervals": {
+    "1m": {
+     "rows": 500,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 1,
+     "warnings": [],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 500,
+     "first": "2026-08-24T13:12:00+09:00",
+     "last": "2026-08-28T09:39:00+09:00"
+    },
+    "5m": {
+     "rows": 200,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 1,
+     "warnings": [],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 200,
+     "first": "2026-08-25T09:35:00+09:00",
+     "last": "2026-08-28T09:35:00+09:00"
+    },
+    "15m": {
+     "rows": 200,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 1,
+     "warnings": [],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 89,
+     "first": "2026-08-18T11:30:00+09:00",
+     "last": "2026-08-28T09:15:00+09:00"
+    },
+    "60m": {
+     "rows": 63,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 1,
+     "warnings": [],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 23,
+     "first": "2026-08-14T09:00:00+09:00",
+     "last": "2026-08-27T15:00:00+09:00"
+    },
+    "120m": {
+     "rows": 36,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 1,
+     "warnings": [],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 13,
+     "first": "2026-08-14T09:00:00+09:00",
+     "last": "2026-08-27T15:00:00+09:00"
+    },
+    "240m": {
+     "rows": 18,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 1,
+     "warnings": [],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 6,
+     "first": "2026-08-14T09:00:00+09:00",
+     "last": "2026-08-27T13:00:00+09:00"
+    }
+   },
+   "pagination": {
+    "pages": 1,
+    "rows": 10,
+    "complete": true
+   },
+   "cache_second_read": {
+    "cache_hit": false,
+    "provider_calls": 1,
+    "rows": 50
+   },
+   "kis_cross_check": {
+    "available": true,
+    "kis_rows": 10,
+    "provider_rows": 10,
+    "common": 10,
+    "only_kis": 0,
+    "only_provider": 0,
+    "only_kis_timestamps": [],
+    "only_provider_timestamps": [],
+    "ohlc_diff_minutes": 0,
+    "ohlc_diff_samples": [],
+    "volume_ratio_median": 1.0
+   }
+  },
+  {
+   "symbol": "043370",
+   "venue": null,
+   "trading_date": "latest",
+   "intervals": {
+    "1m": {
+     "rows": 500,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 1,
+     "warnings": [],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 500,
+     "first": "2026-08-25T09:39:00+09:00",
+     "last": "2026-08-28T09:37:00+09:00"
+    },
+    "5m": {
+     "rows": 200,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 1,
+     "warnings": [],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 183,
+     "first": "2026-08-24T14:35:00+09:00",
+     "last": "2026-08-28T09:35:00+09:00"
+    },
+    "15m": {
+     "rows": 200,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 1,
+     "warnings": [],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 74,
+     "first": "2026-08-18T10:45:00+09:00",
+     "last": "2026-08-28T09:15:00+09:00"
+    },
+    "60m": {
+     "rows": 63,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 1,
+     "warnings": [],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 20,
+     "first": "2026-08-14T09:00:00+09:00",
+     "last": "2026-08-27T15:00:00+09:00"
+    },
+    "120m": {
+     "rows": 36,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 1,
+     "warnings": [],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 11,
+     "first": "2026-08-14T09:00:00+09:00",
+     "last": "2026-08-27T15:00:00+09:00"
+    },
+    "240m": {
+     "rows": 18,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 1,
+     "warnings": [],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 5,
+     "first": "2026-08-14T09:00:00+09:00",
+     "last": "2026-08-27T13:00:00+09:00"
+    }
+   },
+   "pagination": {
+    "pages": 1,
+    "rows": 17,
+    "complete": true
+   },
+   "cache_second_read": {
+    "cache_hit": false,
+    "provider_calls": 1,
+    "rows": 50
+   },
+   "kis_cross_check": {
+    "available": true,
+    "kis_rows": 17,
+    "provider_rows": 17,
+    "common": 17,
+    "only_kis": 0,
+    "only_provider": 0,
+    "only_kis_timestamps": [],
+    "only_provider_timestamps": [],
+    "ohlc_diff_minutes": 0,
+    "ohlc_diff_samples": [],
+    "volume_ratio_median": 1.0
+   }
+  },
+  {
+   "symbol": "036560",
+   "venue": null,
+   "trading_date": "latest",
+   "intervals": {
+    "1m": {
+     "rows": 500,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 1,
+     "warnings": [],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 500,
+     "first": "2026-08-21T09:35:00+09:00",
+     "last": "2026-08-28T09:39:00+09:00"
+    },
+    "5m": {
+     "rows": 200,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 1,
+     "warnings": [],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 200,
+     "first": "2026-08-24T10:50:00+09:00",
+     "last": "2026-08-28T09:35:00+09:00"
+    },
+    "15m": {
+     "rows": 200,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 1,
+     "warnings": [],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 120,
+     "first": "2026-08-14T13:15:00+09:00",
+     "last": "2026-08-28T09:15:00+09:00"
+    },
+    "60m": {
+     "rows": 63,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 1,
+     "warnings": [],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 34,
+     "first": "2026-08-14T09:00:00+09:00",
+     "last": "2026-08-27T15:00:00+09:00"
+    },
+    "120m": {
+     "rows": 36,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 1,
+     "warnings": [],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 19,
+     "first": "2026-08-14T09:00:00+09:00",
+     "last": "2026-08-27T15:00:00+09:00"
+    },
+    "240m": {
+     "rows": 18,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 1,
+     "warnings": [],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 9,
+     "first": "2026-08-14T09:00:00+09:00",
+     "last": "2026-08-27T13:00:00+09:00"
+    }
+   },
+   "pagination": {
+    "pages": 1,
+    "rows": 19,
+    "complete": true
+   },
+   "cache_second_read": {
+    "cache_hit": false,
+    "provider_calls": 1,
+    "rows": 50
+   },
+   "kis_cross_check": {
+    "available": true,
+    "kis_rows": 19,
+    "provider_rows": 19,
+    "common": 19,
+    "only_kis": 0,
+    "only_provider": 0,
+    "only_kis_timestamps": [],
+    "only_provider_timestamps": [],
+    "ohlc_diff_minutes": 0,
+    "ohlc_diff_samples": [],
+    "volume_ratio_median": 1.0
+   }
+  },
+  {
+   "symbol": "069500",
+   "venue": null,
+   "trading_date": "latest",
+   "intervals": {
+    "1m": {
+     "rows": 500,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 1,
+     "warnings": [],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 500,
+     "first": "2026-08-26T14:02:00+09:00",
+     "last": "2026-08-28T09:39:00+09:00"
+    },
+    "5m": {
+     "rows": 200,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 1,
+     "warnings": [],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 101,
+     "first": "2026-08-25T12:15:00+09:00",
+     "last": "2026-08-28T09:35:00+09:00"
+    },
+    "15m": {
+     "rows": 200,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 1,
+     "warnings": [],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 33,
+     "first": "2026-08-18T11:30:00+09:00",
+     "last": "2026-08-28T09:15:00+09:00"
+    },
+    "60m": {
+     "rows": 63,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 1,
+     "warnings": [],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 8,
+     "first": "2026-08-14T09:00:00+09:00",
+     "last": "2026-08-27T15:00:00+09:00"
+    },
+    "120m": {
+     "rows": 36,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 1,
+     "warnings": [],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 5,
+     "first": "2026-08-14T09:00:00+09:00",
+     "last": "2026-08-27T15:00:00+09:00"
+    },
+    "240m": {
+     "rows": 18,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 1,
+     "warnings": [],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 2,
+     "first": "2026-08-14T09:00:00+09:00",
+     "last": "2026-08-27T13:00:00+09:00"
+    }
+   },
+   "pagination": {
+    "pages": 1,
+    "rows": 41,
+    "complete": true
+   },
+   "cache_second_read": {
+    "cache_hit": false,
+    "provider_calls": 1,
+    "rows": 50
+   },
+   "kis_cross_check": {
+    "available": true,
+    "kis_rows": 41,
+    "provider_rows": 41,
+    "common": 41,
+    "only_kis": 0,
+    "only_provider": 0,
+    "only_kis_timestamps": [],
+    "only_provider_timestamps": [],
+    "ohlc_diff_minutes": 0,
+    "ohlc_diff_samples": [],
+    "volume_ratio_median": 1.0
+   }
+  },
+  {
+   "symbol": "371460",
+   "venue": null,
+   "trading_date": "latest",
+   "intervals": {
+    "1m": {
+     "rows": 500,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 1,
+     "warnings": [],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 500,
+     "first": "2026-08-26T11:43:00+09:00",
+     "last": "2026-08-28T09:39:00+09:00"
+    },
+    "5m": {
+     "rows": 200,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 1,
+     "warnings": [],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 129,
+     "first": "2026-08-25T12:15:00+09:00",
+     "last": "2026-08-28T09:35:00+09:00"
+    },
+    "15m": {
+     "rows": 200,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 1,
+     "warnings": [],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 43,
+     "first": "2026-08-18T11:30:00+09:00",
+     "last": "2026-08-28T09:15:00+09:00"
+    },
+    "60m": {
+     "rows": 63,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 1,
+     "warnings": [],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 11,
+     "first": "2026-08-14T09:00:00+09:00",
+     "last": "2026-08-27T15:00:00+09:00"
+    },
+    "120m": {
+     "rows": 36,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 1,
+     "warnings": [],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 6,
+     "first": "2026-08-14T09:00:00+09:00",
+     "last": "2026-08-27T15:00:00+09:00"
+    },
+    "240m": {
+     "rows": 18,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 1,
+     "warnings": [],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 3,
+     "first": "2026-08-14T09:00:00+09:00",
+     "last": "2026-08-27T13:00:00+09:00"
+    }
+   },
+   "pagination": {
+    "pages": 1,
+    "rows": 38,
+    "complete": true
+   },
+   "cache_second_read": {
+    "cache_hit": false,
+    "provider_calls": 1,
+    "rows": 50
+   },
+   "kis_cross_check": {
+    "available": true,
+    "kis_rows": 38,
+    "provider_rows": 38,
+    "common": 38,
+    "only_kis": 0,
+    "only_provider": 0,
+    "only_kis_timestamps": [],
+    "only_provider_timestamps": [],
+    "ohlc_diff_minutes": 0,
+    "ohlc_diff_samples": [],
+    "volume_ratio_median": 1.0
+   }
+  },
+  {
+   "symbol": "305720",
+   "venue": null,
+   "trading_date": "latest",
+   "intervals": {
+    "1m": {
+     "rows": 500,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 1,
+     "warnings": [],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 500,
+     "first": "2026-08-26T14:02:00+09:00",
+     "last": "2026-08-28T09:39:00+09:00"
+    },
+    "5m": {
+     "rows": 200,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 1,
+     "warnings": [],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 101,
+     "first": "2026-08-25T12:15:00+09:00",
+     "last": "2026-08-28T09:35:00+09:00"
+    },
+    "15m": {
+     "rows": 200,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 1,
+     "warnings": [],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 33,
+     "first": "2026-08-18T11:30:00+09:00",
+     "last": "2026-08-28T09:15:00+09:00"
+    },
+    "60m": {
+     "rows": 63,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 1,
+     "warnings": [],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 8,
+     "first": "2026-08-14T09:00:00+09:00",
+     "last": "2026-08-27T15:00:00+09:00"
+    },
+    "120m": {
+     "rows": 36,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 1,
+     "warnings": [],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 5,
+     "first": "2026-08-14T09:00:00+09:00",
+     "last": "2026-08-27T15:00:00+09:00"
+    },
+    "240m": {
+     "rows": 18,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 1,
+     "warnings": [],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 2,
+     "first": "2026-08-14T09:00:00+09:00",
+     "last": "2026-08-27T13:00:00+09:00"
+    }
+   },
+   "pagination": {
+    "pages": 1,
+    "rows": 41,
+    "complete": true
+   },
+   "cache_second_read": {
+    "cache_hit": false,
+    "provider_calls": 1,
+    "rows": 50
+   },
+   "kis_cross_check": {
+    "available": true,
+    "kis_rows": 41,
+    "provider_rows": 41,
+    "common": 41,
+    "only_kis": 0,
+    "only_provider": 0,
+    "only_kis_timestamps": [],
+    "only_provider_timestamps": [],
+    "ohlc_diff_minutes": 0,
+    "ohlc_diff_samples": [],
+    "volume_ratio_median": 1.0
+   }
+  },
+  {
+   "symbol": "005935",
+   "venue": null,
+   "trading_date": "latest",
+   "intervals": {
+    "1m": {
+     "rows": 500,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 1,
+     "warnings": [],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 500,
+     "first": "2026-08-26T14:03:00+09:00",
+     "last": "2026-08-28T09:40:00+09:00"
+    },
+    "5m": {
+     "rows": 200,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 1,
+     "warnings": [],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 101,
+     "first": "2026-08-25T12:15:00+09:00",
+     "last": "2026-08-28T09:35:00+09:00"
+    },
+    "15m": {
+     "rows": 200,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 1,
+     "warnings": [],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 33,
+     "first": "2026-08-18T11:30:00+09:00",
+     "last": "2026-08-28T09:15:00+09:00"
+    },
+    "60m": {
+     "rows": 63,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 1,
+     "warnings": [],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 8,
+     "first": "2026-08-14T09:00:00+09:00",
+     "last": "2026-08-27T15:00:00+09:00"
+    },
+    "120m": {
+     "rows": 36,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 1,
+     "warnings": [],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 5,
+     "first": "2026-08-14T09:00:00+09:00",
+     "last": "2026-08-27T15:00:00+09:00"
+    },
+    "240m": {
+     "rows": 18,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 1,
+     "warnings": [],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 2,
+     "first": "2026-08-14T09:00:00+09:00",
+     "last": "2026-08-27T13:00:00+09:00"
+    }
+   },
+   "pagination": {
+    "pages": 1,
+    "rows": 42,
+    "complete": true
+   },
+   "cache_second_read": {
+    "cache_hit": false,
+    "provider_calls": 1,
+    "rows": 50
+   },
+   "kis_cross_check": {
+    "available": true,
+    "kis_rows": 42,
+    "provider_rows": 42,
+    "common": 42,
+    "only_kis": 0,
+    "only_provider": 0,
+    "only_kis_timestamps": [],
+    "only_provider_timestamps": [],
+    "ohlc_diff_minutes": 1,
+    "ohlc_diff_samples": [
+     "2026-08-28T09:41:00+09:00 close: kis 190150 != 190200"
+    ],
+    "volume_ratio_median": 1.0
+   }
+  },
+  {
+   "symbol": "003555",
+   "venue": null,
+   "trading_date": "latest",
+   "intervals": {
+    "1m": {
+     "rows": 500,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 1,
+     "warnings": [],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 500,
+     "first": "2026-08-24T15:07:00+09:00",
+     "last": "2026-08-28T09:38:00+09:00"
+    },
+    "5m": {
+     "rows": 200,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 1,
+     "warnings": [],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 199,
+     "first": "2026-08-25T10:20:00+09:00",
+     "last": "2026-08-28T09:35:00+09:00"
+    },
+    "15m": {
+     "rows": 200,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 1,
+     "warnings": [],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 81,
+     "first": "2026-08-18T11:00:00+09:00",
+     "last": "2026-08-28T09:15:00+09:00"
+    },
+    "60m": {
+     "rows": 63,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 1,
+     "warnings": [],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 21,
+     "first": "2026-08-14T09:00:00+09:00",
+     "last": "2026-08-27T15:00:00+09:00"
+    },
+    "120m": {
+     "rows": 36,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 1,
+     "warnings": [],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 12,
+     "first": "2026-08-14T09:00:00+09:00",
+     "last": "2026-08-27T15:00:00+09:00"
+    },
+    "240m": {
+     "rows": 18,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 1,
+     "warnings": [],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 6,
+     "first": "2026-08-14T09:00:00+09:00",
+     "last": "2026-08-27T13:00:00+09:00"
+    }
+   },
+   "pagination": {
+    "pages": 1,
+    "rows": 29,
+    "complete": true
+   },
+   "cache_second_read": {
+    "cache_hit": false,
+    "provider_calls": 1,
+    "rows": 50
+   },
+   "kis_cross_check": {
+    "available": true,
+    "kis_rows": 29,
+    "provider_rows": 29,
+    "common": 29,
+    "only_kis": 0,
+    "only_provider": 0,
+    "only_kis_timestamps": [],
+    "only_provider_timestamps": [],
+    "ohlc_diff_minutes": 0,
+    "ohlc_diff_samples": [],
+    "volume_ratio_median": 1.0
+   }
+  },
+  {
+   "symbol": "005930",
+   "venue": null,
+   "trading_date": "2026-08-21",
+   "intervals": {
+    "1m": {
+     "rows": 500,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": null,
+     "warnings": [],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 500,
+     "first": "2026-08-20T13:22:00+09:00",
+     "last": "2026-08-21T15:29:00+09:00"
+    },
+    "5m": {
+     "rows": 200,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": null,
+     "warnings": [],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 101,
+     "first": "2026-08-19T11:35:00+09:00",
+     "last": "2026-08-21T15:25:00+09:00"
+    },
+    "15m": {
+     "rows": 200,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": null,
+     "warnings": [],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 34,
+     "first": "2026-08-11T11:00:00+09:00",
+     "last": "2026-08-21T15:15:00+09:00"
+    },
+    "60m": {
+     "rows": 70,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": null,
+     "warnings": [],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 9,
+     "first": "2026-08-07T09:00:00+09:00",
+     "last": "2026-08-21T15:00:00+09:00"
+    },
+    "120m": {
+     "rows": 40,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": null,
+     "warnings": [],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 5,
+     "first": "2026-08-07T09:00:00+09:00",
+     "last": "2026-08-21T15:00:00+09:00"
+    },
+    "240m": {
+     "rows": 20,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": null,
+     "warnings": [],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 2,
+     "first": "2026-08-07T09:00:00+09:00",
+     "last": "2026-08-21T13:00:00+09:00"
+    }
+   },
+   "pagination": {
+    "pages": 1,
+    "rows": 381,
+    "complete": true
+   },
+   "cache_second_read": {
+    "cache_hit": true,
+    "provider_calls": 0,
+    "rows": 50
+   },
+   "kis_cross_check": {
+    "available": true,
+    "kis_rows": 381,
+    "provider_rows": 381,
+    "common": 381,
+    "only_kis": 0,
+    "only_provider": 0,
+    "only_kis_timestamps": [],
+    "only_provider_timestamps": [],
+    "ohlc_diff_minutes": 0,
+    "ohlc_diff_samples": [],
+    "volume_ratio_median": 1.0
+   }
+  },
+  {
+   "symbol": "005930",
+   "venue": null,
+   "trading_date": "2026-07-30",
+   "intervals": {
+    "1m": {
+     "rows": 500,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 1,
+     "warnings": [
+      "정규장 밖 행 1개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 500,
+     "first": "2026-07-29T13:22:00+09:00",
+     "last": "2026-07-30T15:29:00+09:00"
+    },
+    "5m": {
+     "rows": 200,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": null,
+     "warnings": [],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 101,
+     "first": "2026-07-28T11:10:00+09:00",
+     "last": "2026-07-30T15:25:00+09:00"
+    },
+    "15m": {
+     "rows": 200,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": null,
+     "warnings": [],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 34,
+     "first": "2026-07-21T10:30:00+09:00",
+     "last": "2026-07-30T15:15:00+09:00"
+    },
+    "60m": {
+     "rows": 63,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": null,
+     "warnings": [],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 9,
+     "first": "2026-07-20T09:00:00+09:00",
+     "last": "2026-07-30T15:00:00+09:00"
+    },
+    "120m": {
+     "rows": 36,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": null,
+     "warnings": [],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 5,
+     "first": "2026-07-20T09:00:00+09:00",
+     "last": "2026-07-30T15:00:00+09:00"
+    },
+    "240m": {
+     "rows": 18,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": null,
+     "warnings": [],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 2,
+     "first": "2026-07-20T09:00:00+09:00",
+     "last": "2026-07-30T13:00:00+09:00"
+    }
+   },
+   "pagination": {
+    "pages": 1,
+    "rows": 381,
+    "complete": true
+   },
+   "cache_second_read": {
+    "cache_hit": true,
+    "provider_calls": 0,
+    "rows": 50
+   },
+   "kis_cross_check": {
+    "available": true,
+    "kis_rows": 381,
+    "provider_rows": 381,
+    "common": 381,
+    "only_kis": 0,
+    "only_provider": 0,
+    "only_kis_timestamps": [],
+    "only_provider_timestamps": [],
+    "ohlc_diff_minutes": 0,
+    "ohlc_diff_samples": [],
+    "volume_ratio_median": 1.0
+   }
+  }
+ ]
+}
