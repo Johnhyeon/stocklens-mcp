@@ -14,7 +14,7 @@ from pathlib import Path
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
 VENV = Path(r"C:\Users\whdqj\AppData\Local\Temp\claude"
             r"\D--project-stocklens\1bbc70bb-4455-422e-8819-ab68fa1e67cb"
-            r"\scratchpad\rc1-clean\Scripts")
+            r"\scratchpad\rc1-clean2\Scripts")
 UAT = r"D:\project\stocklens\.uat-home-1.0"
 fails = []
 
@@ -22,12 +22,17 @@ fails = []
 def run(exe, args, request=None, flag=False, home=UAT):
     env = dict(os.environ)
     env["STOCKLENS_HOME"] = home
+    # 자식 출력을 UTF-8 로 읽으므로 자식도 UTF-8 로 쓰게 한다. 이게 없으면
+    # 코드페이지 949 환경에서 한국어 출력이 CP949 로 나와 여기서
+    # UnicodeDecodeError 로 죽는다 (2026-08-28 재현 확인).
+    env["PYTHONIOENCODING"] = "utf-8"
     env.pop("LEETKIT_ENABLE_EXPERIMENTAL_BROKERS", None)
     if flag:
         env["LEETKIT_ENABLE_EXPERIMENTAL_BROKERS"] = "1"
     p = subprocess.run([str(VENV / exe)] + args,
                        input=json.dumps(request) if request else None,
                        capture_output=True, text=True, encoding="utf-8",
+                       errors="replace",
                        env=env)
     return p
 
