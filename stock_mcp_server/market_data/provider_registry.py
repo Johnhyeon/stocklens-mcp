@@ -183,9 +183,11 @@ _RELEASE_VERIFIED: dict[tuple[str, str], bool] = {
     # docs/uat/evidence/kis/uat_kis_us_20260828.json)
     # SPY·IWM 은 EXCD=AMS, BRK.B 는 SYMB "BRK/B" (실측 표기)
     ("kis", "us_intraday"): True,
-    # 키움 KR: 독립 검산 러너 장중 패스 후 켠다 (장마감 증거는 확보,
-    # 리뷰 조건: 장중 실행과 짝)
-    ("kiwoom", "kr_intraday"): False,
+    # 키움 KR: strict 러너 2회 통과 - 장마감(2026-08-27, 16사례
+    # failures=0, KIS 교차 전종목 완전 일치) + 장중(2026-08-28 09:45,
+    # failures=0, 검산 11,154 버킷 0, KIS 교차 16/16, 형성 중 분 제외
+    # 규칙 고정). uat_kiwoom_kr_20260827.json / _20260828.json
+    ("kiwoom", "kr_intraday"): True,
     # 키움 US: strict 러너 15사례 failures=0, 검산 4,663 버킷 0,
     # 완결일 KIS 교차 391/391·OHLC diff 0·거래량 비율 1.0 (2026-08-28,
     # docs/uat/evidence/kiwoom/uat_kiwoom_us_20260828.json). 원인 규명

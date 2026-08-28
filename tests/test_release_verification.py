@@ -50,9 +50,10 @@ class ReleaseGateTableTests(unittest.TestCase):
         #  검산 9,690 버킷 불일치 0 - uat_kis_us_20260828.json)
         self.assertTrue(is_release_verified("kis", "kr_intraday"))
         self.assertTrue(is_release_verified("kis", "us_intraday"))
-        # 키움 KR 은 장중 러너 패스 전, 키움 US 는 2026-08-28 strict
-        # 러너 failures=0 + 완결일 KIS 교차 완전 일치로 검증 완료.
-        self.assertFalse(is_release_verified("kiwoom", "kr_intraday"))
+        # 키움 KR: 장마감+장중 strict 러너 2회 통과 (2026-08-27/28).
+        # 키움 US: 2026-08-28 strict 러너 failures=0 + 완결일 KIS 교차
+        # 완전 일치. 토스는 대표 결정으로 1.0 시세 계약 밖 (미지원).
+        self.assertTrue(is_release_verified("kiwoom", "kr_intraday"))
         self.assertTrue(is_release_verified("kiwoom", "us_intraday"))
         self.assertFalse(is_release_verified("toss", "kr_intraday"))
         self.assertFalse(is_release_verified("toss", "us_intraday"))
@@ -102,12 +103,15 @@ class RouterDistinctionTests(unittest.TestCase):
         self.assertIn("키나 연결 문제가 아닙니다", str(ctx.exception))
 
     def test_connected_endpoint_ok_but_unverified_is_verifying(self):
+        # 게이트가 닫혀 있으면서 endpoint 기록이 available 인 가상 상태
+        # (실제 토스 검증기는 unavailable 로 고정하지만, 상태 계산의
+        # verifying 분기는 계약으로 유지한다).
         from stock_mcp_server.market_data.router import RouterError
-        state = _v2_state("kiwoom")
-        caps = provider_capabilities_v2(state, "kiwoom")
+        state = _v2_state("toss")
+        caps = provider_capabilities_v2(state, "toss")
         self.assertEqual(caps["kr_intraday_state"], "verifying")
         with self.assertRaises(RouterError) as ctx:
-            self._resolve(caps, "kiwoom")
+            self._resolve(caps, "toss")
         self.assertEqual(ctx.exception.provider_status, "unsupported")
         self.assertIn("검증", str(ctx.exception))
         self.assertIn("키 문제가 아닙니다", str(ctx.exception))
@@ -121,13 +125,13 @@ class RouterDistinctionTests(unittest.TestCase):
 class RouterGatingTests(unittest.TestCase):
     def test_endpoint_available_alone_does_not_activate(self):
         # 연결 시험은 통과했지만(available) 출시 검증 전인 능력은
-        # 라우터에 False 로 보인다. (키움 KR 은 장중 러너 패스 전,
-        # 키움 US 는 게이트가 열려 True 다.)
-        state = _v2_state("kiwoom")
-        caps = provider_capabilities_v2(state, "kiwoom")
+        # 라우터에 False 로 보인다. (토스는 게이트가 닫혀 있는 유일한
+        # 공급자다 - 1.0 시세 계약 밖.)
+        state = _v2_state("toss")
+        caps = provider_capabilities_v2(state, "toss")
         self.assertTrue(caps["connected"])
         self.assertFalse(caps["kr_intraday"])
-        self.assertTrue(caps["us_intraday"])
+        self.assertFalse(caps["us_intraday"])
 
     def test_release_verified_capability_activates(self):
         state = _v2_state("kis")
@@ -136,15 +140,15 @@ class RouterGatingTests(unittest.TestCase):
         self.assertTrue(caps["kr_intraday"])  # 검증 완료
         self.assertTrue(caps["us_intraday"])  # 2026-08-27 본장 UAT 완료
         # 게이트가 닫힌 능력은 endpoint available 이어도 꺼져 있다.
-        kw = _v2_state("kiwoom")
-        self.assertFalse(provider_capabilities_v2(kw, "kiwoom")[
+        ts = _v2_state("toss")
+        self.assertFalse(provider_capabilities_v2(ts, "toss")[
             "kr_intraday"])
 
     def test_gate_flip_activates_without_state_change(self):
-        state = _v2_state("kiwoom")
+        state = _v2_state("toss")
         with patch.dict(provider_registry._RELEASE_VERIFIED, {
-                ("kiwoom", "kr_intraday"): True}):
-            caps = provider_capabilities_v2(state, "kiwoom")
+                ("toss", "kr_intraday"): True}):
+            caps = provider_capabilities_v2(state, "toss")
         self.assertTrue(caps["kr_intraday"])
 
     def test_endpoint_unavailable_stays_off_even_if_gate_open(self):
@@ -172,6 +176,9 @@ class FakeKeyring:
 
 class StatusExposureTests(unittest.TestCase):
     def setUp(self):
+        self._experimental = patch.dict(
+            "os.environ", {"LEETKIT_ENABLE_EXPERIMENTAL_BROKERS": "1"})
+        self._experimental.start()
         self._tmp = tempfile.TemporaryDirectory()
         self.home = Path(self._tmp.name)
         self.keyring = FakeKeyring()
@@ -180,6 +187,7 @@ class StatusExposureTests(unittest.TestCase):
 
     def tearDown(self):
         self._tmp.cleanup()
+        self._experimental.stop()
 
     def _connect(self, provider, profile="real"):
         from stock_mcp_server.market_data.provider_registry import registry
@@ -198,7 +206,7 @@ class StatusExposureTests(unittest.TestCase):
             "provider": "kiwoom"}, service=self.service)
         entry = resp["status"]["providers"]["kiwoom"]
         self.assertEqual(entry["release_verified"], {
-            "kr_intraday": False, "us_intraday": True})
+            "kr_intraday": True, "us_intraday": True})
         # 연결 시험 값(endpoint)은 그대로 available 로 남는다.
         self.assertEqual(
             resp["status"]["capability_results"]["real"]["kr_intraday"],

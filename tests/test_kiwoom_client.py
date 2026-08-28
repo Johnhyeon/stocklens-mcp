@@ -54,7 +54,9 @@ class Recorder:
         self.api_calls = 0
         self.token_response = None
         self.api_responses: list = []
-        self.token_expires_dt = "20260828083713"
+        # 실제 시계로 도는 테스트가 시한폭탄이 되지 않게 원미래로 둔다.
+        # (만료 동작 테스트는 가짜 시계와 함께 값을 직접 지정한다.)
+        self.token_expires_dt = "20991231235959"
 
     def handler(self, request: httpx.Request) -> httpx.Response:
         self.requests.append(request)
