@@ -1,0 +1,18 @@
+PASS 실행 파일 stocklens-broker.exe
+PASS 실행 파일 stocklens-doctor.exe
+PASS 실행 파일 stock-mcp-server.exe
+PASS 실행 파일 leetkit-manager.exe
+PASS 고객 모드 공급자 = kis,kiwoom  ['kis', 'kiwoom']
+PASS 개발자 모드 공급자에 toss 포함  ['kis', 'kiwoom', 'toss']
+PASS 고객 status 에 toss 없음  ['kis', 'kiwoom']
+PASS 고객 모드 toss status 차단
+PASS 게이트: KIS/키움 분봉 4개 열림
+PASS 게이트: 토스 분봉 닫힘
+PASS 게이트: 일봉 전부 닫힘
+PASS 고객 모드 source 목록에 toss 없음  auto,kis,kiwoom,naver,yahoo
+PASS doctor --json 동작  version=1.0.0rc1
+PASS doctor 버전 = 1.0.0rc1  1.0.0rc1
+PASS manager __version__ = 1.0.0rc1  1.0.0rc1
+PASS manager selftest 통과  selftest OK
+
+FAILURES: 0 []
