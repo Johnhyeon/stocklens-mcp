@@ -8723,6 +8723,7 @@ def _pressure_block_json(block) -> dict:
         # 같은 종류라도 공급자마다 모양이 다르다. 실측(2026-08-28)
         # 프로그램매매는 KIS 가 장중 시계열, 키움이 일별이다.
         "granularity": block.granularity,
+        "measure_units": dict(block.measure_units),
         "data_as_of": (block.data_as_of.isoformat()
                        if block.data_as_of else None),
         "data_completeness": block.data_completeness,
@@ -8731,6 +8732,8 @@ def _pressure_block_json(block) -> dict:
         "warnings": list(block.warnings),
         "rows": [{
             "date": r.date.isoformat(),
+            "observed_at": (r.observed_at.isoformat()
+                            if r.observed_at else None),
             "measures": {k: float(v) for k, v in r.measures.items()},
             "raw_fields": dict(r.raw_fields),
         } for r in block.rows],
@@ -8951,6 +8954,12 @@ async def get_supply_pressure(
     - `granularity` 를 확인한다. 프로그램매매는 한국투자증권이 **장중
       시계열**, 키움증권이 **일별**이다. 모양이 다른 두 숫자를 같은
       기준으로 비교하지 않는다.
+    - 각 값의 단위는 `measure_units` 를 따른다. 확인된 가격과 금액은
+      KRW, 수량은 shares, 비율은 percent 로 정규화된다. `unknown` 은
+      공급자 단위를 확인하지 못해 원값을 유지한 것이므로 환산을
+      추측하지 않는다.
+    - 장중 시계열의 실제 관측 시각은 행의 `observed_at` 을 읽는다.
+      `date` 만 보고 서로 다른 장중 시점을 같은 값으로 합치지 않는다.
     - **대차잔고는 공매도 실행이 아니다.** 대차는 빌린 주식의 잔고이고,
       공매도는 실제 매도 체결이다. 대차잔고 증가를 공매도로 옮겨 적지
       않는다.

@@ -178,7 +178,33 @@ class MeasureMappingTests(unittest.TestCase):
         # 부호 문자를 값의 일부로 읽으면 부호가 뒤집힌다.
         row = self.blocks["program_trading"].rows[0]
         self.assertEqual(row.raw_field("net_amount"), "prm_netprps_amt")
-        self.assertEqual(row.value("net_amount"), -557431)
+        self.assertEqual(row.value("net_amount"), -557431000000)
+
+    def test_direction_sign_is_not_returned_as_a_negative_price(self):
+        program = self.blocks["program_trading"].rows[0]
+        self.assertEqual(program.value("close"), 256500)
+        for kind in ("program_trading", "short_selling", "credit",
+                     "foreign_holding"):
+            for row in self.blocks[kind].rows:
+                close = row.value("close")
+                if close is not None:
+                    self.assertGreaterEqual(close, 0, kind)
+
+    def test_confirmed_money_scales_are_normalized_to_krw(self):
+        program = self.blocks["program_trading"]
+        short = self.blocks["short_selling"]
+        self.assertEqual(program.measure_units["sell_amount"], "KRW")
+        self.assertEqual(program.rows[0].value("sell_amount"), 1102042000000)
+        self.assertEqual(short.measure_units["short_value"], "KRW")
+        self.assertEqual(short.rows[0].value("short_value"), 243894906000)
+
+    def test_unconfirmed_money_scales_are_not_guessed(self):
+        credit = self.blocks["credit"]
+        lending = self.blocks["securities_lending"]
+        self.assertEqual(credit.measure_units["balance_amount"], "unknown")
+        self.assertEqual(lending.measure_units["balance_amount"], "unknown")
+        self.assertIn("단위", " ".join(credit.warnings))
+        self.assertIn("단위", " ".join(lending.warnings))
 
     def test_program_trading_net_matches_buy_minus_sell(self):
         # 독립 검산: 순매수 = 매수 - 매도. 파싱이 틀리면 여기서 깨진다.

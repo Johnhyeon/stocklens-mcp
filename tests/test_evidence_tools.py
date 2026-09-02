@@ -98,6 +98,9 @@ class ToolDescriptionTests(unittest.TestCase):
         self.assertIn("공매도", text)
         # 종류를 하나의 점수로 합치지 않는다
         self.assertIn("합", text)
+        # AI 가 공급자 원본 단위를 추측하지 않고 정규화된 단위를 읽는다.
+        self.assertIn("measure_units", text)
+        self.assertIn("observed_at", text)
 
     def test_neither_description_promises_a_recommendation(self):
         # 법적 라인: 종목 추천·매매 신호를 만들지 않는다.
@@ -194,6 +197,34 @@ class ResponseShapeTests(unittest.TestCase):
         parsed = self._call("get_supply_pressure", code="005930",
                             kind="teleport")
         self.assertFalse(parsed["ok"])
+
+    def test_pressure_serializer_exposes_time_and_measure_units(self):
+        from datetime import date, datetime, timezone, timedelta
+        from decimal import Decimal
+
+        from stock_mcp_server.market_data.evidence_models import (
+            PressureBlock,
+            PressureRow,
+        )
+        from stock_mcp_server.server import _pressure_block_json
+
+        observed = datetime(2026, 8, 28, 15, 30, 14,
+                            tzinfo=timezone(timedelta(hours=9)))
+        block = PressureBlock(
+            kind="program_trading", status="ok", provider="kis",
+            market="KR", rows=(PressureRow(
+                date=date(2026, 8, 28), measures={"close": Decimal("1")},
+                raw_fields={"close": "stck_prpr"}, observed_at=observed),),
+            data_as_of=date(2026, 8, 28), data_completeness="complete",
+            warnings=(), unavailable_reason=None,
+            coverage={"rows": 1, "complete": True},
+            granularity="intraday", measure_units={"close": "KRW"},
+        )
+
+        payload = _pressure_block_json(block)
+        self.assertEqual(payload["measure_units"], {"close": "KRW"})
+        self.assertEqual(payload["rows"][0]["observed_at"],
+                         "2026-08-28T15:30:14+09:00")
 
 
 if __name__ == "__main__":

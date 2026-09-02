@@ -222,6 +222,9 @@ class PressureSpec:
     rows_key: str
     # 정규 이름 -> 원본 필드명
     measures: tuple[tuple[str, str], ...]
+    units: tuple[tuple[str, str], ...]
+    # 공급자 원본을 공개 공통 단위로 바꾸는 배수.
+    scales: tuple[tuple[str, Decimal], ...] = ()
     extra_body: tuple[tuple[str, str], ...] = ()
     needs_date_range: bool = False
 
@@ -235,7 +238,14 @@ PRESSURE_SPECS: tuple[PressureSpec, ...] = (
                   ("buy_amount", "prm_buy_amt"),
                   ("net_amount", "prm_netprps_amt"),
                   ("sell_qty", "prm_sell_qty"),
-                  ("buy_qty", "prm_buy_qty"))),
+                  ("buy_qty", "prm_buy_qty")),
+        units=(("close", "KRW"), ("volume", "shares"),
+               ("sell_amount", "KRW"), ("buy_amount", "KRW"),
+               ("net_amount", "KRW"), ("sell_qty", "shares"),
+               ("buy_qty", "shares")),
+        scales=(("sell_amount", Decimal("1000000")),
+                ("buy_amount", Decimal("1000000")),
+                ("net_amount", Decimal("1000000")))),
     PressureSpec(
         kind="short_selling", endpoint_id="kr_short_selling",
         api_id="ka10014", rows_key="shrts_trnsn", needs_date_range=True,
@@ -244,7 +254,13 @@ PRESSURE_SPECS: tuple[PressureSpec, ...] = (
                   ("overseas_short_volume", "ovr_shrts_qty"),
                   ("trade_weight", "trde_wght"),
                   ("short_value", "shrts_trde_prica"),
-                  ("short_avg_price", "shrts_avg_pric"))),
+                  ("short_avg_price", "shrts_avg_pric")),
+        units=(("close", "KRW"), ("volume", "shares"),
+               ("short_volume", "shares"),
+               ("overseas_short_volume", "shares"),
+               ("trade_weight", "percent"), ("short_value", "KRW"),
+               ("short_avg_price", "KRW")),
+        scales=(("short_value", Decimal("1000")),)),
     PressureSpec(
         kind="credit", endpoint_id="kr_credit_trade",
         api_id="ka10013", rows_key="crd_trde_trend",
@@ -253,7 +269,12 @@ PRESSURE_SPECS: tuple[PressureSpec, ...] = (
                   ("new", "new"), ("repaid", "rpya"),
                   ("balance", "remn"), ("balance_amount", "amt"),
                   ("share_rate", "shr_rt"),
-                  ("balance_rate", "remn_rt"))),
+                  ("balance_rate", "remn_rt")),
+        units=(("close", "KRW"), ("volume", "shares"),
+               ("new", "shares"), ("repaid", "shares"),
+               ("balance", "shares"), ("balance_amount", "unknown"),
+               ("share_rate", "percent"),
+               ("balance_rate", "percent"))),
     PressureSpec(
         kind="securities_lending", endpoint_id="kr_securities_lending",
         api_id="ka20068", rows_key="dbrt_trde_trnsn",
@@ -261,7 +282,10 @@ PRESSURE_SPECS: tuple[PressureSpec, ...] = (
                   ("repaid", "dbrt_trde_rpy"),
                   ("change", "dbrt_trde_irds"),
                   ("balance", "rmnd"),
-                  ("balance_amount", "remn_amt"))),
+                  ("balance_amount", "remn_amt")),
+        units=(("contracted", "shares"), ("repaid", "shares"),
+               ("change", "shares"), ("balance", "shares"),
+               ("balance_amount", "unknown"))),
     PressureSpec(
         kind="foreign_holding", endpoint_id="kr_foreign_holding",
         api_id="ka10008", rows_key="stk_frgnr",
@@ -271,7 +295,12 @@ PRESSURE_SPECS: tuple[PressureSpec, ...] = (
                   ("holding_weight", "wght"),
                   ("available_qty", "gain_pos_stkcnt"),
                   ("limit_qty", "frgnr_limit"),
-                  ("limit_exhaust_rate", "limit_exh_rt"))),
+                  ("limit_exhaust_rate", "limit_exh_rt")),
+        units=(("close", "KRW"), ("volume", "shares"),
+               ("change_qty", "shares"), ("holding_qty", "shares"),
+               ("holding_weight", "percent"),
+               ("available_qty", "shares"), ("limit_qty", "shares"),
+               ("limit_exhaust_rate", "percent"))),
 )
 _SPEC_BY_KIND = {s.kind: s for s in PRESSURE_SPECS}
 
@@ -310,9 +339,15 @@ def _parse_pressure_row(raw: dict, spec: PressureSpec) -> PressureRow | None:
     except ValueError:
         return None
     measures: dict[str, Decimal] = {}
+    scales = dict(spec.scales)
     for name, raw_key in spec.measures:
         got = _pressure_value(raw.get(raw_key))
         if got is not None:
+            if name == "close":
+                # 키움 가격 필드의 선행 부호는 등락 방향 표기다. 가격 자체가
+                # 음수라는 뜻이 아니다.
+                got = abs(got)
+            got *= scales.get(name, Decimal("1"))
             measures[name] = got
     return PressureRow(date=parsed, measures=measures,
                        raw_fields=dict(spec.measures))
@@ -441,7 +476,6 @@ class KiwoomEvidenceProvider:
 
         if dropped:
             warnings.append(f"해석할 수 없는 행 {dropped}개를 제외했습니다.")
-
         rows, duplicate_dates = dedupe_rows(rows)
         if duplicate_dates:
             warnings.append(
@@ -560,6 +594,12 @@ class KiwoomEvidenceProvider:
         warnings: list[str] = []
         if dropped:
             warnings.append(f"해석할 수 없는 행 {dropped}개를 제외했습니다.")
+        unknown_units = [name for name, unit in spec.units
+                         if unit == "unknown"]
+        if unknown_units:
+            warnings.append(
+                "공급자 원본에서 단위를 독립 확인하지 못한 값은 환산하지 "
+                f"않았습니다: {', '.join(unknown_units)}")
         if not rows:
             return PressureBlock(
                 kind=spec.kind, status="ok",
@@ -575,4 +615,5 @@ class KiwoomEvidenceProvider:
             data_completeness="complete" if not dropped else "partial",
             warnings=tuple(warnings), unavailable_reason=None,
             coverage={"rows": len(rows), "complete": True,
-                      "cont_yn": response.cont_yn})
+                      "cont_yn": response.cont_yn},
+            measure_units=dict(spec.units))

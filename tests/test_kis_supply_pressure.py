@@ -162,6 +162,24 @@ class BlockTests(unittest.TestCase):
         self.assertTrue(block.rows)
         self.assertIsNotNone(block.rows[0].value("net_qty"))
 
+    def test_program_trading_preserves_the_observed_kst_timestamp(self):
+        block = self.blocks["program_trading"]
+        self.assertEqual(
+            block.rows[0].observed_at.isoformat(),
+            "2026-08-28T15:30:14+09:00",
+        )
+        self.assertIsNone(self.blocks["short_selling"].rows[0].observed_at)
+
+    def test_pressure_units_use_the_public_canonical_basis(self):
+        program = self.blocks["program_trading"]
+        short = self.blocks["short_selling"]
+        self.assertEqual(program.measure_units["close"], "KRW")
+        self.assertEqual(program.measure_units["volume"], "shares")
+        self.assertEqual(program.measure_units["net_amount"], "KRW")
+        self.assertEqual(short.measure_units["short_ratio"], "percent")
+        self.assertEqual(short.measure_units["short_value"], "KRW")
+        self.assertEqual(program.rows[0].value("sell_amount"), 1298472581000)
+
     def test_unsupported_kinds_state_a_reason_and_skip_the_network(self):
         for kind, reason in (
             ("securities_lending", "market_level_only"),

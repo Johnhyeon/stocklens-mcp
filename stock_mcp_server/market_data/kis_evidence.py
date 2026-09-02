@@ -16,7 +16,7 @@ inquire-investor, tr_id FHKST01010900):
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 
 from stock_mcp_server.market_data.evidence_models import (
@@ -139,6 +139,12 @@ _PRESSURE_SPECS: dict[str, dict] = {
                      ("short_value", "ssts_tr_pbmn"),
                      ("cum_short_volume", "acml_ssts_cntg_qty"),
                      ("cum_short_ratio", "acml_ssts_cntg_qty_rlim")),
+        "units": {
+            "close": "KRW", "volume": "shares",
+            "short_volume": "shares", "short_ratio": "percent",
+            "short_value": "KRW", "cum_short_volume": "shares",
+            "cum_short_ratio": "percent",
+        },
         "date_range": True,
     },
     "program_trading": {
@@ -156,6 +162,12 @@ _PRESSURE_SPECS: dict[str, dict] = {
                      ("sell_amount", "whol_smtn_seln_tr_pbmn"),
                      ("buy_amount", "whol_smtn_shnu_tr_pbmn"),
                      ("net_amount", "whol_smtn_ntby_tr_pbmn")),
+        "units": {
+            "close": "KRW", "volume": "shares", "sell_qty": "shares",
+            "buy_qty": "shares", "net_qty": "shares",
+            "sell_amount": "KRW", "buy_amount": "KRW",
+            "net_amount": "KRW",
+        },
     },
 }
 
@@ -192,11 +204,19 @@ def _parse_pressure_row(raw: dict, spec: dict,
             parsed = datetime.strptime(day, "%Y%m%d").date()
         except ValueError:
             return None
+        observed_at = None
     else:
         # 장중 시계열은 날짜 필드가 없다. 조회 기준일로 붙인다.
-        if not str(raw.get(spec["time_field"]) or "").strip():
+        clock = str(raw.get(spec["time_field"]) or "").strip()
+        if len(clock) != 6 or not clock.isdigit():
             return None
         parsed = base_date
+        try:
+            parsed_time = datetime.strptime(clock, "%H%M%S").time()
+        except ValueError:
+            return None
+        observed_at = datetime.combine(
+            base_date, parsed_time, tzinfo=timezone(timedelta(hours=9)))
 
     measures = {}
     for name, field_name in spec["measures"]:
@@ -204,7 +224,8 @@ def _parse_pressure_row(raw: dict, spec: dict,
         if got is not None:
             measures[name] = got
     return PressureRow(date=parsed, measures=measures,
-                       raw_fields=dict(spec["measures"]))
+                       raw_fields=dict(spec["measures"]),
+                       observed_at=observed_at)
 
 
 def _decimal_signed(raw: object) -> Decimal | None:
@@ -337,7 +358,8 @@ class KisEvidenceProvider:
             if parsed is not None:
                 rows.append(parsed)
         dropped = len(raw_rows) - len(rows)
-        rows.sort(key=lambda r: r.date, reverse=True)
+        rows.sort(key=lambda r: (r.date, r.observed_at or datetime.min.replace(
+            tzinfo=timezone.utc)), reverse=True)
         if len(rows) > row_limit:
             rows = rows[:row_limit]
 
@@ -356,7 +378,8 @@ class KisEvidenceProvider:
             else ("partial" if rows else "none"),
             warnings=tuple(warnings), unavailable_reason=None,
             coverage={"rows": len(rows), "complete": True},
-            granularity=spec["granularity"])
+            granularity=spec["granularity"],
+            measure_units=dict(spec["units"]))
 
     async def fetch_investor_flow(
         self,

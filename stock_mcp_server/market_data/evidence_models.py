@@ -17,7 +17,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 
 # 측정 단위. 라벨과 값이 갈라지지 않게 요청 파라미터와 함께 고정한다.
@@ -102,6 +102,9 @@ class PressureRow:
     date: date
     measures: dict[str, Decimal]
     raw_fields: dict[str, str]
+    # 일별 자료에는 없고 장중 시계열에만 있다. date 는 하위 호환을 위해
+    # 계속 유지한다.
+    observed_at: datetime | None = None
 
     def value(self, name: str) -> Decimal | None:
         return self.measures.get(name)
@@ -137,3 +140,6 @@ class PressureBlock:
     unavailable_reason: str | None
     coverage: dict
     granularity: str = "daily"
+    # 공개 measures 의 단위. 공급자 원본 단위가 아니라 정규화 이후 단위다.
+    # 확인하지 못한 단위는 추정하지 않고 unknown 으로 남긴다.
+    measure_units: dict[str, str] = field(default_factory=dict)
