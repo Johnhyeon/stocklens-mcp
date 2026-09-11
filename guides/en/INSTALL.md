@@ -161,12 +161,16 @@ detailed investor flow. **One broker is enough** - pick Korea Investment
 | KR / US intraday bars | yes | yes |
 | Detailed flow investor kinds | 3 (retail, foreign, institution total) | 13 (institution broken out) |
 | Buy / sell split in flow | yes | no (net only) |
-| Lending, credit, foreign holding | no | yes |
 | Where you can use it | no IP restriction; pick this for a laptop | only from the IP you registered |
 | Key issuance | https://apiportal.koreainvestment.com | https://openapi.kiwoom.com |
 
 Neither is a superset of the other. Choose Kiwoom to break institutions
 apart, KIS to separate buys from sells.
+
+Program trading, short selling, credit, lending and foreign holding are
+**not open yet.** The adapters exist but have not cleared live-account
+verification, so they answer "verifying" instead of returning numbers.
+This is not an API key problem.
 
 1. Issue a quotation-scope App Key and App Secret at the portal above
 2. Open LeetKit Manager and click the broker connection button on the

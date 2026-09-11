@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""1.0 전 기능 점검 — MCP 도구 66개를 하나씩 실제로 호출한다.
+"""1.0 전 기능 점검 — MCP 도구 68개를 하나씩 실제로 호출한다.
 
 단위 테스트는 응답을 흉내 내므로 원천이 사라진 것을 못 잡는다. 2026-09 네이버
 개편 때 테스트가 전부 초록인 채로 국내 도구가 전멸했던 이유가 그것이다.
@@ -110,6 +110,14 @@ def build_calls(ctx: dict) -> list[tuple[str, dict]]:
                                 "row_limit": 20, "venue": "NAS"}),
         ("get_intraday_indicators", {"symbol": us, "market": "US", "interval": "60m",
                                      "bars": 60, "venue": "NAS"}),
+        # ── 1.1 상세 수급 (증권사 연결 구간) ────────────
+        ("get_detailed_investor_flow", {"code": kr, "days": 10}),
+        ("get_detailed_investor_flow", {"codes": [kr, kr2], "days": 5,
+                                        "measure": "net_amount"}),
+        ("get_supply_pressure", {"code": kr, "kind": "program_trading",
+                                 "days": 10}),
+        ("get_supply_pressure", {"code": kr, "kinds": ["short_selling", "credit"],
+                                 "days": 10}),
         # ── 미국 ───────────────────────────────────────
         ("get_us_market", {}),
         ("get_us_search", {"query": "apple"}),
