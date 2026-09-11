@@ -57,10 +57,14 @@ _mojibake: list = []
 def run(exe, args, request=None, flag=False, home=UAT):
     env = dict(os.environ)
     env["STOCKLENS_HOME"] = home
-    # 자식 출력을 UTF-8 로 읽으므로 자식도 UTF-8 로 쓰게 한다. 이게 없으면
-    # 코드페이지 949 환경에서 한국어 출력이 CP949 로 나와 여기서
-    # UnicodeDecodeError 로 죽는다 (2026-08-28 재현 확인).
-    env["PYTHONIOENCODING"] = "utf-8"
+    # **PYTHONIOENCODING 을 넣지 않는다.** 예전에는 넣었는데, 그게 이 검증기를
+    # 무용지물로 만들었다. LeetKit Manager 는 이 변수를 넣지 않고 자식을
+    # 부르면서 출력을 UTF-8 로 읽는다. 검증기만 UTF-8 을 쥐여 주면 자식이
+    # 코드페이지로 쓰는 결함이 여기서는 안 보이고 고객 화면에서만 보인다.
+    # 1.0.0 의 stocklens-broker 가 정확히 그랬다 - 검증 16/16 통과인데
+    # 증권사 연결 화면의 한글이 전부 깨져 나갔다.
+    # 읽는 조건을 **Manager 와 똑같이** 두고, 자식이 스스로 UTF-8 로 쓰는지 본다.
+    env.pop("PYTHONIOENCODING", None)
     env.pop("LEETKIT_ENABLE_EXPERIMENTAL_BROKERS", None)
     if flag:
         env["LEETKIT_ENABLE_EXPERIMENTAL_BROKERS"] = "1"

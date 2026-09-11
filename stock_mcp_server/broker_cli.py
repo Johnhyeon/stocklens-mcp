@@ -584,7 +584,32 @@ def _interactive_main() -> int:
     return 0 if response.get("ok") else 1
 
 
+def _force_utf8_io() -> None:
+    """stdout·stderr 를 UTF-8 로 고정한다.
+
+    이걸 안 하면 윈도우에서 파이썬이 시스템 코드페이지(한국은 cp949)로 쓴다.
+    `json.dumps(..., ensure_ascii=False)` 로 만든 한글이 cp949 바이트로 나가고,
+    UTF-8 로 읽는 LeetKit Manager 화면에서는 안내문이 통째로 깨진다.
+    실제로 1.0.0 의 증권사 연결 화면이 그랬다.
+
+    호출자가 PYTHONIOENCODING 을 넣어 주면 멀쩡하다는 게 함정이었다. 출시
+    검증기는 넣고 불렀고 Manager 는 넣지 않았다. 그래서 검증은 통과했는데
+    고객 화면만 깨졌다. 읽는 쪽 환경에 기대지 말고 **쓰는 쪽에서 고정한다.**
+    """
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is None:
+            continue
+        try:
+            reconfigure(encoding="utf-8", errors="replace")
+        except (ValueError, OSError):
+            # 재설정을 못 하는 스트림(파이프가 이미 닫힌 경우 등)은 건너뛴다.
+            # 여기서 죽으면 진짜 응답을 못 돌려준다.
+            pass
+
+
 def main(argv: list[str] | None = None) -> int:
+    _force_utf8_io()
     args = list(sys.argv[1:] if argv is None else argv)
     if "--interactive" in args:
         return _interactive_main()
