@@ -118,109 +118,96 @@ class MissingIsNotZeroTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# 3. 재무 표의 기준(연결/별도) 캡처
+# 3. 재무 기간 라벨 — 연간/분기/추정치가 한 줄에 섞이던 것
 # ---------------------------------------------------------------------------
+#
+# 재무 값은 [연간 …, 분기 …] 로 이어 붙어 온다. 어느 구간이 어디까지인지를
+# `_periods` 가 말해 주지 않으면, 뒤에서부터 집는 소비자가 분기값을 연간 확정치로
+# 읽는다. 추정치는 라벨에 (E) 가 붙어야 확정치와 갈린다 — 네이버는 이걸
+# isConsensus 플래그로만 주므로 우리가 라벨에 실어야 한다.
 
-# 네이버 종목 메인의 기업실적분석 thead는 3행이다.
-#   0행 연간/분기 그룹, 1행 기간, 2행 재무기준(IFRS연결/IFRS별도)
-# 예전엔 2행을 통째로 버려 연결·별도가 섞인 종목도 구분 없이 한 줄로 나갔다.
-FIN_TABLE_HTML = """
-<div class="cop_analysis"><table>
-<thead>
-<tr><th>주요재무정보</th><th colspan="2">최근 연간 실적</th><th colspan="2">최근 분기 실적</th></tr>
-<tr><th>2024.12</th><th>2025.12</th><th>2026.03</th><th>2026.06</th></tr>
-<tr><th>IFRS별도</th><th>IFRS연결</th><th>IFRS연결</th><th>IFRS연결</th></tr>
-</thead>
-<tbody>
-<tr><th>매출액</th><td>1,196</td><td>1,641</td><td>413</td><td>449</td></tr>
-</tbody>
-</table></div>
-"""
+from stock_mcp_server.naver import _fin_period_labels, _fin_rows  # noqa: E402
+
+FINANCE_PAYLOAD = {
+    "itemCode": "005930",
+    "financePeriodType": "annual",
+    "financeInfo": {
+        "trTitleList": [
+            {"isConsensus": "N", "title": "2024.12.", "key": "202412"},
+            {"isConsensus": "N", "title": "2025.12.", "key": "202512"},
+            {"isConsensus": "Y", "title": "2026.12.", "key": "202612"},
+        ],
+        "rowList": [
+            {"title": "매출액", "columns": {
+                "202412": {"value": "3,008,709"},
+                "202512": {"value": "3,336,059"},
+                "202612": {"value": "7,396,375"},
+            }},
+            {"title": "부채비율", "columns": {
+                "202412": {"value": "27.93"},
+                "202512": {"value": "29.94"},
+            }},
+        ],
+    },
+}
 
 
-class FinancialBasisCaptureTests(unittest.TestCase):
-    def _parse(self):
-        soup = BeautifulSoup(FIN_TABLE_HTML, "lxml")
-        table = soup.select_one("div.cop_analysis table")
-        thead_rows = table.select("thead tr")
-        annual_count, quarterly_count = 0, 0
-        for th in thead_rows[0].select("th"):
-            span = int(th.get("colspan", "1"))
-            if "연간" in th.text:
-                annual_count = span
-            elif "분기" in th.text:
-                quarterly_count = span
-        periods = [th.text.strip() for th in thead_rows[1].select("th")]
-        bases = [th.text.strip() for th in thead_rows[2].select("th")]
-        return annual_count, quarterly_count, periods, bases
+class FinancePeriodLabelTests(unittest.TestCase):
+    def test_consensus_periods_are_marked(self):
+        labels, keys = _fin_period_labels(
+            FINANCE_PAYLOAD["financeInfo"]["trTitleList"]
+        )
+        self.assertEqual(labels, ["2024.12", "2025.12", "2026.12(E)"])
+        self.assertEqual(keys, ["202412", "202512", "202612"])
 
-    def test_third_header_row_is_the_accounting_basis(self):
-        annual_count, quarterly_count, periods, bases = self._parse()
-        self.assertEqual((annual_count, quarterly_count), (2, 2))
-        self.assertEqual(len(bases), len(periods))
-        self.assertEqual(bases[0], "IFRS별도")
+    def test_values_are_matched_by_column_key_not_by_order(self):
+        """응답의 columns 는 순서가 보장되지 않는다 — 키로 맞춰야 한다."""
+        labels, keys, rows = _fin_rows(FINANCE_PAYLOAD)
+        self.assertEqual(
+            [rows["매출액"][k] for k in keys],
+            ["3,008,709", "3,336,059", "7,396,375"],
+        )
 
-    def test_mixed_basis_is_detectable(self):
-        """연결과 별도가 섞이면 비교 범위가 달라 경고가 필요하다."""
-        _, _, _, bases = self._parse()
-        self.assertGreater(len({b for b in bases if b}), 1)
+    def test_absent_column_is_not_shifted_into_a_neighbour(self):
+        """부채비율은 추정 기간 값이 없다 — 앞 값을 당겨 채우면 안 된다."""
+        labels, keys, rows = _fin_rows(FINANCE_PAYLOAD)
+        self.assertIsNone(rows["부채비율"].get("202612"))
 
 
 # ---------------------------------------------------------------------------
 # 4. 종목 상태(시장경보·관리종목)는 시세와 함께 보여야 한다
 # ---------------------------------------------------------------------------
+#
+# 라벨을 우리가 새로 짓지 않는다 — 관리종목·투자경고는 시장이 쓰는 말이고,
+# 말을 바꾸면 사용자가 HTS 에서 본 것과 대조할 수 없다.
 
-# 네이버 종목 페이지 div.description 실제 구조 (035290 골드앤에스, 2026-08-16 확인).
-# 상태 마커는 em으로 붙고, date/realtime/summary는 마커가 아니다.
-_DESC_HTML = """
-<div class="wrap_company"><div class="description">
-  <span class="code">035290</span>
-  <em class="date">2026.08.14 기준(KRX 장마감)</em>
-  <em class="realtime">실시간</em>
-  <em class="summary">기업개요 동사는 1999년 코스닥시장에 상장하고…</em>
-  {markers}
-</div></div>
-"""
+from stock_mcp_server.naver import _status_flags  # noqa: E402
 
 
 class StockStatusMarkerTests(unittest.TestCase):
-    def _flags(self, markers: str) -> list[str]:
-        from stock_mcp_server.naver import _NON_STATUS_EM_CLASSES
-        soup = BeautifulSoup(_DESC_HTML.format(markers=markers), "lxml")
-        desc = soup.select_one("div.description")
-        return [
-            t
-            for em in desc.select("em")
-            if not (set(em.get("class") or []) & _NON_STATUS_EM_CLASSES)
-            for t in [" ".join(em.get_text(" ", strip=True).split())]
-            if t and len(t) <= 12
-        ]
+    def test_managed_and_caution_flags_extracted(self):
+        flags = _status_flags({"manageStatusGb": "1", "marketAlertType": "01"})
+        self.assertEqual(flags, ["관리종목", "투자주의"])
 
-    def test_managed_stock_flags_extracted(self):
-        flags = self._flags('<em class="caution">투자주의</em><em class="manage">관리종목</em>')
-        self.assertEqual(flags, ["투자주의", "관리종목"])
-
-    def test_warning_stock_flag_extracted(self):
-        self.assertEqual(self._flags('<em class="warning">투자경고</em>'), ["투자경고"])
+    def test_warning_and_risk_labels(self):
+        self.assertEqual(_status_flags({"marketAlertType": "02"}), ["투자경고"])
+        self.assertEqual(_status_flags({"marketAlertType": "03"}), ["투자위험"])
 
     def test_normal_stock_has_no_flags(self):
-        self.assertEqual(self._flags(""), [])
+        self.assertEqual(
+            _status_flags({"manageStatusGb": "0", "marketAlertType": "00",
+                           "tradeStopYn": "N"}),
+            [],
+        )
 
-    def test_unknown_future_marker_still_surfaces(self):
-        """클래스 화이트리스트로 잡으면 새 유형이 생겼을 때 조용히 놓친다.
+    def test_trading_halt_is_surfaced(self):
+        self.assertEqual(_status_flags({"tradeStopYn": "Y"}), ["거래정지"])
 
-        마커가 아닌 것만 제외하는 방식이라 처음 보는 클래스도 그대로 드러난다.
-        """
-        self.assertEqual(self._flags('<em class="brandnew">정리매매</em>'), ["정리매매"])
-
-    def test_long_text_is_not_mistaken_for_a_marker(self):
-        """summary처럼 긴 본문이 클래스만 바뀌어도 상태로 오인되면 안 된다."""
-        body = "가" * 200
-        self.assertEqual(self._flags(f'<em class="odd">{body}</em>'), [])
+    def test_unknown_alert_code_is_not_invented(self):
+        """처음 보는 코드에 임의의 라벨을 붙이지 않는다."""
+        self.assertEqual(_status_flags({"marketAlertType": "99"}), [])
 
 
-if __name__ == "__main__":
-    unittest.main(verbosity=2)
 
 
 # ---------------------------------------------------------------------------
@@ -280,118 +267,109 @@ class InsiderTradeDisplayTests(unittest.IsolatedAsyncioTestCase):
 
 
 # ---------------------------------------------------------------------------
-# 6. 투자자 수급 — 컬럼을 위치로 읽던 결함 (2026-08-17)
+# 6. 투자자 수급 — 이름표와 값이 어긋나던 계열 (2026-08-17 / 2026-09-11 갱신)
 # ---------------------------------------------------------------------------
 #
-# 예전 코드는 `cols[5]=기관`, `cols[6]=외국인` 처럼 자리 번호로 읽었다. 네이버가
-# 컬럼을 하나 끼워 넣으면 기관 값이 외국인 자리로 들어가는데, 숫자는 여전히
-# 그럴듯해서 아무도 눈치채지 못한다(= 조용히 틀린다). 그래서 헤더 '이름'으로 찾고,
-# 이름을 못 찾으면 빈 결과 대신 예외를 던진다.
+# 예전 코드는 HTML 표를 `cols[5]=기관`, `cols[6]=외국인` 처럼 자리 번호로 읽었다.
+# 컬럼이 하나 끼면 기관 값이 외국인 자리로 들어가는데, 숫자는 여전히 그럴듯해서
+# 아무도 눈치채지 못한다(= 조용히 틀린다).
 #
-# 전일비도 같은 계열이었다. 네이버는 전일비를 절댓값으로만 주고 방향은
-# <em class="bu_pup|bu_pdn"> 로 따로 준다 — 숫자만 뽑으면 하락일도 양수가 된다.
+# 2026-09 네이버가 그 화면을 걷어내면서 소스가 JSON API 로 바뀌었다. 자리 번호가
+# 사라졌으니 그 결함 자체는 구조적으로 불가능해졌지만, **계약은 그대로다**:
+# 필드 이름으로 읽고, 결측을 0으로 채우지 않고, 응답 모양이 다르면 빈 결과가
+# 아니라 파싱 실패로 알린다.
 
-from stock_mcp_server.naver import (  # noqa: E402
-    NaverParseError,
-    _flatten_header_labels,
-    _parse_int_strict,
-    _resolve_flow_columns,
-    _signed_change,
-)
+import types  # noqa: E402
 
-# 네이버 frgn.naver 두 번째 table.type2 구조(2026-08-17 실측). 헤더가 2단이고
-# 앞 5개는 rowspan=2, '외국인'은 colspan=3 이다.
-FLOW_HTML = """
-<table class="type2">
-  <tr>
-    <th rowspan="2">날짜</th><th rowspan="2">종가</th><th rowspan="2">전일비</th>
-    <th rowspan="2">등락률</th><th rowspan="2">거래량</th>
-    <th>기관</th><th colspan="3">외국인</th>
-  </tr>
-  <tr><th>순매매량</th><th>순매매량</th><th>보유주수</th><th>보유율</th></tr>
-  <tr>
-    <td>2026.08.10</td><td>230,000</td>
-    <td><em class="bu_p bu_pdn"><span class="blind">하락</span></em><span>1,000</span></td>
-    <td><span>-0.43%</span></td>
-    <td>19,000,000</td><td>+625,055</td><td>-4,394,465</td>
-    <td>2,730,000,000</td><td>46.70%</td>
-  </tr>
-</table>
-"""
+from stock_mcp_server import naver as _naver  # noqa: E402
+from stock_mcp_server._cache import clear_cache  # noqa: E402
+from stock_mcp_server.naver import NaverParseError, _parse_int_strict  # noqa: E402
+
+# m.stock.naver.com/api/stock/{code}/trend 실측 응답(2026-09-11).
+TREND_ROW = {
+    "itemCode": "005930",
+    "bizdate": "20260911",
+    "foreignerPureBuyQuant": "-3,531,147",
+    "foreignerHoldRatio": "46.65%",
+    "organPureBuyQuant": "+2,208,594",
+    "individualPureBuyQuant": "+3,643,746",
+    "closePrice": "259,500",
+    "compareToPreviousClosePrice": "-9,500",
+    "compareToPreviousPrice": {"code": "5", "text": "하락", "name": "FALLING"},
+    "accumulatedTradingVolume": "13,938,673",
+}
 
 
-def _flow_table(html: str = FLOW_HTML):
-    return BeautifulSoup(html, "lxml").select("table.type2")[0]
+class InvestorFlowFieldTests(unittest.IsolatedAsyncioTestCase):
+    def _serve(self, payload):
+        async def _fetch(url, params=None, **kwargs):
+            return types.SimpleNamespace(
+                status_code=200, text="", json=lambda: payload
+            )
 
+        self._real = _naver.fetch
+        _naver.fetch = _fetch
+        clear_cache()
 
-class InvestorFlowColumnTests(unittest.TestCase):
-    def test_header_flattens_with_rowspan_colspan(self):
-        """2단 헤더를 펼쳐 '외국인 순매매량'처럼 구분 가능한 라벨이 나와야 한다."""
-        labels = _flatten_header_labels(_flow_table())
-        self.assertEqual(labels[5], "기관 순매매량")
-        self.assertEqual(labels[6], "외국인 순매매량")
-        self.assertEqual(labels[7], "외국인 보유주수")
+    def tearDown(self):
+        if hasattr(self, "_real"):
+            _naver.fetch = self._real
+        clear_cache()
 
-    def test_resolves_to_known_positions(self):
-        """현재 구조에서는 기존 위치 매핑과 같은 결과여야 한다(회귀 방지)."""
-        idx = _resolve_flow_columns(_flow_table())
-        self.assertEqual(idx["institutional"], 5)
-        self.assertEqual(idx["foreign"], 6)
+    async def test_each_investor_goes_to_its_own_field(self):
+        """기관·외국인·개인이 서로의 자리로 들어가면 안 된다."""
+        self._serve([TREND_ROW])
+        rows = await _naver.get_investor_flow("005930", days=5)
 
-    def test_inserted_column_shifts_indices_instead_of_swapping(self):
-        """핵심 회귀 — 컬럼이 끼어들면 인덱스가 따라 움직여야 한다.
+        self.assertEqual(len(rows), 1)
+        row = rows[0]
+        self.assertEqual(row["institutional"], 2208594)
+        self.assertEqual(row["foreign"], -3531147)
+        self.assertEqual(row["individual"], 3643746)
+        self.assertEqual(row["date"], "2026.09.11")
 
-        위치로 읽던 예전 코드는 여기서 '개인' 값을 기관으로, 기관을 외국인으로
-        읽었다. 에러 없이 값만 한 칸씩 밀리는 게 가장 위험한 실패다.
-        """
-        table = _flow_table()
-        header = [tr for tr in table.select("tr") if tr.select("th")][0]
-        new_th = BeautifulSoup('<th rowspan="2">개인</th>', "lxml").th
-        header.select("th")[5].insert_before(new_th)
+    async def test_change_keeps_its_sign(self):
+        """전일비는 부호가 붙은 채로 온다 — 절댓값으로 읽으면 하락일이 양수가 된다."""
+        self._serve([TREND_ROW])
+        row = (await _naver.get_investor_flow("005930", days=5))[0]
 
-        idx = _resolve_flow_columns(table)
-        self.assertEqual(idx["institutional"], 6)
-        self.assertEqual(idx["foreign"], 7)
+        self.assertEqual(row["change"], -9500)
+        self.assertEqual(row["change_rate"], -3.53)
 
-    def test_renamed_column_raises_instead_of_silent_empty(self):
-        """이름을 못 찾으면 '데이터 없음'이 아니라 파싱 실패로 알려야 한다."""
-        table = _flow_table(FLOW_HTML.replace("<th>기관</th>", "<th>기타법인</th>"))
+    async def test_row_with_missing_core_value_is_dropped_not_zeroed(self):
+        """순매매 0은 실제 값이다 — 결측을 0으로 채우면 둘을 구분할 수 없다."""
+        broken = dict(TREND_ROW, organPureBuyQuant="-")
+        self._serve([broken])
+
+        self.assertEqual(await _naver.get_investor_flow("005930", days=5), [])
+
+    async def test_real_zero_is_kept(self):
+        self._serve([dict(TREND_ROW, organPureBuyQuant="0")])
+        row = (await _naver.get_investor_flow("005930", days=5))[0]
+        self.assertEqual(row["institutional"], 0)
+
+    async def test_shape_change_raises_instead_of_silent_empty(self):
+        """응답이 목록이 아니면 '데이터 없음'이 아니라 파싱 실패로 알려야 한다."""
+        self._serve({"datas": []})
         with self.assertRaises(NaverParseError):
-            _resolve_flow_columns(table)
+            await _naver.get_investor_flow("005930", days=5)
 
-    def test_missing_header_raises(self):
-        table = _flow_table()
-        for tr in table.select("tr"):
-            if tr.select("th"):
-                tr.decompose()
+    async def test_html_instead_of_json_raises(self):
+        """2026-09 사고의 모양 — 200 OK 로 SPA 껍데기가 오던 경우."""
+
+        async def _fetch(url, params=None, **kwargs):
+            def _boom():
+                raise ValueError("not json")
+
+            return types.SimpleNamespace(
+                status_code=200, text="<!doctype html>", json=_boom
+            )
+
+        self._real = _naver.fetch
+        _naver.fetch = _fetch
+        clear_cache()
         with self.assertRaises(NaverParseError):
-            _resolve_flow_columns(table)
-
-
-class InvestorFlowChangeSignTests(unittest.TestCase):
-    def _change_cell(self, table=None):
-        table = table or _flow_table()
-        idx = _resolve_flow_columns(table)
-        row = [tr for tr in table.select("tr") if tr.select("td")][0]
-        return row.select("td")[idx["change"]]
-
-    def test_down_day_change_is_negative(self):
-        """전일비 절댓값 1,000 + 등락률 -0.43% → -1,000. 예전엔 +1,000이었다."""
-        self.assertEqual(_signed_change(self._change_cell(), -0.43), -1000)
-
-    def test_up_day_change_is_positive(self):
-        self.assertEqual(_signed_change(self._change_cell(), 2.43), 1000)
-
-    def test_falls_back_to_marker_when_rate_missing(self):
-        """등락률을 못 읽어도 bu_pdn 마커로 방향을 복원한다."""
-        self.assertEqual(_signed_change(self._change_cell(), None), -1000)
-
-    def test_no_direction_signal_is_missing_not_positive(self):
-        """방향 단서가 없으면 양수로 단정하지 않고 결측으로 둔다."""
-        html = FLOW_HTML.replace(
-            '<em class="bu_p bu_pdn"><span class="blind">하락</span></em>', ""
-        )
-        self.assertIsNone(_signed_change(self._change_cell(_flow_table(html)), None))
+            await _naver.get_investor_flow("005930", days=5)
 
 
 class StrictIntParsingTests(unittest.TestCase):
@@ -410,80 +388,11 @@ class StrictIntParsingTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# 7. 현재가 블록 — "값이 없음"과 "못 읽었음"이 같은 모양이던 것 (2026-08-17)
+# 7. 현재가 — "값이 없음"과 "못 읽었음"이 같은 모양이던 것 (2026-08-17)
 # ---------------------------------------------------------------------------
 #
-# `_parse_rate_info` 는 `_parse_int`(실패 시 0)를 썼다. 네이버가 값 표기를 바꾸면
-# 거래량이 **0** 으로 나가는데, 거래정지 종목의 진짜 0과 구분되지 않는다.
-# 게다가 못 읽은 항목은 화면에서 줄째로 빠져서, 사용자는 그 항목이 원래 없는 건지
-# 우리가 못 읽은 건지 알 수 없었다.
-
-from stock_mcp_server.naver import _parse_rate_info  # noqa: E402
-
-
-def _rate_html(rows: str) -> str:
-    return f"""
-    <div id="rate_info_krx">
-      <p class="no_today"><span class="blind">274,500</span></p>
-      <p class="no_exday"><em class="no_up"><span class="blind">6,500</span></em></p>
-      <table class="no_info"><tr>{rows}</tr></table>
-    </div>
-    """
-
-
-def _cell(label: str, value: str) -> str:
-    return f'<td><span class="sptxt">{label}</span><em><span class="blind">{value}</span></em></td>'
-
-
-FULL_ROWS = (
-    _cell("시가", "275,000")
-    + _cell("고가", "275,500")
-    + _cell("저가", "266,000")
-    + _cell("거래량", "21,668,266")
-)
-
-
-def _parse(rows: str):
-    scope = BeautifulSoup(_rate_html(rows), "lxml").select_one("#rate_info_krx")
-    return _parse_rate_info(scope)
-
-
-class RateInfoMissingTests(unittest.TestCase):
-    def test_full_block_has_no_missing(self):
-        info, missing = _parse(FULL_ROWS)
-        self.assertEqual(missing, [])
-        self.assertEqual(info["volume"], 21668266)
-        self.assertEqual(info["price"], 274500)
-
-    def test_dropped_field_is_reported_not_zeroed(self):
-        """거래량 칸이 사라지면 0이 아니라 '못 읽음'으로 보고해야 한다."""
-        rows = FULL_ROWS.replace(_cell("거래량", "21,668,266"), "")
-        info, missing = _parse(rows)
-        self.assertIn("volume", missing)
-        self.assertNotIn("volume", info)  # 0으로 채우지 않는다
-
-    def test_unparseable_value_is_missing_not_zero(self):
-        """값이 '-' 로 바뀌어도 0으로 읽지 않는다."""
-        rows = FULL_ROWS.replace(
-            _cell("거래량", "21,668,266"), _cell("거래량", "-")
-        )
-        info, missing = _parse(rows)
-        self.assertIn("volume", missing)
-        self.assertNotIn("volume", info)
-
-    def test_real_zero_is_a_value_not_a_miss(self):
-        """거래정지 종목의 거래량 0은 실제 값이다 — 결측으로 밀면 안 된다."""
-        rows = FULL_ROWS.replace(_cell("거래량", "21,668,266"), _cell("거래량", "0"))
-        info, missing = _parse(rows)
-        self.assertEqual(info["volume"], 0)
-        self.assertNotIn("volume", missing)
-
-    def test_change_sign_uses_direction_icon(self):
-        """전일대비도 방향 아이콘(no_down)이 있으면 음수여야 한다."""
-        html = _rate_html(FULL_ROWS).replace('em class="no_up"', 'em class="no_down"')
-        scope = BeautifulSoup(html, "lxml").select_one("#rate_info_krx")
-        info, _ = _parse_rate_info(scope)
-        self.assertEqual(info["change"], -6500)
+# 결측을 0으로 채우면 거래정지 종목의 진짜 0과 구분되지 않는다. KRX/NXT 분리와
+# 상태 플래그를 포함한 현재가 계약은 tests/test_naver_price.py 가 전담한다.
 
 
 # ---------------------------------------------------------------------------
@@ -542,183 +451,259 @@ class ChartParseFailureTests(unittest.IsolatedAsyncioTestCase):
 
 
 # ---------------------------------------------------------------------------
-# 9. 테마·업종·리포트·공시 표 — 위치 기반 파싱 일괄 전환 (2026-08-17)
+# 9. 테마·업종·리포트 목록 — 이름으로 읽는 계약 (2026-08-17 / 2026-09-11 갱신)
 # ---------------------------------------------------------------------------
 #
-# 수급 표와 같은 계열이 6곳 더 있었다. 특히 테마/업종 상세는 현재가·거래량을
-# cells[2]/cells[7] 처럼 자리로 읽고 있어서, 컬럼이 하나 끼면 주가 자리에
-# 호가가 들어가도 알 수 없었다. 아래는 그 표들의 실제 헤더 구조를 고정한다.
+# 예전에는 테마/업종 상세의 현재가·거래량을 cells[2]/cells[7] 처럼 자리로 읽었다.
+# 컬럼이 하나 끼면 주가 자리에 호가가 들어가도 알 수 없었다. 새 소스는 JSON 이라
+# 자리 개념이 없지만, 계약은 같다 — 필드 이름으로 읽고, 등락률의 부호를 잃지 않고,
+# 응답 모양이 다르면 파싱 실패로 알린다.
 
-from stock_mcp_server.naver import (  # noqa: E402
-    _DISCLOSURE_RULES,
-    _GROUP_STOCK_RULES,
-    _REPORT_RULES,
-    _SECTOR_LIST_RULES,
-    _THEME_LIST_RULES,
-    _resolve_columns,
-)
+THEME_GROUP = {
+    "no": 405,
+    "name": "MLCC(적층세라믹콘덴서)",
+    "totalCount": 11,
+    "changeRate": "7.69",
+    "riseCount": 8,
+    "fallCount": 2,
+    "steadyCount": 1,
+}
 
-
-def _table(html: str):
-    return BeautifulSoup(f"<table>{html}</table>", "lxml").select_one("table")
-
-
-# 2026-08-17 실측 헤더 구조 (rowspan/colspan 포함)
-THEME_LIST_HEAD = """
-<tr><th rowspan="2">테마명</th><th rowspan="2">전일대비</th>
-    <th rowspan="2">최근3일등락률(평균)</th><th colspan="3">전일대비 등락현황</th>
-    <th colspan="2">주도주</th></tr>
-<tr><th>상승</th><th>보합</th><th>하락</th></tr>
-"""
-SECTOR_LIST_HEAD = """
-<tr><th rowspan="2">업종명</th><th rowspan="2">전일대비</th>
-    <th colspan="4">전일대비 등락현황</th><th rowspan="2">등락그래프</th></tr>
-<tr><th>전체</th><th>상승</th><th>보합</th><th>하락</th></tr>
-"""
-# 테마 상세는 '종목명'이 colspan=2 — 편입사유 칸까지 헤더가 세어 준다.
-THEME_DETAIL_HEAD = """
-<tr><th colspan="2">종목명</th><th>현재가</th><th>전일비</th><th>등락률</th>
-    <th>매수호가</th><th>매도호가</th><th>거래량</th><th>거래대금</th>
-    <th>전일거래량</th><th>토론</th></tr>
-"""
-SECTOR_DETAIL_HEAD = THEME_DETAIL_HEAD.replace('<th colspan="2">종목명</th>', "<th>종목명</th>")
-REPORT_HEAD = "<tr><th>종목명</th><th>제목</th><th>증권사</th><th>첨부</th><th>작성일</th><th>조회수</th></tr>"
-DISCLOSURE_HEAD = "<tr><th>제목</th><th>정보제공</th><th>날짜</th></tr>"
+GROUP_STOCK = {
+    "itemCode": "052710",
+    "stockName": "아모텍",
+    "closePrice": "15,130",
+    "closePriceRaw": "15130",
+    "compareToPreviousClosePrice": "3,490",
+    "compareToPreviousPrice": {"code": "1", "text": "상한", "name": "UPPER_LIMIT"},
+    "fluctuationsRatio": "29.98",
+    "accumulatedTradingVolume": "3,396,316",
+    "accumulatedTradingVolumeRaw": "3396316",
+}
 
 
-class GroupTableColumnTests(unittest.TestCase):
-    def test_theme_list_columns(self):
-        idx = _resolve_columns(_table(THEME_LIST_HEAD), _THEME_LIST_RULES, what="테마 목록")
-        self.assertEqual(idx["change_rate"], 1)  # '전일대비 등락현황'과 섞이면 안 된다
-        self.assertEqual(idx["up_count"], 3)
-        self.assertEqual(idx["down_count"], 5)
+class _JsonServing(unittest.IsolatedAsyncioTestCase):
+    """URL 별로 미리 정해둔 JSON 을 돌려주는 fetch 대역."""
 
-    def test_sector_list_columns(self):
-        idx = _resolve_columns(_table(SECTOR_LIST_HEAD), _SECTOR_LIST_RULES, what="업종 목록")
-        self.assertEqual(idx["change_rate"], 1)
-        self.assertEqual(idx["total_count"], 2)
-        self.assertEqual(idx["down_count"], 5)
+    def _serve(self, router):
+        async def _fetch(url, params=None, **kwargs):
+            payload = router(url, params or {})
+            return types.SimpleNamespace(
+                status_code=200, text="", json=lambda: payload
+            )
 
-    def test_theme_detail_offsets_by_reason_column(self):
-        """테마 상세는 편입사유 칸 때문에 업종 상세보다 한 칸씩 밀린다."""
-        idx = _resolve_columns(_table(THEME_DETAIL_HEAD), _GROUP_STOCK_RULES, what="테마 상세")
-        self.assertEqual((idx["price"], idx["change_rate"], idx["volume"]), (2, 4, 7))
+        self._real = _naver.fetch
+        _naver.fetch = _fetch
+        clear_cache()
 
-    def test_sector_detail_has_no_reason_column(self):
-        idx = _resolve_columns(_table(SECTOR_DETAIL_HEAD), _GROUP_STOCK_RULES, what="업종 상세")
-        self.assertEqual((idx["price"], idx["change_rate"], idx["volume"]), (1, 3, 6))
+    def tearDown(self):
+        if hasattr(self, "_real"):
+            _naver.fetch = self._real
+        clear_cache()
 
-    def test_volume_is_not_confused_with_previous_day_volume(self):
-        """'거래량'은 '전일거래량'에도 들어 있다 — must_not 이 빠지면 모호해진다."""
-        idx = _resolve_columns(_table(SECTOR_DETAIL_HEAD), _GROUP_STOCK_RULES, what="업종 상세")
-        self.assertNotEqual(idx["volume"], 8)  # 8번이 전일거래량
 
-    def test_report_and_disclosure_columns(self):
-        r = _resolve_columns(_table(REPORT_HEAD), _REPORT_RULES, what="리포트")
-        self.assertEqual((r["broker"], r["date"], r["views"]), (2, 4, 5))
-        d = _resolve_columns(_table(DISCLOSURE_HEAD), _DISCLOSURE_RULES, what="공시")
-        self.assertEqual((d["title"], d["source"], d["date"]), (0, 1, 2))
+class GroupListTests(_JsonServing):
+    async def test_theme_list_keeps_counts_in_their_own_fields(self):
+        self._serve(lambda url, params: {"groups": [THEME_GROUP], "totalCount": 266})
+        themes = await _naver.list_themes(1)
 
-    def test_renamed_column_raises(self):
-        head = THEME_DETAIL_HEAD.replace("<th>현재가</th>", "<th>체결가</th>")
+        self.assertEqual(len(themes), 1)
+        t = themes[0]
+        self.assertEqual(t["theme_id"], "405")
+        self.assertEqual(t["change_rate"], "+7.69%")
+        self.assertEqual(t["total_count"], 11)
+        self.assertEqual((t["up_count"], t["flat_count"], t["down_count"]), (8, 1, 2))
+
+    async def test_sector_list_shares_the_shape(self):
+        self._serve(lambda url, params: {"groups": [dict(THEME_GROUP, changeRate="-3.14")]})
+        sectors = await _naver.list_sectors()
+
+        self.assertEqual(sectors[0]["sector_id"], "405")
+        self.assertEqual(sectors[0]["change_rate"], "-3.14%")
+
+    async def test_missing_groups_key_raises(self):
+        """'테마가 없다'가 아니라 '응답이 바뀌었다'로 알려야 한다."""
+        self._serve(lambda url, params: {"stocks": []})
         with self.assertRaises(NaverParseError):
-            _resolve_columns(_table(head), _GROUP_STOCK_RULES, what="테마 상세")
+            await _naver.list_themes(1)
+
+    async def test_empty_group_list_is_not_an_error(self):
+        self._serve(lambda url, params: {"groups": []})
+        self.assertEqual(await _naver.list_themes(7), [])
+
+
+class GroupMemberTests(_JsonServing):
+    def _router(self, reasons=None):
+        def route(url, params):
+            if url.endswith("/stocks/theme"):
+                return {"groups": [THEME_GROUP]}
+            return {
+                "stocks": [GROUP_STOCK],
+                "groupInfo": THEME_GROUP,
+                "themeItemInfoMap": reasons or {},
+            }
+
+        return route
+
+    async def test_price_and_volume_come_from_named_fields(self):
+        self._serve(self._router())
+        result = await _naver.get_theme_stocks("MLCC", count=5)
+
+        stock = result["stocks"][0]
+        self.assertEqual(stock["code"], "052710")
+        self.assertEqual(stock["price"], 15130)        # 호가가 아니라 종가
+        self.assertEqual(stock["volume"], 3396316)
+        self.assertEqual(stock["change_rate"], "+29.98%")
+
+    async def test_reason_is_matched_by_code_not_by_position(self):
+        self._serve(self._router({"052710": "MLCC를 새 사업 아이템으로 양산중."}))
+        stock = (await _naver.get_theme_stocks("MLCC", count=5))["stocks"][0]
+        self.assertTrue(stock["reason"].startswith("MLCC를 새 사업"))
+
+    async def test_reason_of_another_code_never_leaks_in(self):
+        self._serve(self._router({"005930": "전혀 다른 종목의 편입사유"}))
+        stock = (await _naver.get_theme_stocks("MLCC", count=5))["stocks"][0]
+        self.assertEqual(stock["reason"], "")
+
+    async def test_unknown_theme_returns_empty_not_error(self):
+        self._serve(lambda url, params: {"groups": []})
+        result = await _naver.get_theme_stocks("없는테마", count=5)
+        self.assertIsNone(result["theme_id"])
+        self.assertEqual(result["stocks"], [])
+
+
+class ReportListTests(_JsonServing):
+    REPORT = {
+        "nid": "96027",
+        "title": "HBM으로 매크로 우려 극복",
+        "brokerName": "미래에셋증권",
+        "writeDate": "2026-09-07",
+        "readCount": "32873",
+        "itemCode": "005930",
+        "itemName": "삼성전자",
+        "goalPrice": "400000",
+        "opinionText": "매수",
+        "content": "<p><strong>환율 하락효과</strong> 반영</p>",
+        "attachUrl": "https://stock.pstatic.net/a.pdf",
+    }
+
+    async def test_fields_keep_their_labels(self):
+        self._serve(lambda url, params: {"005930": [self.REPORT]})
+        rows = await _naver.get_reports("005930", 3)
+
+        self.assertEqual(rows[0]["broker"], "미래에셋증권")
+        self.assertEqual(rows[0]["date"], "2026-09-07")
+        self.assertEqual(rows[0]["views"], 32873)
+        self.assertEqual(rows[0]["stock"], "삼성전자")
+
+    async def test_stock_without_reports_is_empty_not_error(self):
+        self._serve(lambda url, params: {})
+        self.assertEqual(await _naver.get_reports("999999", 3), [])
+
+    async def test_detail_strips_markup_and_keeps_numbers(self):
+        self._serve(lambda url, params: self.REPORT)
+        detail = await _naver.get_report_detail("96027")
+
+        self.assertEqual(detail["target_price"], 400000)
+        self.assertEqual(detail["opinion"], "매수")
+        self.assertEqual(detail["pdf_url"], "https://stock.pstatic.net/a.pdf")
+        self.assertNotIn("<", detail["summary"])
+
+    async def test_detail_without_body_is_flagged_not_silent(self):
+        self._serve(lambda url, params: {k: v for k, v in self.REPORT.items() if k != "content"})
+        detail = await _naver.get_report_detail("96027")
+        self.assertEqual(detail[_naver.PARSE_MISS_KEY], ["summary"])
 
 
 # ---------------------------------------------------------------------------
-# 10. 랭킹·시장지수 (2026-08-17)
+# 10. 랭킹·시장지수 (2026-08-17 / 2026-09-11 갱신)
 # ---------------------------------------------------------------------------
 #
-# 랭킹 표는 페이지마다 6번 칸부터 구성이 다르다(거래량 페이지는 '거래대금',
-# 상승률 페이지는 '매수호가'). 공용 파서가 자리를 가정하고 있었다.
-# 시장지수는 파싱 실패 시 원문 문자열을 그대로 value 에 넣어, 숫자 자리에
-# 문자열이 앉았다.
+# 랭킹은 페이지마다 표 구성이 달라 공용 파서가 자리를 가정하고 있었다. 지금은
+# 정렬 키만 다른 하나의 API 라 그 문제가 사라졌다. 남은 계약은 단위다 —
+# `market_cap_billion` 은 이름이 '억원'이므로 원 단위를 그대로 실으면 안 된다.
 
-from stock_mcp_server.naver import (  # noqa: E402
-    _MARKET_CAP_RULES,
-    _RANKING_RULES,
-)
-
-QUANT_HEAD = (
-    "<tr><th>N</th><th>종목명</th><th>현재가</th><th>전일비</th><th>등락률</th>"
-    "<th>거래량</th><th>거래대금</th><th>매수호가</th><th>매도호가</th>"
-    "<th>시가총액</th><th>PER</th><th>ROE</th></tr>"
-)
-RISE_HEAD = (
-    "<tr><th>N</th><th>종목명</th><th>현재가</th><th>전일비</th><th>등락률</th>"
-    "<th>거래량</th><th>매수호가</th><th>매도호가</th><th>매수총잔량</th>"
-    "<th>매도총잔량</th><th>PER</th><th>ROE</th></tr>"
-)
-MARKET_CAP_HEAD = (
-    "<tr><th>N</th><th>종목명</th><th>현재가</th><th>전일비</th><th>등락률</th>"
-    "<th>액면가</th><th>시가총액</th><th>상장주식수</th><th>외국인비율</th>"
-    "<th>거래량</th><th>PER</th><th>ROE</th><th>토론</th></tr>"
-)
+RANK_ROW = {
+    "itemcode": "005930",
+    "itemname": "삼성전자",
+    "nowPrice": "259500",
+    "prevChangeRate": "-3.53",
+    "tradeVolume": "13938673",
+    "marketSum": "1517109298000000",
+}
 
 
-class RankingColumnTests(unittest.TestCase):
-    def test_quant_and_rise_pages_share_first_columns(self):
-        q = _resolve_columns(_table(QUANT_HEAD), _RANKING_RULES, what="거래량 랭킹")
-        r = _resolve_columns(_table(RISE_HEAD), _RANKING_RULES, what="상승률 랭킹")
-        self.assertEqual(q, r)  # 쓰는 다섯 칸은 두 페이지가 같아야 한다
-        self.assertEqual(q["volume"], 5)
+class RankingFieldTests(_JsonServing):
+    async def test_rank_follows_response_order(self):
+        rows = [RANK_ROW, dict(RANK_ROW, itemcode="000660", itemname="SK하이닉스")]
+        self._serve(lambda url, params: rows)
+        ranked = await _naver.get_volume_ranking(count=5)
 
-    def test_market_cap_columns(self):
-        idx = _resolve_columns(_table(MARKET_CAP_HEAD), _MARKET_CAP_RULES, what="시가총액")
-        self.assertEqual(idx["market_cap"], 6)
-        self.assertEqual(idx["volume"], 9)  # 액면가·상장주식수 뒤로 밀려 있다
+        self.assertEqual([r["rank"] for r in ranked], [1, 2])
+        self.assertEqual(ranked[0]["code"], "005930")
 
-    def test_ranking_rules_fail_loudly_on_rename(self):
-        head = QUANT_HEAD.replace("<th>거래량</th>", "<th>체결량</th>")
+    async def test_change_rate_keeps_its_sign(self):
+        self._serve(lambda url, params: [RANK_ROW])
+        ranked = await _naver.get_change_ranking("down", "ALL", 5)
+        self.assertEqual(ranked[0]["change_rate"], "-3.53%")
+
+    async def test_market_cap_is_converted_to_its_label_unit(self):
+        """`market_cap_billion` 의 단위는 억원이다. 원 단위를 그대로 넣으면 안 된다."""
+        self._serve(lambda url, params: [RANK_ROW])
+        ranked = await _naver.get_market_cap_ranking("KOSPI", 5)
+        self.assertEqual(ranked[0]["market_cap_billion"], 15171092)
+
+    async def test_trade_value_is_an_estimate_from_price_times_volume(self):
+        """키 이름이 '_est_' 다 — 실제 체결 거래대금이 아니라 추산임을 유지한다."""
+        self._serve(lambda url, params: [RANK_ROW])
+        ranked = await _naver.get_volume_ranking(count=5)
+        self.assertEqual(ranked[0]["trade_value_est_krw"], 259500 * 13938673)
+
+    async def test_shape_change_raises_instead_of_silent_empty(self):
+        self._serve(lambda url, params: {"datas": []})
         with self.assertRaises(NaverParseError):
-            _resolve_columns(_table(head), _RANKING_RULES, what="거래량 랭킹")
+            await _naver.get_volume_ranking(count=5)
 
 
-class MarketIndexValueTests(unittest.IsolatedAsyncioTestCase):
+class MarketIndexValueTests(_JsonServing):
+    def _index_payload(self, **over):
+        base = {
+            "itemCode": "KOSPI",
+            "closePrice": "6,909.91",
+            "compareToPreviousClosePrice": "-124.01",
+            "fluctuationsRatio": "-1.76",
+        }
+        base.update(over)
+        return {"datas": [base, dict(base, itemCode="KOSDAQ")]}
+
+    async def test_signs_come_from_the_values_not_a_direction_label(self):
+        """방향 라벨은 값과 어긋난 채 내려온 적이 있다 — 부호는 숫자에서 읽는다."""
+        self._serve(lambda url, params: self._index_payload())
+        items = await _naver.get_market_index()
+
+        self.assertEqual(items[0]["value"], 6909.91)
+        self.assertEqual(items[0]["change_value"], -124.01)
+        self.assertEqual(items[0]["change_rate"], -1.76)
+
     async def test_unparseable_index_value_is_missing_not_string(self):
         """예전엔 float 실패 시 원문 문자열을 value 에 넣었다."""
-        html = (
-            '<em id="now_value">N/A</em>'
-            '<span class="fluc" id="change_value_and_rate">'
-            '<span>164.60</span> +2.42%<span class="blind">상승</span></span>'
-        )
-
-        async def _fetch(url, params=None, **kwargs):
-            return types.SimpleNamespace(text=html)
-
-        real, _naver.fetch = _naver.fetch, _fetch
-        clear_cache()
-        try:
-            items = await _naver.get_market_index()
-        finally:
-            _naver.fetch = real
-            clear_cache()
+        self._serve(lambda url, params: self._index_payload(closePrice="N/A"))
+        items = await _naver.get_market_index()
 
         for item in items:
             self.assertNotIn("value", item)
             self.assertIn("value", item[_naver.PARSE_MISS_KEY])
-            self.assertEqual(item["change_value"], 164.6)  # 부호 복원까지 확인
 
-    async def test_down_day_index_change_value_is_negative(self):
-        html = (
-            '<em id="now_value">6,977.94</em>'
-            '<span class="fluc" id="change_value_and_rate">'
-            '<span>164.60</span> -2.42%<span class="blind">하락</span></span>'
-        )
+    async def test_absent_index_is_reported_not_invented(self):
+        self._serve(lambda url, params: {"datas": []})
+        items = await _naver.get_market_index()
 
-        async def _fetch(url, params=None, **kwargs):
-            return types.SimpleNamespace(text=html)
+        self.assertEqual([i["index"] for i in items], ["KOSPI", "KOSDAQ"])
+        for item in items:
+            self.assertEqual(
+                item[_naver.PARSE_MISS_KEY], ["value", "change_value", "change_rate"]
+            )
 
-        real, _naver.fetch = _naver.fetch, _fetch
-        clear_cache()
-        try:
-            items = await _naver.get_market_index()
-        finally:
-            _naver.fetch = real
-            clear_cache()
-
-        self.assertEqual(items[0]["change_value"], -164.6)
-        self.assertEqual(items[0]["change_rate"], -2.42)
 
 
 # ---------------------------------------------------------------------------
@@ -734,6 +719,16 @@ class SourceFormatChangeTests(unittest.IsolatedAsyncioTestCase):
     def _serve_text(self, text: str):
         async def _fetch(url, params=None, **kwargs):
             return types.SimpleNamespace(text=text)
+
+        self._real = _naver.fetch
+        _naver.fetch = _fetch
+        clear_cache()
+
+    def _serve_json(self, router):
+        async def _fetch(url, params=None, **kwargs):
+            return types.SimpleNamespace(
+                status_code=200, text="", json=lambda: router(url, params or {})
+            )
 
         self._real = _naver.fetch
         _naver.fetch = _fetch
@@ -770,14 +765,100 @@ class SourceFormatChangeTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_financials_missing_table_is_flagged_not_silent(self):
         """종목명은 읽히는데 재무 표가 없으면 '자료 없음'이 아니라 파싱 실패다."""
-        self._serve_text(
-            '<div class="wrap_company"><h2><a>삼성전자</a></h2></div><body></body>'
-        )
+
+        def route(url, params):
+            if url.endswith("/integration"):
+                return {"stockName": "삼성전자"}
+            return {"itemCode": "005930", "financeInfo": None}
+
+        self._serve_json(route)
         data = await _naver.get_financials("005930")
         self.assertEqual(data.get(_naver.PARSE_MISS_KEY), ["financial_table"])
 
     async def test_financials_unknown_page_is_not_flagged(self):
         """종목명조차 없으면 잘못된 코드일 수 있어 파싱 실패로 단정하지 않는다."""
-        self._serve_text("<html><body></body></html>")
+
+        def route(url, params):
+            if url.endswith("/integration"):
+                return {"code": "StockConflict"}
+            return {"itemCode": "999999", "financeInfo": None}
+
+        self._serve_json(route)
         data = await _naver.get_financials("999999")
         self.assertNotIn(_naver.PARSE_MISS_KEY, data)
+
+    async def test_financials_keep_annual_and_quarterly_apart(self):
+        """[연간 …, 분기 …] 로 이어 붙이고 경계를 _periods 로 알려야 한다."""
+
+        def route(url, params):
+            if url.endswith("/integration"):
+                return {"stockName": "삼성전자", "totalInfos": [
+                    {"code": "marketValue", "key": "시총", "value": "1,517조 1,093억"},
+                    {"code": "dividendYieldRatio", "key": "배당수익률",
+                     "value": "0.64%", "valueDesc": "2025.12."},
+                ]}
+            period = "quarter" if url.endswith("/quarter") else "annual"
+            titles = (
+                [{"isConsensus": "N", "title": "2026.06.", "key": "202606"}]
+                if period == "quarter"
+                else [{"isConsensus": "N", "title": "2025.12.", "key": "202512"}]
+            )
+            key = titles[0]["key"]
+            return {"financeInfo": {
+                "trTitleList": titles,
+                "rowList": [{"title": "PER", "columns": {key: {"value": "18.27"}}}],
+            }}
+
+        self._serve_json(route)
+        data = await _naver.get_financials("005930")
+
+        self.assertEqual(data["_periods"],
+                         {"annual": ["2025.12"], "quarterly": ["2026.06"]})
+        self.assertEqual(data["PER(배)"], ["18.27", "18.27"])   # 라벨 수와 길이가 같다
+        self.assertEqual(data["시가총액"], "1,517조 1,093억")
+
+    async def test_dividend_rate_lands_only_on_its_own_period(self):
+        """배당수익률은 valueDesc 가 말하는 기간의 값이다 — 최신 칸에 밀어 넣지 않는다."""
+
+        def route(url, params):
+            if url.endswith("/integration"):
+                return {"stockName": "삼성전자", "totalInfos": [
+                    {"code": "dividendYieldRatio", "value": "0.64%",
+                     "valueDesc": "2024.12."},
+                ]}
+            if url.endswith("/quarter"):
+                return {"financeInfo": {"trTitleList": [], "rowList": []}}
+            return {"financeInfo": {
+                "trTitleList": [
+                    {"isConsensus": "N", "title": "2024.12.", "key": "202412"},
+                    {"isConsensus": "N", "title": "2025.12.", "key": "202512"},
+                ],
+                "rowList": [{"title": "PER", "columns": {
+                    "202412": {"value": "10.75"}, "202512": {"value": "18.27"}}}],
+            }}
+
+        self._serve_json(route)
+        data = await _naver.get_financials("005930")
+
+        self.assertEqual(data["시가배당률(%)"], ["0.64", "-"])
+
+    async def test_dividend_rate_of_unknown_period_is_dropped(self):
+        """기간이 우리 라벨에 없으면 아무 칸에도 넣지 않는다."""
+
+        def route(url, params):
+            if url.endswith("/integration"):
+                return {"stockName": "삼성전자", "totalInfos": [
+                    {"code": "dividendYieldRatio", "value": "0.64%",
+                     "valueDesc": "2019.12."},
+                ]}
+            if url.endswith("/quarter"):
+                return {"financeInfo": {"trTitleList": [], "rowList": []}}
+            return {"financeInfo": {
+                "trTitleList": [{"isConsensus": "N", "title": "2025.12.", "key": "202512"}],
+                "rowList": [{"title": "PER", "columns": {"202512": {"value": "18.27"}}}],
+            }}
+
+        self._serve_json(route)
+        data = await _naver.get_financials("005930")
+
+        self.assertNotIn("시가배당률(%)", data)

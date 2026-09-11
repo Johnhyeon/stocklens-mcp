@@ -15,30 +15,102 @@ from stock_mcp_server._cache import cached
 BASE_URL = "https://finance.naver.com"
 FCHART_URL = "https://fchart.stock.naver.com/siseJson.nhn"
 
-# div.description 안의 em 중 '종목 상태 마커가 아닌' 것들.
-# date=기준일, realtime=실시간 배지, summary=기업개요 본문.
-_NON_STATUS_EM_CLASSES = {"date", "realtime", "summary"}
+# 2026-09 네이버가 finance.naver.com 의 HTML 화면을 전부 폐지하고 stock.naver.com
+# (SPA)으로 302 를 태웠다. 우리 클라이언트는 follow_redirects=True 라 200 OK 로
+# SPA 껍데기를 받아왔고, 셀렉터가 하나도 안 맞아 국내 도구가 통째로 죽었다.
+# 그 화면들이 실제로 쓰는 JSON API 로 갈아탄다 — 리다이렉트를 막는 우회는
+# 답이 아니다. 구주소에는 내용이 남아 있지 않고 302 만 온다.
+#
+# 아래 세 호스트가 서로 다른 것을 준다. 섞어 쓰면 안 된다:
+#   MSTOCK_API   종목 단위 상세(시세·수급·재무)와 테마/업종 그룹
+#   STOCK_API    시장 단위 목록·랭킹, 증권사 리포트
+#   POLLING_API  종목 여러 개의 시세를 한 번에 (배치 전용)
+MSTOCK_API = "https://m.stock.naver.com/api"
+STOCK_API = "https://stock.naver.com/api"
+POLLING_API = "https://polling.finance.naver.com/api"
 
-# 시장경보 목록 페이지. type은 실제 탭 링크에서 확인한 값만 쓴다
-# (trading_halt 같은 추측 값은 기본 페이지를 돌려주므로 넣지 않는다).
-_ALERT_TYPES = {
-    "caution": "투자주의",
-    "warning": "투자경고",
-    "risk": "투자위험",
-}
+# 시장 단위 목록 API 의 정렬 키. stock.naver.com 이 실제로 보내는 값만 쓴다
+# (추측한 이름은 404 가 아니라 엉뚱한 목록을 돌려줄 수 있다).
+_ORDER_VOLUME = "quantTop"
+_ORDER_UP = "up"
+_ORDER_DOWN = "down"
+_ORDER_MARKET_SUM = "marketSum"
+_ORDER_ALERT = "marketAlertType"
 
 
-def _parse_int(text: str, default: int = 0) -> int:
-    """'+1,234', '-1,234', '1,234', '-' 등을 정수로 변환합니다."""
+async def _api_json(url: str, *, what: str, params=None):
+    """네이버 JSON API 를 호출해 파싱된 본문을 돌려준다.
+
+    HTML 을 돌려받는 경우를 성공으로 세지 않는다 — 그게 이번(2026-09) 사고의
+    모양이었다. 200 OK 에 SPA 껍데기가 실려 왔고, 파서는 '데이터 없음'을 돌려줬다.
+    JSON 이 아니면 '못 읽었다'로 올린다.
+    """
+    resp = await fetch(url, params=params)
+    try:
+        return resp.json()
+    except Exception as exc:
+        raise NaverParseError(
+            f"{what}: 네이버가 JSON 대신 다른 응답을 줬습니다 "
+            f"(status={getattr(resp, 'status_code', '?')}, url={url}). 구조 변경 가능성."
+        ) from exc
+
+
+def _api_list(payload, *, what: str, key: str | None = None) -> list:
+    """API 응답에서 행 목록을 꺼낸다. 모양이 다르면 파싱 실패로 올린다.
+
+    빈 목록은 그대로 통과시킨다 — '조회 결과가 없다'와 '구조가 바뀌었다'는
+    다른 사건이고, 여기서 섞으면 정상적으로 결과가 0건인 조회까지 오류가 된다.
+    """
+    rows = payload if key is None else (payload or {}).get(key)
+    if not isinstance(rows, list):
+        raise NaverParseError(
+            f"{what}: 응답에서 목록({key or 'root'})을 찾지 못했습니다 (네이버 구조 변경 가능성)."
+        )
+    return rows
+
+
+def _num(text, default=None):
+    """'259,500' · '+3,643,746' · '46.65%' · 'N/A' → float. 못 읽으면 default.
+
+    결측을 0으로 바꾸지 않는다. 거래량 0은 거래정지 종목의 실제 값이라,
+    '못 읽었다'와 같은 자리에 두면 둘을 영영 구분할 수 없다.
+    """
     if text is None:
         return default
-    cleaned = text.strip().replace(",", "").replace("+", "")
-    if not cleaned or cleaned == "-":
+    cleaned = str(text).strip().replace(",", "").replace("%", "").replace("+", "")
+    if not cleaned or cleaned in ("-", "N/A"):
         return default
     try:
-        return int(cleaned)
+        return float(cleaned)
     except ValueError:
         return default
+
+
+def _num_int(text, default=None):
+    """_num 의 정수판. 소수점이 붙어 와도 잘라서 정수로 돌려준다."""
+    val = _num(text, default=None)
+    return default if val is None else int(val)
+
+
+def _rate_text(value, default: str = "") -> str:
+    """등락률 숫자를 부호 붙은 표시 문자열로. '7.69' → '+7.69%', '-3.14' → '-3.14%'."""
+    rate = _num(value)
+    return default if rate is None else f"{rate:+.2f}%"
+
+
+def _signed_rate(row: dict) -> str:
+    """등락률을 사람이 읽는 문자열로. 부호는 네이버가 주는 방향 코드로 붙인다.
+
+    fluctuationsRatio 에는 보통 네이버가 부호를 붙여 주지만, 방향 코드
+    (compareToPreviousPrice.code — 4=하한, 5=하락)와 어긋나면 코드를 따른다.
+    """
+    raw = _num(row.get("fluctuationsRatio"))
+    if raw is None:
+        return ""
+    code = str((row.get("compareToPreviousPrice") or {}).get("code") or "")
+    if code in ("4", "5") and raw > 0:      # 4=하한, 5=하락
+        raw = -raw
+    return f"{raw:+.2f}%"
 
 
 @cached(ttl_market=600, ttl_closed=86400)  # 장중 10분, 장마감 1일
@@ -148,8 +220,29 @@ PARSE_MISS_KEY = "_parse_miss"
 _RATE_INFO_REQUIRED = ("price", "change", "open", "high", "low", "volume")
 
 
-def _parse_rate_info(scope) -> tuple[dict, list[str]]:
-    """rate_info 블록(KRX 또는 NXT) 하나에서 현재가/전일대비/시가/고가/저가/거래량을 추출합니다.
+# 시장경보 코드 → 라벨. stock.naver.com 이 쓰는 값 그대로다.
+_MARKET_ALERT_LABELS = {"01": "투자주의", "02": "투자경고", "03": "투자위험"}
+
+
+def _status_flags(d: dict) -> list[str]:
+    """상세 응답의 상태 플래그를 사람이 읽는 라벨로. 없으면 빈 리스트.
+
+    라벨을 우리가 새로 짓지 않는다 — 관리종목·투자경고는 시장이 쓰는 말이고,
+    여기서 말을 바꾸면 사용자가 HTS 에서 본 것과 대조할 수 없다.
+    """
+    flags: list[str] = []
+    if str(d.get("manageStatusGb") or "0") != "0" or d.get("isManagement") == "Y":
+        flags.append("관리종목")
+    alert = _MARKET_ALERT_LABELS.get(str(d.get("marketAlertType") or "00"))
+    if alert:
+        flags.append(alert)
+    if d.get("tradeStopYn") == "Y" or d.get("isTradingHalt") == "Y":
+        flags.append("거래정지")
+    return flags
+
+
+def _rate_info(d: dict) -> tuple[dict, list[str]]:
+    """상세 응답에서 현재가/전일대비/시가/고가/저가/거래량을 뽑는다.
 
     Returns:
         (읽어낸 값, 못 읽은 필드 이름 목록).
@@ -158,114 +251,84 @@ def _parse_rate_info(scope) -> tuple[dict, list[str]]:
     '못 읽었다'와 같은 자리에 두면 둘을 영영 구분할 수 없다.
     """
     info: dict = {}
-
-    price_tag = scope.select_one("p.no_today span.blind")
-    if price_tag:
-        price = _parse_int_strict(price_tag.text)
-        if price is not None:
-            info["price"] = price
-
-    diff_tag = scope.select_one("p.no_exday em span.blind")
-    if diff_tag:
-        diff_text = diff_tag.text.replace(",", "")
-        icon = scope.select_one("p.no_exday em.no_up, p.no_exday em.no_down")
-        if icon and "no_down" in icon.get("class", []):
-            diff_text = "-" + diff_text
-        change = _parse_int_strict(diff_text)
-        if change is not None:
-            info["change"] = change
-
-    # 네이버 no_info 테이블 구조: td마다 span.sptxt(라벨) + em > span.blind(값)
-    for td in scope.select("table.no_info td"):
-        label_tag = td.select_one("span.sptxt")
-        value_tag = td.select_one("em > span.blind")
-        if not label_tag or not value_tag:
-            continue
-
-        label = label_tag.text.strip()
-        value = _parse_int_strict(value_tag.text)
-        if value is None:
-            continue
-
-        if "거래량" in label:
-            info["volume"] = value
-        elif "시가" in label:
-            info["open"] = value
-        elif "고가" in label and "상한" not in label:
-            info["high"] = value
-        elif "저가" in label and "하한" not in label:
-            info["low"] = value
-
+    for key, src in (
+        ("price", "nowPrice"),
+        ("change", "prevChangePrice"),
+        ("open", "openPrice"),
+        ("high", "highPrice"),
+        ("low", "lowPrice"),
+        ("volume", "tradeVolume"),
+    ):
+        val = _num_int(d.get(src))
+        if val is not None:
+            info[key] = val
     return info, [f for f in _RATE_INFO_REQUIRED if f not in info]
+
+
+def _quote_date(trade_time) -> str | None:
+    """'20260911161021' → '2026-09-11'. 못 읽으면 None(호출부가 캘린더로 대체)."""
+    raw = str(trade_time or "")
+    if len(raw) >= 8 and raw[:8].isdigit():
+        return f"{raw[:4]}-{raw[4:6]}-{raw[6:8]}"
+    return None
+
+
+async def _stock_detail(code: str, code_type: str = "KRX") -> dict:
+    """종목 상세(시세·재무비율·업종·상태) 한 방. stock.naver.com 종목 화면의 소스다."""
+    return await _api_json(
+        f"{STOCK_API}/domestic/detail/{code}/detail",
+        params={"codeType": code_type},
+        what=f"종목 상세({code})",
+    )
 
 
 @cached(ttl_market=30, ttl_closed=3600)  # 장중 30초, 장마감 1시간
 async def get_current_price(code: str) -> dict:
     """종목의 현재가 정보를 가져옵니다.
 
-    코스피200/코스닥150 등 NXT 대상 종목은 네이버가 KRX/NXT 탭으로 시세를 나눠 보여주며,
-    두 table.no_info가 한 페이지에 동시에 존재한다. KRX를 기본값으로 쓰고 NXT는
-    nxt_ 접두사 필드로 별도 반환해 두 시장 수치가 섞이지 않게 한다.
+    코스피200/코스닥150 등 NXT 대상 종목은 KRX/NXT 시세가 따로 존재한다.
+    KRX를 기본값으로 쓰고 NXT는 nxt_ 접두사 필드로 별도 반환해 두 시장 수치가
+    섞이지 않게 한다. NXT 대상인지 여부는 추측하지 않고 sosok 응답의
+    isNxtYn 을 그대로 따른다.
     """
-    url = f"{BASE_URL}/item/main.naver?code={code}"
-    resp = await fetch(url)
-    soup = BeautifulSoup(resp.text, "lxml")
-
-    result = {"code": code}
-
-    # 종목명
-    name_tag = soup.select_one("div.wrap_company h2 a")
-    if name_tag:
-        result["name"] = name_tag.text.strip()
-
-    desc = soup.select_one("div.wrap_company div.description")
-
-    # 네이버가 페이지 상단에 "2026.08.14 기준(KRX 장마감)"으로 **기준일을 직접**
-    # 명시한다. 우리 시장 캘린더로 역산하는 것보다 이게 정확하다(예상 못 한 휴장
-    # 포함). 못 찾으면 None으로 두고 호출부가 캘린더로 대체한다.
-    stamp = desc.select_one("em.date") if desc else None
-    stamp_text = " ".join(stamp.get_text(" ", strip=True).split()) if stamp else ""
-    m = re.search(r"(20\d{2})[.\-/](\d{1,2})[.\-/](\d{1,2})", stamp_text)
-    result["quote_date"] = (
-        f"{m.group(1)}-{int(m.group(2)):02d}-{int(m.group(3)):02d}" if m else None
+    detail, sosok = await asyncio.gather(
+        _stock_detail(code, "KRX"),
+        _api_json(f"{STOCK_API}/domestic/detail/{code}/sosok", what=f"시장 구분({code})"),
+        return_exceptions=True,
     )
+    if isinstance(detail, BaseException):
+        raise detail
+    if not isinstance(detail, dict) or not detail.get("itemcode"):
+        raise NaverParseError(
+            f"종목 상세 응답에 시세가 없습니다 (code={code}). 네이버 구조 변경 가능성."
+        )
 
-    # 종목 상태(관리종목·투자경고·투자주의 등). 같은 div.description 안에 em으로
-    # 붙는다 — 035290은 em.caution "투자주의" + em.manage "관리종목",
-    # 024850은 em.warning "투자경고", 정상 종목(039840)은 아무것도 없다.
-    # 클래스 이름을 화이트리스트로 잡으면 새 유형(투자위험·거래정지 등)이 생겼을 때
-    # 조용히 놓친다. 그래서 **마커가 아닌 것만 제외**하고 나머지는 텍스트 그대로
-    # 싣는다 — 라벨은 네이버가 이미 한글로 써 준다.
-    result["status_flags"] = (
-        [
-            t
-            for em in desc.select("em")
-            if not (set(em.get("class") or []) & _NON_STATUS_EM_CLASSES)
-            for t in [" ".join(em.get_text(" ", strip=True).split())]
-            if t and len(t) <= 12
-        ]
-        if desc
-        else []
-    )
+    result: dict = {"code": code}
+    if detail.get("itemname"):
+        result["name"] = detail["itemname"]
+    result["quote_date"] = _quote_date(detail.get("tradeTime"))
+    result["status_flags"] = _status_flags(detail)
 
-    # KRX 블록이 없는(NXT 비대상) 종목은 페이지 전체를 그대로 스코프로 사용
-    krx_scope = soup.select_one("#rate_info_krx") or soup
-    krx_info, krx_missing = _parse_rate_info(krx_scope)
+    krx_info, krx_missing = _rate_info(detail)
     result.update(krx_info)
 
-    nxt_scope = soup.select_one("#rate_info_nxt")
-    if nxt_scope:
-        # NXT는 부가 정보다. 여기 결측을 본 조회의 흠으로 세지 않는다.
-        nxt_info, _ = _parse_rate_info(nxt_scope)
-        for key, value in nxt_info.items():
-            result[f"nxt_{key}"] = value
+    is_nxt = isinstance(sosok, dict) and sosok.get("isNxtYn") == "Y"
+    if is_nxt:
+        try:
+            nxt = await _stock_detail(code, "NXT")
+        except Exception:
+            nxt = None          # NXT는 부가 정보다. 실패해도 본 조회를 막지 않는다.
+        if isinstance(nxt, dict):
+            nxt_info, _ = _rate_info(nxt)
+            for key, value in nxt_info.items():
+                result[f"nxt_{key}"] = value
 
     # 호출부가 '값이 없다'와 '우리가 못 읽었다'를 구분할 수 있게 실어 보낸다.
     result[PARSE_MISS_KEY] = krx_missing
     return result
 
 
-@cached(ttl_market=1800, ttl_closed=86400)  # 시장경보는 하루 단위로만 바뀐다
+@cached(ttl_market=1800, ttl_closed=7200)  # 시장경보는 하루 단위로만 바뀐다
 async def get_alert_codes() -> dict[str, list[str]]:
     """시장경보 종목 → {종목코드: [경보 라벨]}.
 
@@ -279,20 +342,19 @@ async def get_alert_codes() -> dict[str, list[str]]:
 
     async def one(alert_type: str, label: str) -> None:
         try:
-            resp = await fetch(
-                f"{BASE_URL}/sise/investment_alert.naver", params={"type": alert_type}
+            rows = await _market_stock_list(
+                order_type=_ORDER_ALERT, market="ALL", size=300, alert_type=alert_type
             )
         except Exception:
             return  # 경보 목록은 부가 정보다. 실패해도 본 조회를 막지 않는다.
-        soup = BeautifulSoup(resp.text, "lxml")
-        for a in soup.select('table a[href*="code="]'):
-            m = re.search(r"code=(\d{6})", a.get("href", ""))
-            if m:
-                out.setdefault(m.group(1), [])
-                if label not in out[m.group(1)]:
-                    out[m.group(1)].append(label)
+        for row in rows:
+            code = str(row.get("itemcode") or "")
+            if len(code) == 6:
+                out.setdefault(code, [])
+                if label not in out[code]:
+                    out[code].append(label)
 
-    await asyncio.gather(*(one(t, lbl) for t, lbl in _ALERT_TYPES.items()))
+    await asyncio.gather(*(one(t, lbl) for t, lbl in _MARKET_ALERT_LABELS.items()))
     return out
 
 
@@ -378,68 +440,6 @@ def _resolve_columns(table, rules: tuple[ColumnRule, ...], *, what: str) -> dict
     return mapping
 
 
-_FLOW_COLUMN_RULES: tuple[ColumnRule, ...] = (
-    ("date", ("날짜",), ()),
-    ("close", ("종가",), ()),
-    ("change", ("전일비",), ()),
-    ("change_rate", ("등락률",), ()),
-    ("volume", ("거래량",), ()),
-    ("institutional", ("기관", "순매매"), ()),
-    ("foreign", ("외국인", "순매매"), ()),
-)
-
-# 테마 목록(sise/theme.naver) — 2단 헤더. '전일대비'는 등락현황 묶음에도 들어 있어
-# must_not 으로 갈라야 한다.
-_THEME_LIST_RULES: tuple[ColumnRule, ...] = (
-    ("name", ("테마명",), ()),
-    ("change_rate", ("전일대비",), ("등락현황",)),
-    ("recent_3d_rate", ("최근3일",), ()),
-    ("up_count", ("등락현황", "상승"), ()),
-    ("flat_count", ("등락현황", "보합"), ()),
-    ("down_count", ("등락현황", "하락"), ()),
-)
-
-# 업종 목록(sise/sise_group.naver) — 테마와 같은 꼴에 '전체' 칸이 하나 더 있다.
-_SECTOR_LIST_RULES: tuple[ColumnRule, ...] = (
-    ("name", ("업종명",), ()),
-    ("change_rate", ("전일대비",), ("등락현황",)),
-    ("total_count", ("등락현황", "전체"), ()),
-    ("up_count", ("등락현황", "상승"), ()),
-    ("flat_count", ("등락현황", "보합"), ()),
-    ("down_count", ("등락현황", "하락"), ()),
-)
-
-# 테마/업종 상세의 종목 표 — 헤더가 동일하다. 테마 쪽은 '종목명'이 colspan=2라
-# 편입사유 칸까지 헤더가 이미 세어 주므로 인덱스가 저절로 맞는다.
-# '거래량'은 '전일거래량'에도 들어 있어 must_not 이 필요하다.
-_GROUP_STOCK_RULES: tuple[ColumnRule, ...] = (
-    ("price", ("현재가",), ()),
-    ("change_rate", ("등락률",), ()),
-    ("volume", ("거래량",), ("전일",)),
-)
-
-# 랭킹 표(거래량/상승률/하락률) — 6번 칸부터 페이지마다 구성이 달라서 공용 위치를
-# 쓰면 안 된다. 여기서 쓰는 다섯 칸은 어느 페이지에나 같은 이름으로 있다.
-_RANKING_RULES: tuple[ColumnRule, ...] = (
-    ("rank", ("N",), ()),
-    ("name", ("종목명",), ()),
-    ("price", ("현재가",), ()),
-    ("change_rate", ("등락률",), ()),
-    ("volume", ("거래량",), ()),
-)
-
-_MARKET_CAP_RULES: tuple[ColumnRule, ...] = _RANKING_RULES + (
-    ("market_cap", ("시가총액",), ()),
-)
-
-_REPORT_RULES: tuple[ColumnRule, ...] = (
-    ("stock", ("종목명",), ()),
-    ("title", ("제목",), ()),
-    ("broker", ("증권사",), ()),
-    ("date", ("작성일",), ()),
-    ("views", ("조회수",), ()),
-)
-
 _DISCLOSURE_RULES: tuple[ColumnRule, ...] = (
     ("title", ("제목",), ()),
     ("source", ("정보제공",), ()),
@@ -447,13 +447,8 @@ _DISCLOSURE_RULES: tuple[ColumnRule, ...] = (
 )
 
 
-def _resolve_flow_columns(table) -> dict[str, int]:
-    """수급 표 헤더를 읽어 '필드 → 컬럼 인덱스'를 만든다."""
-    return _resolve_columns(table, _FLOW_COLUMN_RULES, what="수급 표")
-
-
 def _parse_int_strict(text: str | None) -> int | None:
-    """숫자로 못 읽으면 None. `_parse_int`는 실패 시 0을 돌려주는데, 수급에서 0은
+    """숫자로 못 읽으면 None. 네이버 숫자는 결측이 0과 구분돼야 한다 — 수급에서 0은
     '순매매 0주'라는 실제 의미가 있어서 결측과 섞이면 안 된다."""
     if text is None:
         return None
@@ -466,276 +461,288 @@ def _parse_int_strict(text: str | None) -> int | None:
         return None
 
 
-def _parse_rate(text: str | None) -> float | None:
-    """'+2.43%' → 2.43, '-0.43%' → -0.43. 못 읽으면 None."""
-    if text is None:
-        return None
-    cleaned = text.strip().replace("%", "").replace("+", "").replace(",", "")
-    if not cleaned or cleaned == "-":
-        return None
-    try:
-        return float(cleaned)
-    except ValueError:
-        return None
-
-
-def _signed_change(change_td, rate: float | None) -> int | None:
-    """전일비에 부호를 붙인다.
-
-    네이버는 전일비를 **절댓값**으로만 주고 방향은 따로 표시한다
-    (`<em class="bu_pup|bu_pdn">` + `<span class="blind">상승|하락</span>`).
-    그대로 숫자만 뽑으면 하락일도 양수가 되므로, 방향을 반드시 복원해야 한다.
-
-    부호 출처는 등락률 텍스트('-0.43%')를 1순위로 쓴다 — CSS 클래스명보다 덜 바뀐다.
-    방향 단서가 전혀 없고 값이 0도 아니면 추측하지 않고 None(결측)을 돌려준다.
-    """
-    if change_td is None:
-        return None
-
-    em = change_td.select_one("em")
-    marker = " ".join(em.get("class", [])) if em is not None else ""
-    blind = em.select_one("span.blind") if em is not None else None
-    word = blind.text.strip() if blind is not None else ""
-
-    # 방향 마커('상승'/'하락')를 걷어낸 뒤 숫자만 집는다. 태그 사이 공백 유무에
-    # 기대지 않으려고 get_text(구분자)와 정규식을 쓴다 — 네이버가 공백을 없애도
-    # 값이 결측으로 떨어지지 않아야 한다.
-    text = change_td.get_text(" ", strip=True)
-    if word:
-        text = text.replace(word, " ")
-    matched = re.search(r"[-+]?[\d,]+", text)
-    magnitude = _parse_int_strict(matched.group()) if matched else None
-    if magnitude is None:
-        return None
-    magnitude = abs(magnitude)
-    if magnitude == 0:
-        return 0
-
-    if rate is not None and rate != 0:
-        return -magnitude if rate < 0 else magnitude
-
-    if "하락" in word or "하한" in word or "bu_pdn" in marker or "bu_pd" in marker:
-        return -magnitude
-    if "상승" in word or "상한" in word or "bu_pup" in marker or "bu_pu" in marker:
-        return magnitude
-    return None  # 방향을 모른 채 양수로 단정하지 않는다
-
-
 @cached(ttl_market=300, ttl_closed=7200)  # 장중 5분, 장마감 2시간
 async def get_investor_flow(code: str, days: int = 20) -> list[dict]:
-    """투자자별 매매동향 (기관/외국인 순매매)을 가져옵니다.
+    """투자자별 매매동향 (개인/기관/외국인 순매매)을 가져옵니다.
 
-    네이버 증권 frgn.naver 페이지 기준:
-    - 두 번째 table.type2가 수급 데이터 테이블
-    - 컬럼은 **헤더 이름으로 찾는다** (`_resolve_flow_columns`). 자리 번호로 읽으면
-      네이버가 컬럼을 추가·재배치했을 때 기관 값이 외국인 자리로 들어가도 아무도 모른다.
-    - 개인 순매매 컬럼은 이 페이지에 없음
+    출처는 stock.naver.com 종목 화면이 쓰는 매매동향 API 다. 예전 HTML 표와 달리
+    **개인 순매매도 함께 온다** — 자리 번호가 아니라 필드 이름으로 읽으므로
+    네이버가 컬럼을 더해도 기관 값이 외국인 자리로 들어갈 일이 없다.
+
+    Args:
+        code: 종목코드 6자리
+        days: 조회할 일수 (한 번에 받는다 — 페이지를 도는 루프가 없다)
 
     Raises:
-        NaverParseError: 헤더에서 필요한 컬럼을 특정하지 못한 경우(구조 변경).
+        NaverParseError: 응답이 JSON 목록이 아닌 경우(구조 변경).
             '데이터 없음'(빈 리스트)과 구분하기 위해 예외로 알린다.
     """
-    url = f"{BASE_URL}/item/frgn.naver"
+    days = max(1, min(days, 100))
+    payload = await _api_json(
+        f"{MSTOCK_API}/stock/{code}/trend",
+        params={"pageSize": days},
+        what=f"투자자 매매동향({code})",
+    )
+    rows = _api_list(payload, what=f"투자자 매매동향({code})")
+
     results = []
-    page = 1
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        bizdate = str(row.get("bizdate") or "")
+        if len(bizdate) < 8 or not bizdate[:8].isdigit():
+            continue
 
-    while len(results) < days:
-        params = {"code": code, "page": page}
-        resp = await fetch(url, params=params)
-        soup = BeautifulSoup(resp.text, "lxml")
+        close = _parse_int_strict(row.get("closePrice"))
+        volume = _parse_int_strict(row.get("accumulatedTradingVolume"))
+        institutional = _parse_int_strict(row.get("organPureBuyQuant"))
+        foreign = _parse_int_strict(row.get("foreignerPureBuyQuant"))
+        # 핵심 값이 하나라도 결측이면 0으로 메우지 않고 행을 버린다.
+        # 수급에서 0은 '순매매 0주'라는 실제 의미라 결측과 섞이면 안 된다.
+        if None in (close, volume, institutional, foreign):
+            continue
 
-        # 두 번째 table.type2가 수급 데이터 (첫 번째는 거래원)
-        tables = soup.select("table.type2")
-        if len(tables) < 2:
-            break
+        change = _parse_int_strict(row.get("compareToPreviousClosePrice"))
+        # 전일 종가 = 종가 - 전일대비. 등락률은 이 둘에서 나온 **계산값**이다
+        # (네이버가 이 응답에 등락률을 싣지 않는다).
+        prev_close = close - change if change is not None else None
+        change_rate = (
+            round(change / prev_close * 100, 2)
+            if change is not None and prev_close
+            else None
+        )
 
-        table = tables[1]
-        idx = _resolve_flow_columns(table)  # 구조 검증 — 실패 시 NaverParseError
-        max_idx = max(idx.values())
-        rows = table.select("tr")
-        found_in_page = 0
-        for row in rows:
-            cols = row.select("td")
-            # 필요한 컬럼까지 있으면 된다. 총 개수를 고정하지 않으므로 네이버가
-            # 컬럼을 덧붙여도 깨지지 않는다(위치는 헤더가 정해준다).
-            if len(cols) <= max_idx:
-                continue
-
-            date_text = cols[idx["date"]].text.strip()
-            # 날짜 형식(YYYY.MM.DD) 체크 — 헤더/빈 행 필터링
-            if not date_text or "." not in date_text:
-                continue
-
-            rate = _parse_rate(cols[idx["change_rate"]].text)
-            close = _parse_int_strict(cols[idx["close"]].text)
-            volume = _parse_int_strict(cols[idx["volume"]].text)
-            institutional = _parse_int_strict(cols[idx["institutional"]].text)
-            foreign = _parse_int_strict(cols[idx["foreign"]].text)
-            # 핵심 값이 하나라도 결측이면 0으로 메우지 않고 행을 버린다.
-            # 수급에서 0은 '순매매 0주'라는 실제 의미라 결측과 섞이면 안 된다.
-            if None in (close, volume, institutional, foreign):
-                continue
-
-            results.append({
-                "date": date_text,
-                "close": close,
-                "change": _signed_change(cols[idx["change"]], rate),
-                "change_rate": rate,
-                "volume": volume,
-                "institutional": institutional,
-                "foreign": foreign,
-            })
-            found_in_page += 1
-
-        if found_in_page == 0:
-            break  # 더 이상 데이터 없음
-
-        if len(results) >= days:
-            break
-        page += 1
-        if page > 10:
-            break
+        results.append({
+            "date": f"{bizdate[:4]}.{bizdate[4:6]}.{bizdate[6:8]}",
+            "close": close,
+            "change": change,
+            "change_rate": change_rate,
+            "volume": volume,
+            "institutional": institutional,
+            "foreign": foreign,
+            "individual": _parse_int_strict(row.get("individualPureBuyQuant")),
+        })
 
     return results[:days]
 
 
+# 새 재무 API 의 행 이름 → 기존 키. 단위·기준이 붙은 쪽이 우리 계약이고,
+# 소비자(get_financial_batch·재무건전성·스냅샷)가 이 이름으로 값을 찾는다.
+# 이름만 짧아졌을 뿐 같은 표의 같은 줄이다.
+_FIN_ROW_ALIASES = {
+    "ROE": "ROE(지배주주)",
+    "EPS": "EPS(원)",
+    "PER": "PER(배)",
+    "BPS": "BPS(원)",
+    "PBR": "PBR(배)",
+    "주당배당금": "주당배당금(원)",
+}
+
+# 기간 라벨에서 추정치를 표시하는 꼬리표. 소비자가 이걸 보고 확정치와 가른다.
+_ESTIMATE_SUFFIX = "(E)"
+
+
+def _fin_period_labels(title_list) -> tuple[list[str], list[str]]:
+    """trTitleList → (라벨, 컬럼 키). '2026.12.' + isConsensus=Y → '2026.12(E)'."""
+    labels, keys = [], []
+    for t in title_list or []:
+        if not isinstance(t, dict):
+            continue
+        title = str(t.get("title") or "").rstrip(".")
+        key = str(t.get("key") or "")
+        if not title or not key:
+            continue
+        labels.append(title + (_ESTIMATE_SUFFIX if t.get("isConsensus") == "Y" else ""))
+        keys.append(key)
+    return labels, keys
+
+
+def _fin_rows(payload) -> tuple[list[str], list[str], dict[str, dict]]:
+    """재무 API 응답 → (기간 라벨, 컬럼 키, {행 이름: {컬럼 키: 값}})."""
+    info = (payload or {}).get("financeInfo") or {}
+    labels, keys = _fin_period_labels(info.get("trTitleList"))
+    table: dict[str, dict] = {}
+    for row in info.get("rowList") or []:
+        if not isinstance(row, dict):
+            continue
+        title = str(row.get("title") or "").strip()
+        if not title:
+            continue
+        cols = row.get("columns") or {}
+        table[title] = {
+            k: (v or {}).get("value") for k, v in cols.items() if isinstance(v, dict)
+        }
+    return labels, keys, table
+
+
 @cached(ttl_market=3600, ttl_closed=86400)  # 장중 1시간, 장마감 1일
 async def get_financials(code: str) -> dict:
-    """종목의 주요 재무지표를 가져옵니다."""
-    url = f"{BASE_URL}/item/main.naver?code={code}"
-    resp = await fetch(url)
-    soup = BeautifulSoup(resp.text, "lxml")
+    """종목의 주요 재무지표를 가져옵니다.
 
-    result = {"code": code}
+    연간·분기 표를 각각 받아 [연간 …, 분기 …] 한 줄로 이어 붙이고, 어느 구간이
+    어디까지인지는 `_periods` 로 함께 넘긴다. 값만 보고 위치로 집으면 분기값이
+    연간 확정치 자리에 들어간다.
 
-    # 종목명
-    name_tag = soup.select_one("div.wrap_company h2 a")
-    if name_tag:
-        result["name"] = name_tag.text.strip()
+    네이버가 이 표에 **시가배당률·배당성향을 더 이상 싣지 않는다**. 없는 줄은
+    만들어 내지 않고, 시가배당률은 종목 요약이 기간(`valueDesc`)과 함께 주는
+    단일 값만 그 기간 칸에 넣는다 — 나머지 칸은 '-'(결측)로 둔다.
+    """
+    annual, quarter, summary = await asyncio.gather(
+        _api_json(f"{MSTOCK_API}/stock/{code}/finance/annual", what=f"연간 재무({code})"),
+        _api_json(f"{MSTOCK_API}/stock/{code}/finance/quarter", what=f"분기 재무({code})"),
+        _api_json(f"{MSTOCK_API}/stock/{code}/integration", what=f"종목 요약({code})"),
+        return_exceptions=True,
+    )
+    if isinstance(annual, BaseException):
+        raise annual
 
-    # 투자정보 테이블 (PER, PBR, 배당수익률 등)
-    # 구조: thead[0]은 대분류(연간/분기 colspan), thead[1]은 실제 기간 라벨
-    cop_info = soup.select("div.cop_analysis table")
-    if not cop_info and name_tag:
-        # 종목명은 읽혔는데 재무 표가 통째로 없다 — 페이지 구조가 바뀐 것이다.
-        # (종목명도 못 읽었으면 애초에 종목 페이지가 아닐 가능성이 높아 여기서
-        #  단정하지 않는다.) 그냥 두면 화면엔 '재무지표 없음'으로만 뜬다.
-        result[PARSE_MISS_KEY] = ["financial_table"]
-    if cop_info:
-        for table in cop_info:
-            thead_rows = table.select("thead tr")
-            annual_count, quarterly_count = 0, 0
-            periods_flat: list[str] = []
-            if len(thead_rows) >= 2:
-                for th in thead_rows[0].select("th"):
-                    label = th.text.strip()
-                    try:
-                        span = int(th.get("colspan", "1"))
-                    except ValueError:
-                        span = 1
-                    if "연간" in label:
-                        annual_count = span
-                    elif "분기" in label:
-                        quarterly_count = span
-                periods_flat = [th.text.strip() for th in thead_rows[1].select("th")]
-                if periods_flat and len(periods_flat) == annual_count + quarterly_count:
-                    result["_periods"] = {
-                        "annual": periods_flat[:annual_count],
-                        "quarterly": periods_flat[annual_count:],
-                    }
-                    # thead 3행은 컬럼별 재무기준(IFRS연결/IFRS별도). 예전엔 통째로
-                    # 버려서, 연결과 별도가 섞인 종목도 한 줄로 보여 비교 범위가
-                    # 달라진 걸 알 수 없었다.
-                    if len(thead_rows) >= 3:
-                        bases = [th.text.strip() for th in thead_rows[2].select("th")]
-                        if len(bases) == len(periods_flat):
-                            result["_fs_basis"] = bases
+    result: dict = {"code": code}
+    if isinstance(summary, dict) and summary.get("stockName"):
+        result["name"] = summary["stockName"]
 
-            for row in table.select("tbody tr"):
-                th = row.select_one("th")
-                tds = row.select("td")
-                if th and tds:
-                    label = th.text.strip()
-                    values = [td.text.strip() for td in tds]
-                    if values:
-                        result[label] = values
+    a_labels, a_keys, a_rows = _fin_rows(annual)
+    q_labels, q_keys, q_rows = ([], [], {})
+    if isinstance(quarter, dict):
+        q_labels, q_keys, q_rows = _fin_rows(quarter)
 
-    # 시가총액, 상장주식수 등
-    aside = soup.select("div.first table tr")
-    for tr in aside:
-        th = tr.select_one("th")
-        td = tr.select_one("td")
-        if th and td:
-            label = th.get_text(strip=True)
-            # td 내부 탭/줄바꿈 제거 후 공백 한 칸으로 정리
-            value = " ".join(td.get_text(strip=True).split())
-            if "시가총액" in label or "상장주식수" in label or "PER" in label or "PBR" in label:
-                result[label] = value
+    if not a_labels and not q_labels:
+        # 실재하는 종목인데 재무 표가 통째로 비었다면 구조가 바뀐 것이다. 그냥
+        # 두면 화면엔 '재무지표 없음'으로만 뜨고, 조회는 성공으로 기록된다.
+        # 종목명조차 못 받았으면 잘못된 코드일 수 있어 파싱 실패로 단정하지 않는다.
+        if result.get("name"):
+            result[PARSE_MISS_KEY] = ["financial_table"]
+        return result
+
+    result["_periods"] = {"annual": a_labels, "quarterly": q_labels}
+
+    for title in list(a_rows) + [t for t in q_rows if t not in a_rows]:
+        key = _FIN_ROW_ALIASES.get(title, title)
+        values = [a_rows.get(title, {}).get(k) or "-" for k in a_keys]
+        values += [q_rows.get(title, {}).get(k) or "-" for k in q_keys]
+        result[key] = values
+
+    if isinstance(summary, dict):
+        for info in summary.get("totalInfos") or []:
+            if not isinstance(info, dict):
+                continue
+            if info.get("code") == "marketValue" and info.get("value"):
+                result["시가총액"] = info["value"]
+            elif info.get("code") == "dividendYieldRatio":
+                # 이 값은 valueDesc 가 말하는 **그 기간**의 것이다. 기간이 우리
+                # 라벨에 없으면 아무 칸에도 넣지 않는다 — 자리를 맞추려고 최신
+                # 칸에 밀어 넣는 순간 라벨과 값이 어긋난다.
+                period = str(info.get("valueDesc") or "").rstrip(".")
+                all_labels = a_labels + q_labels
+                if period and period in all_labels and info.get("value"):
+                    series = ["-"] * len(all_labels)
+                    series[all_labels.index(period)] = str(info["value"]).replace("%", "")
+                    result["시가배당률(%)"] = series
 
     return result
+
+
+# 테마·업종 그룹 API 는 한 번에 100개까지만 준다. 그 이상을 요구하면 JSON 이
+# 아니라 빈 응답이 온다 — 실측(pageSize=300)으로 확인했다.
+_GROUP_PAGE_MAX = 100
+
+
+def _group_row(row: dict) -> dict | None:
+    """테마·업종 구성종목 한 줄 → {code, name, price, change_rate, volume}."""
+    code = str(row.get("itemCode") or "")
+    if len(code) != 6:
+        return None
+    return {
+        "code": code,
+        "name": str(row.get("stockName") or "").strip(),
+        "price": _num_int(row.get("closePriceRaw") or row.get("closePrice"), default=0),
+        "change_rate": _signed_rate(row),
+        "volume": _num_int(
+            row.get("accumulatedTradingVolumeRaw") or row.get("accumulatedTradingVolume"),
+            default=0,
+        ),
+    }
+
+
+async def _group_page(kind: str, page: int, size: int) -> dict:
+    """테마/업종 목록 한 페이지. kind는 'theme' 또는 'industry'."""
+    return await _api_json(
+        f"{MSTOCK_API}/stocks/{kind}",
+        params={"page": page, "pageSize": min(size, _GROUP_PAGE_MAX)},
+        what=("테마 목록" if kind == "theme" else "업종 목록"),
+    )
+
+
+async def _group_members(kind: str, no: str, count: int) -> tuple[list[dict], dict]:
+    """테마/업종 구성종목을 count 개까지. (행 목록, 편입사유 맵)."""
+    what = "테마 상세" if kind == "theme" else "업종 상세"
+    rows: list[dict] = []
+    reasons: dict = {}
+    page = 1
+    while len(rows) < count and page <= 10:
+        payload = await _api_json(
+            f"{MSTOCK_API}/stocks/{kind}/{no}",
+            params={"page": page, "pageSize": _GROUP_PAGE_MAX},
+            what=f"{what}({no})",
+        )
+        chunk = _api_list(payload, what=f"{what}({no})", key="stocks")
+        if page == 1 and isinstance(payload.get("themeItemInfoMap"), dict):
+            reasons = payload["themeItemInfoMap"]
+        rows.extend(chunk)
+        if len(chunk) < _GROUP_PAGE_MAX:
+            break
+        page += 1
+    return rows[:count], reasons
+
+
+async def _find_group(kind: str, name: str) -> dict | None:
+    """이름 부분일치로 테마/업종을 찾는다. 정확히 같은 이름이 있으면 그쪽이 우선."""
+    partial = None
+    page = 1
+    while page <= 10:
+        payload = await _group_page(kind, page, _GROUP_PAGE_MAX)
+        groups = _api_list(
+            payload, what=("테마 목록" if kind == "theme" else "업종 목록"), key="groups"
+        )
+        for g in groups:
+            gname = str(g.get("name") or "")
+            if gname.lower() == name.lower():
+                return g
+            if partial is None and name in gname:
+                partial = g
+        if len(groups) < _GROUP_PAGE_MAX:
+            break
+        page += 1
+    return partial
 
 
 @cached(ttl_market=300, ttl_closed=3600)  # 장중 5분, 장마감 1시간
 async def list_themes(page: int = 1) -> list[dict]:
     """네이버 증권 테마 목록을 가져옵니다.
 
-    한 페이지에 40개 테마, 총 7페이지 존재 (약 280개).
-
-    Args:
-        page: 페이지 번호 (1~7)
+    한 페이지에 40개 테마 (전체 약 270개).
 
     Returns:
-        [{name, theme_id, change_rate, recent_3d_rate, up_count, flat_count, down_count, leaders}]
+        [{name, theme_id, change_rate, total_count, up_count, flat_count, down_count}]
+
+    네이버가 목록에서 '최근 3일 등락률'과 '주도주'를 더 이상 주지 않는다.
+    없는 칸을 만들어 내지 않고 뺐다 — 주도주는 get_theme_stocks 로 확인한다.
     """
-    url = f"{BASE_URL}/sise/theme.naver"
-    resp = await fetch(url, params={"page": page})
-    soup = BeautifulSoup(resp.text, "lxml")
-
-    table = soup.select_one("table.type_1.theme")
-    if not table:
-        raise NaverParseError(
-            "테마 목록 표(table.type_1.theme)를 찾지 못했습니다 (네이버 구조 변경 가능성)."
-        )
-
-    idx = _resolve_columns(table, _THEME_LIST_RULES, what="테마 목록")
-    max_idx = max(idx.values())
+    payload = await _group_page("theme", page, 40)
+    groups = _api_list(payload, what="테마 목록", key="groups")
 
     results = []
-    for row in table.select("tr"):
-        cells = row.select("td")
-        if len(cells) <= max_idx:
+    for g in groups:
+        if not isinstance(g, dict) or g.get("no") is None:
             continue
-
-        # 테마명 링크(no=…)가 있는 칸을 행 안에서 찾는다. 첫 칸으로 못박으면
-        # 앞에 칸이 하나 끼는 순간 전 행이 조용히 버려진다.
-        name_tag = row.select_one('td a[href*="no="]')
-        if not name_tag:
-            continue
-
-        theme_id_match = re.search(r"no=(\d+)", name_tag.get("href", ""))
-        if not theme_id_match:
-            continue
-
-        # 주도주는 종목 링크(code=…)로 찾는다 — 자리 대신 내용으로.
-        leaders = []
-        for leader_a in row.select('td a[href*="code="]'):
-            code_match = re.search(r"code=([A-Za-z0-9]{6})", leader_a.get("href", ""))
-            leaders.append({
-                "name": leader_a.text.strip(),
-                "code": code_match.group(1) if code_match else "",
-            })
-
         results.append({
-            "name": name_tag.text.strip(),
-            "theme_id": theme_id_match.group(1),
-            "change_rate": cells[idx["change_rate"]].text.strip(),
-            "recent_3d_rate": cells[idx["recent_3d_rate"]].text.strip(),
-            "up_count": _parse_int(cells[idx["up_count"]].text),
-            "flat_count": _parse_int(cells[idx["flat_count"]].text),
-            "down_count": _parse_int(cells[idx["down_count"]].text),
-            "leaders": leaders,
+            "name": str(g.get("name") or "").strip(),
+            "theme_id": str(g["no"]),
+            "change_rate": _rate_text(g.get("changeRate")),
+            "total_count": _num_int(g.get("totalCount"), default=0),
+            "up_count": _num_int(g.get("riseCount"), default=0),
+            "flat_count": _num_int(g.get("steadyCount"), default=0),
+            "down_count": _num_int(g.get("fallCount"), default=0),
         })
-
     return results
 
 
@@ -747,7 +754,7 @@ async def get_theme_stocks(
 ) -> dict:
     """특정 테마의 종목 리스트를 가져옵니다.
 
-    테마명으로 먼저 검색해서 theme_id를 찾은 뒤, 상세 페이지에서 종목 추출.
+    테마명으로 먼저 검색해서 theme_id를 찾은 뒤, 상세에서 종목을 추출한다.
 
     Args:
         theme_name: 테마명 (예: "선박", "AI반도체") - 부분 일치
@@ -757,91 +764,29 @@ async def get_theme_stocks(
     Returns:
         {theme_name, theme_id, stocks: [{code, name, price, change_rate, volume, reason}]}
     """
-    # 1) 모든 페이지에서 테마 검색 (부분 일치)
-    theme_id = None
-    matched_name = None
-    for page in range(1, 8):
-        resp = await fetch(
-            f"{BASE_URL}/sise/theme.naver",
-            params={"page": page},
-        )
-        soup = BeautifulSoup(resp.text, "lxml")
-        table = soup.select_one("table.type_1.theme")
-        if not table:
-            continue
-
-        for row in table.select("tr"):
-            # 테마 링크(no=…)를 자리가 아니라 내용으로 찾는다.
-            name_tag = row.select_one('td a[href*="no="]')
-            if not name_tag:
-                continue
-            name = name_tag.text.strip()
-            if theme_name in name or name.lower() == theme_name.lower():
-                m = re.search(r"no=(\d+)", name_tag.get("href", ""))
-                if m:
-                    theme_id = m.group(1)
-                    matched_name = name
-                    break
-        if theme_id:
-            break
-
-    if not theme_id:
+    group = await _find_group("theme", theme_name)
+    if not group:
         return {"theme_name": theme_name, "theme_id": None, "stocks": []}
 
-    # 2) 테마 상세 페이지에서 종목 리스트 추출
-    resp = await fetch(
-        f"{BASE_URL}/sise/sise_group_detail.naver",
-        params={"type": "theme", "no": theme_id},
-    )
-    soup = BeautifulSoup(resp.text, "lxml")
-
-    # table.type_5가 종목 리스트
-    tables = soup.select("table.type_5")
-    if not tables:
-        raise NaverParseError(
-            f"테마 상세의 종목 표(table.type_5)를 찾지 못했습니다 (theme_id={theme_id})."
-        )
-
-    # 테마 상세는 '종목명' 헤더가 colspan=2라 편입사유 칸까지 헤더가 세어 준다.
-    # 덕분에 업종 상세와 같은 규칙으로 인덱스가 각각 맞게 풀린다.
-    idx = _resolve_columns(tables[0], _GROUP_STOCK_RULES, what="테마 상세 종목 표")
-    max_idx = max(idx.values())
+    theme_id = str(group["no"])
+    rows, reasons = await _group_members("theme", theme_id, count)
 
     stocks = []
-    for row in tables[0].select("tr"):
-        cells = row.select("td")
-        if len(cells) <= max_idx:
+    for row in rows:
+        if not isinstance(row, dict):
             continue
-
-        name_a = row.select_one('td a[href*="code="]')
-        if not name_a:
+        info = _group_row(row)
+        if not info:
             continue
-        code_match = re.search(r"code=([A-Za-z0-9]{6})", name_a.get("href", ""))
-        if not code_match:
-            continue
-
-        stock_info = {
-            "code": code_match.group(1),
-            "name": name_a.text.strip().rstrip("*").strip(),
-            "price": _parse_int(cells[idx["price"]].text),
-            "change_rate": cells[idx["change_rate"]].text.strip(),
-            "volume": _parse_int(cells[idx["volume"]].text),
-        }
-
         if include_reason:
-            # 편입사유는 헤더가 없는 칸이라 자리로 찾을 수 없다 — 클래스로 찾는다.
-            reason_tag = row.select_one("td p.info_txt")
-            reason = reason_tag.text.strip() if reason_tag else ""
+            reason = str(reasons.get(info["code"]) or "").strip()
             if len(reason) > 80:
                 reason = reason[:78] + ".."
-            stock_info["reason"] = reason
-
-        stocks.append(stock_info)
-        if len(stocks) >= count:
-            break
+            info["reason"] = reason
+        stocks.append(info)
 
     return {
-        "theme_name": matched_name,
+        "theme_name": str(group.get("name") or theme_name),
         "theme_id": theme_id,
         "stocks": stocks,
     }
@@ -849,107 +794,68 @@ async def get_theme_stocks(
 
 @cached(ttl_market=300, ttl_closed=3600)  # 장중 5분, 장마감 1시간
 async def list_sectors() -> list[dict]:
-    """네이버 증권 업종(섹터) 목록을 가져옵니다.
-
-    업종은 1페이지에 모두 존재 (약 79개).
+    """네이버 증권 업종(섹터) 목록을 가져옵니다 (약 79개, 한 번에 전부).
 
     Returns:
         [{name, sector_id, change_rate, total_count, up_count, flat_count, down_count}]
     """
-    url = f"{BASE_URL}/sise/sise_group.naver"
-    resp = await fetch(url, params={"type": "upjong"})
-    soup = BeautifulSoup(resp.text, "lxml")
-
-    table = soup.select_one("table.type_1")
-    if not table:
-        raise NaverParseError(
-            "업종 목록 표(table.type_1)를 찾지 못했습니다 (네이버 구조 변경 가능성)."
-        )
-
-    idx = _resolve_columns(table, _SECTOR_LIST_RULES, what="업종 목록")
-    max_idx = max(idx.values())
+    payload = await _group_page("industry", 1, _GROUP_PAGE_MAX)
+    groups = _api_list(payload, what="업종 목록", key="groups")
 
     results = []
-    for row in table.select("tr"):
-        cells = row.select("td")
-        if len(cells) <= max_idx:
+    for g in groups:
+        if not isinstance(g, dict) or g.get("no") is None:
             continue
-
-        name_tag = row.select_one('td a[href*="no="]')
-        if not name_tag:
-            continue
-
-        sector_id_match = re.search(r"no=(\d+)", name_tag.get("href", ""))
-        if not sector_id_match:
-            continue
-
         results.append({
-            "name": name_tag.text.strip(),
-            "sector_id": sector_id_match.group(1),
-            "change_rate": cells[idx["change_rate"]].text.strip(),
-            "total_count": _parse_int(cells[idx["total_count"]].text),
-            "up_count": _parse_int(cells[idx["up_count"]].text),
-            "flat_count": _parse_int(cells[idx["flat_count"]].text),
-            "down_count": _parse_int(cells[idx["down_count"]].text),
+            "name": str(g.get("name") or "").strip(),
+            "sector_id": str(g["no"]),
+            "change_rate": _rate_text(g.get("changeRate")),
+            "total_count": _num_int(g.get("totalCount"), default=0),
+            "up_count": _num_int(g.get("riseCount"), default=0),
+            "flat_count": _num_int(g.get("steadyCount"), default=0),
+            "down_count": _num_int(g.get("fallCount"), default=0),
         })
-
     return results
 
 
-@cached(ttl_market=300, ttl_closed=3600)  # 장중 5분, 장마감 1시간
 @cached(ttl_market=1800, ttl_closed=7200)
 async def get_stock_sector(code: str) -> dict:
     """종목 → 소속 업종(네이버 기준). 역방향 조회가 없어 비교 기준을 못 잡던 구멍.
 
-    네이버 종목 페이지에는 업종 상세로 가는 링크가 있고, 그 href 의 `no=` 가
-    업종 ID다. 이걸 못 읽으면 "이 종목이 동종 대비 싼가"를 물어볼 때 사용자가
-    업종 이름을 직접 알고 있어야 한다.
-
     Returns:
-        {"code", "sector_name", "sector_id"} — 못 찾으면 sector_name 이 None.
-    """
-    resp = await fetch(f"{BASE_URL}/item/main.naver", params={"code": code})
-    soup = BeautifulSoup(resp.text, "lxml")
+        {"code", "sector_name", "sector_id", "per_ttm", "sector_per_naver"}
+        — 못 찾으면 sector_name 이 None.
 
+    `per_ttm` 은 네이버가 종목 화면에 쓰는 PER 이다(현재가 ÷ 최근 4분기 합산 EPS).
+    연간 확정 재무로만 PER 을 계산하면 실적이 급변한 기업에서 1년 가까이 낡은
+    값이 나온다(한화오션: 연간 27.94 vs TTM 12.84 — 할증/할인이 뒤집힌다).
+
+    `sector_per_naver`(동일업종 PER)는 네이버가 새 화면에서 더 이상 주지 않아
+    항상 None 이다. 계산 방식이 다른 비슷한 수치로 대체하지 않는다 — 그 값은
+    업종 집계(합산 시총÷합산 순이익)라 우리 중앙값과 애초에 다른 물건이다.
+    """
     out: dict = {"code": code, "sector_name": None, "sector_id": None,
                  "per_ttm": None, "sector_per_naver": None}
 
-    # 네이버가 이미 계산해 둔 두 값을 같은 페이지에서 함께 가져온다.
-    #  - #_per      : 현재가 ÷ 최근 4분기 합산 EPS (TTM). 시장이 보는 PER 이다.
-    #  - 동일업종 PER: 업종 집계 PER(Σ시총÷Σ순이익 계열). 우리가 내는 중앙값과
-    #                 방식이 달라 값이 크게 벌어질 수 있다.
-    # 연간 확정 재무로만 PER 을 계산하면 실적이 급변한 기업에서 1년 가까이 낡은
-    # 값이 나온다(한화오션: 연간 27.94 vs TTM 12.84 — 할증/할인이 뒤집힌다).
-    per_el = soup.select_one("#_per")
-    if per_el is not None:
-        out["per_ttm"] = _parse_float(per_el.get_text(strip=True), default=None)
-    for cell in soup.select("th, td"):
-        label = cell.get_text(" ", strip=True)
-        if label.startswith("동일업종 PER"):
-            # 라벨과 값이 같은 행(tr)의 다른 칸에 나뉘어 있다 — 행 전체에서 읽는다.
-            row_text = cell.parent.get_text(" ", strip=True) if cell.parent else label
-            m_per = re.search(r"동일업종\s*PER[^\d\-]*(-?[\d,]+\.?\d*)", row_text)
-            if m_per:
-                out["sector_per_naver"] = _parse_float(m_per.group(1), default=None)
-            break
-    link = soup.select_one('a[href*="type=upjong"]')
-    if link is not None:
-        name = link.get_text(strip=True)
-        # '더보기'·'동일업종 PER' 같은 안내 링크도 같은 href 를 쓴다 — 업종명만 취한다.
-        if name and name not in ("더보기",) and not name.startswith("동일업종"):
+    detail, industry = await asyncio.gather(
+        _stock_detail(code, "KRX"),
+        _api_json(
+            f"{STOCK_API}/domestic/detail/{code}/stock/industry",
+            params={"page": 1, "pageSize": 1, "marketType": "ALL"},
+            what=f"업종 조회({code})",
+        ),
+        return_exceptions=True,
+    )
+    if isinstance(detail, dict):
+        name = str(detail.get("upJongName") or "").strip()
+        if name:
             out["sector_name"] = name
-        m = re.search(r"no=(\d+)", link.get("href") or "")
-        if m:
-            out["sector_id"] = m.group(1)
-    if out["sector_name"] is None:
-        # 첫 링크가 안내였다면 나머지에서 업종명을 찾는다.
-        for a in soup.select('a[href*="type=upjong"]'):
-            nm = a.get_text(strip=True)
-            if nm and nm != "더보기" and not nm.startswith("동일업종"):
-                out["sector_name"] = nm
-                break
-    # 업종 ID 가 없으면 업종 링크가 아니라 메뉴("업종별" 등)를 잡은 것이다.
-    # ETF·ETN 은 소속 업종이 없어 이 경로로 들어온다 — 이름만 남기면 오독한다.
+        out["per_ttm"] = _num(detail.get("per"))
+    if isinstance(industry, dict) and industry.get("upjongNo"):
+        out["sector_id"] = str(industry["upjongNo"])
+
+    # 업종 ID 가 없으면 소속 업종이 없는 종목이다 — ETF·ETN 이 이 경로로 들어온다.
+    # 이름만 남기면 오독한다.
     if not out["sector_id"]:
         out["sector_name"] = None
         out["reason"] = "업종 정보 없음 (ETF·ETN이거나 업종 미분류)"
@@ -968,62 +874,24 @@ async def get_sector_stocks(sector_name: str, count: int = 30) -> dict:
     Returns:
         {sector_name, sector_id, stocks: [{code, name, price, change_rate, volume}]}
     """
-    # 1) 업종 검색
-    sectors = await list_sectors()
-    matched = None
-    for s in sectors:
-        if sector_name in s["name"] or s["name"].lower() == sector_name.lower():
-            matched = s
-            break
-
-    if not matched:
+    group = await _find_group("industry", sector_name)
+    if not group:
         return {"sector_name": sector_name, "sector_id": None, "stocks": []}
 
-    # 2) 업종 상세 페이지에서 종목 리스트 추출
-    resp = await fetch(
-        f"{BASE_URL}/sise/sise_group_detail.naver",
-        params={"type": "upjong", "no": matched["sector_id"]},
-    )
-    soup = BeautifulSoup(resp.text, "lxml")
-
-    tables = soup.select("table.type_5")
-    if not tables:
-        raise NaverParseError(
-            f"업종 상세의 종목 표(table.type_5)를 찾지 못했습니다 "
-            f"(sector_id={matched['sector_id']})."
-        )
-
-    # 업종 상세는 편입사유 칸이 없어 테마 상세보다 한 칸 짧다. 헤더로 풀면
-    # 두 경우가 각각 맞게 잡히므로 표별로 상수를 따로 둘 필요가 없다.
-    idx = _resolve_columns(tables[0], _GROUP_STOCK_RULES, what="업종 상세 종목 표")
-    max_idx = max(idx.values())
+    sector_id = str(group["no"])
+    rows, _ = await _group_members("industry", sector_id, count)
 
     stocks = []
-    for row in tables[0].select("tr"):
-        cells = row.select("td")
-        if len(cells) <= max_idx:
+    for row in rows:
+        if not isinstance(row, dict):
             continue
-
-        name_a = row.select_one('td a[href*="code="]')
-        if not name_a:
-            continue
-        code_match = re.search(r"code=([A-Za-z0-9]{6})", name_a.get("href", ""))
-        if not code_match:
-            continue
-
-        stocks.append({
-            "code": code_match.group(1),
-            "name": name_a.text.strip().rstrip("*").strip(),
-            "price": _parse_int(cells[idx["price"]].text),
-            "change_rate": cells[idx["change_rate"]].text.strip(),
-            "volume": _parse_int(cells[idx["volume"]].text),
-        })
-        if len(stocks) >= count:
-            break
+        info = _group_row(row)
+        if info:
+            stocks.append(info)
 
     return {
-        "sector_name": matched["name"],
-        "sector_id": matched["sector_id"],
+        "sector_name": str(group.get("name") or sector_name),
+        "sector_id": sector_id,
         "stocks": stocks,
     }
 
@@ -1050,55 +918,57 @@ def _raise_if_all_failed(
 
 
 async def get_multi_stocks(codes: list[str]) -> list[dict]:
-    """여러 종목의 기본 정보를 한 번에 병렬로 가져옵니다.
+    """여러 종목의 기본 정보를 **한 번의 요청으로** 가져옵니다.
 
-    Claude가 스크리닝 결과로 받은 N개 종목을 각각 get_price로 호출하는 것보다
-    훨씬 토큰 효율적입니다. 개별 호출 시마다 MCP 도구 호출 오버헤드가 크거든요.
+    네이버가 종목 시세를 콤마로 이어 붙여 한꺼번에 주는 API 를 쓴다. 예전에는
+    종목마다 페이지를 열어 30번 요청했다.
 
     Args:
         codes: 종목코드 리스트 (최대 30개)
 
     Returns:
         [{code, name, price, change, change_rate, volume}] 형태의 리스트
+
+    조회 자체가 실패하면 빈 리스트가 아니라 예외로 알린다. 예전엔 종목별 실패를
+    전부 삼켜서, 네트워크가 통째로 죽어도 화면엔 '조회 결과 없음'만 떴다
+    (2026-08-13 문의에서 실제로 이렇게 나갔다).
     """
-    # 최대 30개 제한 (네이버 rate limit 및 응답 크기 제어)
-    codes = codes[:30]
+    wanted = [str(c).strip() for c in codes[:30] if str(c).strip()]
+    if not wanted:
+        return []
 
-    failures: list[Exception] = []
+    payload = await _api_json(
+        f"{POLLING_API}/realtime/domestic/stock/{','.join(wanted)}", what="벌크 시세"
+    )
+    rows = _api_list(payload, what="벌크 시세", key="datas")
 
-    async def fetch_one(code: str) -> dict | None:
-        try:
-            data = await get_current_price(code)
-            if not data or "price" not in data:
-                return None
+    by_code: dict[str, dict] = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        code = str(row.get("itemCode") or "")
+        price = _num_int(row.get("closePriceRaw") or row.get("closePrice"))
+        if len(code) != 6 or price is None:
+            continue
+        change = _num_int(
+            row.get("compareToPreviousClosePriceRaw") or row.get("compareToPreviousClosePrice"),
+            default=0,
+        )
+        by_code[code] = {
+            "code": code,
+            "name": str(row.get("stockName") or "").strip(),
+            "price": price,
+            "change": change,
+            "change_rate": _signed_rate(row) or "0.00%",
+            "volume": _num_int(
+                row.get("accumulatedTradingVolumeRaw") or row.get("accumulatedTradingVolume"),
+                default=0,
+            ),
+        }
 
-            # 등락률 계산 (close 대비 change)
-            price = data["price"]
-            change = data.get("change", 0)
-            prev_close = price - change if change else price
-            if prev_close > 0:
-                change_rate = f"{change / prev_close * 100:+.2f}%"
-            else:
-                change_rate = "0.00%"
-
-            return {
-                "code": code,
-                "name": data.get("name", ""),
-                "price": price,
-                "change": change,
-                "change_rate": change_rate,
-                "volume": data.get("volume", 0),
-            }
-        except Exception as e:
-            # 한 종목이 실패했다고 배치 전체를 죽이지 않는다(상장폐지·거래정지 등).
-            # 다만 무엇이 실패했는지는 남겨서, 아래에서 '전부 실패'를 가려낸다.
-            failures.append(e)
-            return None
-
-    results = await asyncio.gather(*[fetch_one(code) for code in codes])
-    ok = [r for r in results if r is not None]
-    _raise_if_all_failed(ok, codes, failures)
-    return ok
+    # 요청한 순서를 지킨다 — 호출부가 입력 리스트와 짝지어 읽는 경우가 있다.
+    # 응답에 없는 코드(상장폐지·오타)는 조용히 빠진다.
+    return [by_code[c] for c in wanted if c in by_code]
 
 
 def _ttm_eps(fin: dict) -> tuple[float | None, str | None]:
@@ -1414,90 +1284,71 @@ async def get_multi_chart_stats(
     return ok
 
 
-def _market_to_sosok(market: str) -> str | None:
-    """시장 파라미터를 네이버 sosok 값으로 변환. None이면 전체."""
-    m = market.upper()
-    if m == "KOSPI":
-        return "0"
-    if m == "KOSDAQ":
-        return "1"
-    return None
+# 시장 단위 목록 API 가 한 번에 주는 최대 개수. 500까지는 실측으로 확인했고,
+# 우리 도구의 상한(count<=500)과 같아 페이지를 돌 필요가 없다.
+_MARKET_LIST_MAX = 500
+
+
+def _market_type(market: str) -> str:
+    """시장 파라미터를 API 값으로. KOSPI/KOSDAQ 이 아니면 전체."""
+    m = (market or "").upper()
+    return m if m in ("KOSPI", "KOSDAQ") else "ALL"
 
 
 @cached(ttl_market=60, ttl_closed=3600)  # 장중 1분, 장마감 1시간
-async def _fetch_ranking_page(url: str, sosok: str | None, page: int = 1) -> list[dict]:
-    """네이버 랭킹 페이지 HTML을 파싱해서 종목 리스트 반환 (한 페이지 = 50개).
+async def _market_stock_list(
+    order_type: str,
+    market: str = "ALL",
+    size: int = 50,
+    alert_type: str | None = None,
+) -> list[dict]:
+    """시장 단위 종목 목록 API. 랭킹·시장경보가 모두 이 하나를 쓴다.
 
-    거래량/상승률/하락률 페이지 공통 구조 (12 cells).
+    정렬 키(order_type)만 바꾸면 시총·상승·하락·거래량·시장경보가 같은 스키마로
+    나온다. 화면마다 표 구조가 달라 컬럼을 따로 풀어야 했던 예전 HTML 과 달리,
+    필드 이름이 목록 종류와 무관하게 같다.
     """
-    params: dict[str, str | int] = {"page": page}
-    if sosok is not None:
-        params["sosok"] = sosok
-    resp = await fetch(url, params=params)
-    soup = BeautifulSoup(resp.text, "lxml")
+    params: dict = {
+        "tradeType": "KRX",
+        "marketType": _market_type(market),
+        "orderType": order_type,
+        "startIdx": 0,
+        "pageSize": max(1, min(size, _MARKET_LIST_MAX)),
+    }
+    if alert_type:
+        params["alertType"] = alert_type
+    payload = await _api_json(
+        f"{STOCK_API}/domestic/market/stock/default",
+        params=params,
+        what=f"종목 목록({order_type})",
+    )
+    return _api_list(payload, what=f"종목 목록({order_type})")
 
-    table = soup.select_one("table.type_2")
-    if not table:
-        raise NaverParseError(
-            f"랭킹 표(table.type_2)를 찾지 못했습니다 (url={url}, page={page})."
-        )
 
-    # 거래량 페이지와 상승/하락률 페이지는 6번 칸부터 컬럼 구성이 서로 다르다
-    # (거래대금 vs 매수호가). 자리를 공용으로 가정하면 안 되는 구조라 헤더로 푼다.
-    idx = _resolve_columns(table, _RANKING_RULES, what="랭킹 표")
-    max_idx = max(idx.values())
-
+def _rank_rows(rows: list, count: int) -> list[dict]:
+    """목록 API 응답 → 랭킹 행. 순위는 응답 순서(=네이버가 정렬한 순서)다."""
     results = []
-    for row in table.select("tr"):
-        cells = row.select("td")
-        if len(cells) <= max_idx:
+    for row in rows:
+        if not isinstance(row, dict):
             continue
-
-        # 순위 숫자 확인 (헤더/광고 행 걸러냄)
-        rank_text = cells[idx["rank"]].text.strip()
-        if not rank_text.isdigit():
+        code = str(row.get("itemcode") or "")
+        if len(code) != 6:
             continue
-
-        name_a = cells[idx["name"]].find("a")
-        if not name_a:
-            continue
-        code_match = re.search(r"code=([A-Za-z0-9]{6})", name_a.get("href", ""))
-        if not code_match:
-            continue
-
-        price = _parse_int(cells[idx["price"]].text)
-        volume = _parse_int(cells[idx["volume"]].text)
+        price = _num_int(row.get("nowPrice"), default=0)
+        volume = _num_int(row.get("tradeVolume"), default=0)
         results.append({
-            "rank": int(rank_text),
-            "code": code_match.group(1),
-            "name": name_a.text.strip(),
+            "rank": len(results) + 1,
+            "code": code,
+            "name": str(row.get("itemname") or "").strip(),
             "price": price,
-            "change_rate": cells[idx["change_rate"]].text.strip(),
+            "change_rate": _rate_text(row.get("prevChangeRate"), default="0.00%"),
             "volume": volume,
             # 현재가 × 거래량 추산. 실제 거래대금은 체결가 가중이라 살짝 다르다.
             "trade_value_est_krw": price * volume,
         })
-
+        if len(results) >= count:
+            break
     return results
-
-
-async def _fetch_ranking_multi_page(
-    url: str,
-    sosok: str | None,
-    count: int,
-) -> list[dict]:
-    """count에 맞춰 여러 페이지를 병렬로 가져옴 (네이버는 페이지당 50개)."""
-    pages_needed = (count + 49) // 50  # 올림
-    pages_needed = max(1, min(pages_needed, 10))  # 1~10 페이지 제한
-
-    results_list = await asyncio.gather(
-        *[_fetch_ranking_page(url, sosok, page=p) for p in range(1, pages_needed + 1)]
-    )
-    # 여러 페이지 병합
-    merged = []
-    for page_results in results_list:
-        merged.extend(page_results)
-    return merged[:count]
 
 
 async def get_volume_ranking(
@@ -1512,31 +1363,20 @@ async def get_volume_ranking(
         count: 최대 반환 개수 (기본 50, 최대 500)
         sort_by: "volume"(거래량=주수) / "trade_value"(거래대금=원). 기본 volume.
     """
-    count = min(count, 500)
-    url = f"{BASE_URL}/sise/sise_quant.naver"
-    sort_key = "trade_value_est_krw" if sort_by == "trade_value" else "volume"
+    count = max(1, min(count, _MARKET_LIST_MAX))
+    rows = await _market_stock_list(_ORDER_VOLUME, market=market, size=count)
+    results = _rank_rows(rows, count)
 
-    if market.upper() == "ALL":
-        kospi, kosdaq = await asyncio.gather(
-            _fetch_ranking_multi_page(url, "0", count),
-            _fetch_ranking_multi_page(url, "1", count),
-        )
-        merged = sorted(kospi + kosdaq, key=lambda x: x.get(sort_key, 0), reverse=True)
-        # 랭크 재부여 (병합 후 순위)
-        for i, item in enumerate(merged[:count], 1):
+    if sort_by == "trade_value":
+        results.sort(key=lambda x: x.get("trade_value_est_krw", 0), reverse=True)
+        for i, item in enumerate(results, 1):
             item["rank"] = i
-        return merged[:count]
-    else:
-        sosok = _market_to_sosok(market)
-        results = await _fetch_ranking_multi_page(url, sosok, count)
-        if sort_by == "trade_value":
-            results = sorted(results, key=lambda x: x.get("trade_value_est_krw", 0), reverse=True)
-            for i, item in enumerate(results[:count], 1):
-                item["rank"] = i
-        return results[:count]
+    return results
 
 
-async def get_change_ranking(direction: str = "up", market: str = "ALL", count: int = 50) -> list[dict]:
+async def get_change_ranking(
+    direction: str = "up", market: str = "ALL", count: int = 50
+) -> list[dict]:
     """등락률 상위/하위 종목을 가져옵니다.
 
     Args:
@@ -1544,164 +1384,69 @@ async def get_change_ranking(direction: str = "up", market: str = "ALL", count: 
         market: "KOSPI" / "KOSDAQ" / "ALL"
         count: 최대 반환 개수 (기본 50, 최대 500)
     """
-    count = min(count, 500)
-    page_url = "sise_rise.naver" if direction.lower() == "up" else "sise_fall.naver"
-    url = f"{BASE_URL}/sise/{page_url}"
-
-    if market.upper() == "ALL":
-        kospi, kosdaq = await asyncio.gather(
-            _fetch_ranking_multi_page(url, "0", count),
-            _fetch_ranking_multi_page(url, "1", count),
-        )
-        merged = kospi + kosdaq
-
-        def parse_rate(s: str) -> float:
-            try:
-                return float(s.replace("%", "").replace("+", ""))
-            except ValueError:
-                return 0.0
-
-        reverse = direction.lower() == "up"
-        merged.sort(key=lambda x: parse_rate(x["change_rate"]), reverse=reverse)
-        return merged[:count]
-    else:
-        sosok = _market_to_sosok(market)
-        return await _fetch_ranking_multi_page(url, sosok, count)
-
-
-@cached(ttl_market=300, ttl_closed=3600)  # 장중 5분, 장마감 1시간
-async def _fetch_market_cap_page(sosok: str, page: int = 1) -> list[dict]:
-    """시가총액 페이지 1페이지(50개)를 파싱. cells=13 구조."""
-    url = f"{BASE_URL}/sise/sise_market_sum.naver"
-    resp = await fetch(url, params={"sosok": sosok, "page": page})
-    soup = BeautifulSoup(resp.text, "lxml")
-
-    table = soup.select_one("table.type_2")
-    if not table:
-        raise NaverParseError(
-            f"시가총액 표(table.type_2)를 찾지 못했습니다 (sosok={sosok}, page={page})."
-        )
-
-    idx = _resolve_columns(table, _MARKET_CAP_RULES, what="시가총액 랭킹")
-    max_idx = max(idx.values())
-
-    results = []
-    for row in table.select("tr"):
-        cells = row.select("td")
-        if len(cells) <= max_idx:
-            continue
-
-        rank_text = cells[idx["rank"]].text.strip()
-        if not rank_text.isdigit():
-            continue
-
-        name_a = cells[idx["name"]].find("a")
-        if not name_a:
-            continue
-        code_match = re.search(r"code=([A-Za-z0-9]{6})", name_a.get("href", ""))
-        if not code_match:
-            continue
-
-        results.append({
-            "rank": int(rank_text),
-            "code": code_match.group(1),
-            "name": name_a.text.strip(),
-            "price": _parse_int(cells[idx["price"]].text),
-            "change_rate": cells[idx["change_rate"]].text.strip(),
-            "market_cap_billion": _parse_int(cells[idx["market_cap"]].text),  # 단위: 억원
-            "volume": _parse_int(cells[idx["volume"]].text),
-        })
-
-    return results
+    count = max(1, min(count, _MARKET_LIST_MAX))
+    order = _ORDER_UP if (direction or "").lower() == "up" else _ORDER_DOWN
+    rows = await _market_stock_list(order, market=market, size=count)
+    return _rank_rows(rows, count)
 
 
 async def get_market_cap_ranking(market: str = "KOSPI", count: int = 50) -> list[dict]:
     """시가총액 상위 종목을 가져옵니다.
 
-    네이버 페이지당 50개이므로 count가 50 넘으면 여러 페이지 병렬 요청.
-
     Args:
         market: "KOSPI" / "KOSDAQ" (ALL 미지원)
         count: 최대 반환 개수 (기본 50, 최대 500)
     """
-    count = min(count, 500)
-    sosok = _market_to_sosok(market) or "0"
+    count = max(1, min(count, _MARKET_LIST_MAX))
+    market_type = _market_type(market)
+    if market_type == "ALL":
+        market_type = "KOSPI"
+    rows = await _market_stock_list(_ORDER_MARKET_SUM, market=market_type, size=count)
 
-    pages_needed = max(1, min((count + 49) // 50, 10))
-    results_list = await asyncio.gather(
-        *[_fetch_market_cap_page(sosok, page=p) for p in range(1, pages_needed + 1)]
-    )
-    merged = []
-    for page_results in results_list:
-        merged.extend(page_results)
-    return merged[:count]
+    results = []
+    for base, row in zip(_rank_rows(rows, count), rows):
+        # 시가총액은 원 단위로 온다. 이 키의 라벨이 '억원'이므로 여기서 억으로 맞춘다.
+        cap_won = _num(row.get("marketSum"))
+        base["market_cap_billion"] = int(cap_won / 100_000_000) if cap_won else 0
+        results.append(base)
+    return results
 
 
 @cached(ttl_market=30, ttl_closed=3600)  # 장중 30초, 장마감 1시간
 async def get_market_index() -> list[dict]:
     """KOSPI, KOSDAQ 지수 현재값을 가져옵니다.
 
-    네이버 증권의 `#now_value` (em), `#change_value_and_rate` (span) 파싱.
+    두 지수를 한 번에 받는다. 값·전일대비·등락률이 모두 **부호가 붙은 채로**
+    오므로, 예전처럼 방향 라벨(상승/하락)에서 부호를 복원할 필요가 없다 —
+    그 라벨은 값과 어긋난 채 내려온 적이 있었다(코스닥 -0.41%인 날 '상승').
     """
-    url_base = f"{BASE_URL}/sise/sise_index.naver"
+    payload = await _api_json(
+        f"{POLLING_API}/realtime/domestic/index/KOSPI,KOSDAQ", what="시장 지수"
+    )
+    rows = _api_list(payload, what="시장 지수", key="datas")
+    by_code = {
+        str(r.get("itemCode") or ""): r for r in rows if isinstance(r, dict)
+    }
 
-    async def fetch_one(code: str) -> dict:
-        resp = await fetch(url_base, params={"code": code})
-        soup = BeautifulSoup(resp.text, "lxml")
-
+    results = []
+    for code in ("KOSPI", "KOSDAQ"):
         item: dict = {"index": code}
         missing: list[str] = []
-
-        now_val = soup.select_one("#now_value")
-        parsed = _parse_float(now_val.text, default=None) if now_val else None
-        if parsed is None:
-            # 예전엔 파싱 실패 시 원문 문자열을 그대로 value 에 넣었다. 숫자 자리에
-            # 문자열이 앉으면 소비자는 그게 지수인 줄 알고 그대로 쓴다.
-            missing.append("value")
-        else:
-            item["value"] = parsed
-
-        change_val = soup.select_one("#change_value_and_rate")
-        if change_val is None:
-            missing.extend(["change_rate", "change_value"])
-        else:
-            # 구조: <span class="fluc"><span>164.60</span> +2.42%<span class="blind">상승</span></span>
-            raw = change_val.get_text(" ", strip=True)
-            item["change_raw"] = raw
-
-            # 퍼센트에는 네이버가 부호를 직접 붙여 준다('+2.42%' / '-2.42%').
-            rate_m = re.search(r"([-+]?\d+(?:\.\d+)?)\s*%", raw)
-            if rate_m:
-                item["change_rate"] = float(rate_m.group(1))
+        row = by_code.get(code) or {}
+        for key, src in (
+            ("value", "closePrice"),
+            ("change_value", "compareToPreviousClosePrice"),
+            ("change_rate", "fluctuationsRatio"),
+        ):
+            parsed = _num(row.get(src))
+            if parsed is None:
+                missing.append(key)
             else:
-                missing.append("change_rate")
-
-            # 포인트 변화는 절댓값으로만 온다 — 방향은 .blind(상승/하락)에만 있다.
-            blind = change_val.select_one("span.blind")
-            word = blind.text.strip() if blind else ""
-            point_tag = next(
-                (s for s in change_val.select("span") if s is not blind), None
-            )
-            point = _parse_float(point_tag.get_text(strip=True), default=None) if point_tag else None
-            if point is None:
-                missing.append("change_value")
-            else:
-                # 방향은 **퍼센트 부호**에서 가져온다. .blind(상승/하락) 텍스트는
-                # 값과 어긋난 채 내려오는 경우가 실제로 관찰됐다 — 코스닥이
-                # -0.41%인 날에도 blind 는 '상승'이었다. 퍼센트에는 네이버가
-                # 부호를 직접 붙여 주므로 그쪽이 더 믿을 만하다.
-                rate_signed = item.get("change_rate")
-                if rate_signed is not None:
-                    item["change_value"] = -abs(point) if rate_signed < 0 else abs(point)
-                else:
-                    item["change_value"] = -abs(point) if "하락" in word else abs(point)
-
+                item[key] = parsed
         if missing:
             item[PARSE_MISS_KEY] = missing
-        return item
-
-    results = await asyncio.gather(fetch_one("KOSPI"), fetch_one("KOSDAQ"))
-    return list(results)
+        results.append(item)
+    return results
 
 
 # ---------------------------------------------------------------------------
@@ -2039,94 +1784,80 @@ def _parse_earnings_surprise(res_data: dict) -> dict | None:
 # 증권사 리포트
 # ---------------------------------------------------------------------------
 
-REPORT_LIST_URL = f"{BASE_URL}/research/company_list.naver"
-REPORT_READ_URL = f"{BASE_URL}/research/company_read.naver"
+# 증권사 리포트. 새 API 는 목록에 본문·목표주가·투자의견·PDF 까지 실어 준다
+# (예전 HTML 은 목록과 본문 페이지가 따로였다).
+RESEARCH_API = f"{STOCK_API}/stockSecurity/researches/v2"
+
+# 사람이 열어 보는 리포트 화면. 본문·목표가가 같이 있고 PDF 가 없는 리포트도 열린다.
+REPORT_PAGE_URL = "https://stock.naver.com/research/company"
+
+
+def _report_row(row: dict) -> dict:
+    """리포트 한 건 → 목록용 필드."""
+    return {
+        "nid": str(row.get("nid") or ""),
+        "stock": str(row.get("itemName") or "").strip(),
+        "title": str(row.get("title") or "").strip(),
+        "broker": str(row.get("brokerName") or "").strip(),
+        "date": str(row.get("writeDate") or "").strip(),
+        "views": _num_int(row.get("readCount"), default=0),
+    }
 
 
 @cached(ttl_market=600, ttl_closed=3600)  # 장중 10분, 장마감 1시간
 async def get_reports(code: str, count: int = 5) -> list[dict]:
     """종목의 최근 증권사 리포트 목록을 가져옵니다."""
-    resp = await fetch(REPORT_LIST_URL, params={
-        "searchType": "itemCode",
-        "itemCode": code,
-        "page": "1",
-    })
-    soup = BeautifulSoup(resp.text, "lxml")
-
-    table = soup.select_one("table.type_1")
-    if not table:
+    count = max(1, min(count, 10))
+    payload = await _api_json(
+        f"{RESEARCH_API}/company/by-items",
+        params={"itemCodes": code, "size": count},
+        what=f"증권사 리포트 목록({code})",
+    )
+    if not isinstance(payload, dict):
         raise NaverParseError(
-            "리서치 리포트 표(table.type_1)를 찾지 못했습니다 (네이버 구조 변경 가능성)."
+            f"증권사 리포트 목록({code}): 응답 형식이 예상과 다릅니다 (네이버 구조 변경 가능성)."
         )
+    # 종목별로 묶여 오고, 리포트가 없는 종목은 키 자체가 없다 — 그건 '없음'이다.
+    rows = payload.get(code) or []
+    if not isinstance(rows, list):
+        raise NaverParseError(f"증권사 리포트 목록({code}): 목록을 찾지 못했습니다.")
 
-    idx = _resolve_columns(table, _REPORT_RULES, what="리서치 리포트 목록")
-    max_idx = max(idx.values())
-
-    results = []
-    for row in table.select("tr"):
-        cells = row.select("td")
-        if len(cells) <= max_idx:
-            continue
-
-        title_a = row.select_one('td a[href*="nid="]')
-        if not title_a:
-            continue
-
-        nid_match = re.search(r"nid=(\d+)", title_a.get("href", ""))
-        if not nid_match:
-            continue
-
-        results.append({
-            "nid": nid_match.group(1),
-            "stock": cells[idx["stock"]].get_text(strip=True),
-            "title": title_a.get_text(strip=True),
-            "broker": cells[idx["broker"]].get_text(strip=True),
-            "date": cells[idx["date"]].get_text(strip=True),
-            "views": _parse_int(cells[idx["views"]].get_text(strip=True)),
-        })
-        if len(results) >= count:
-            break
-
-    return results
+    return [_report_row(r) for r in rows if isinstance(r, dict) and r.get("nid")][:count]
 
 
 async def get_report_detail(nid: str) -> dict:
     """증권사 리포트 상세 (본문 요약 + PDF 링크 + 목표가/투자의견)."""
-    resp = await fetch(REPORT_READ_URL, params={"nid": nid})
-    soup = BeautifulSoup(resp.text, "lxml")
+    payload = await _api_json(
+        f"{RESEARCH_API}/company/{nid}", what=f"증권사 리포트({nid})"
+    )
+    if not isinstance(payload, dict):
+        raise NaverParseError(
+            f"증권사 리포트({nid}): 응답 형식이 예상과 다릅니다 (네이버 구조 변경 가능성)."
+        )
 
-    result = {"nid": nid}
+    result: dict = {"nid": nid}
 
-    # 목표가 / 투자의견
-    for td in soup.select("td"):
-        text = " ".join(td.get_text(strip=True).split())
-        if "목표가" in text:
-            import re as _re
-            price_m = _re.search(r"목표가\s*([\d,]+)", text)
-            if price_m:
-                result["target_price"] = _parse_int(price_m.group(1))
-            opinion_m = _re.search(r"투자의견\s*(\w+)", text)
-            if opinion_m:
-                result["opinion"] = opinion_m.group(1)
+    target = _num_int(payload.get("goalPrice"))
+    if target is not None:
+        result["target_price"] = target
+    opinion = str(payload.get("opinionText") or "").strip()
+    if opinion:
+        result["opinion"] = opinion
+    if payload.get("attachUrl"):
+        result["pdf_url"] = payload["attachUrl"]
 
-    # 본문 텍스트
-    content_td = soup.select_one("td.view_cnt")
-    if content_td:
-        text = content_td.get_text(strip=True)
+    # 본문은 HTML 조각으로 온다. 태그를 걷어내고 요약 길이로 자른다.
+    content = payload.get("content")
+    if content:
+        text = BeautifulSoup(str(content), "lxml").get_text(" ", strip=True)
+        text = " ".join(text.split())
         if len(text) > 500:
             text = text[:500] + "..."
         result["summary"] = text
     else:
-        # 본문 칸(td.view_cnt)이 없으면 요약을 조용히 빼지 않고 못 읽었다고 남긴다.
-        # 여러 리포트를 한 번에 묶어 보여주는 자리라 예외 대신 표시로 알린다.
+        # 본문이 없으면 요약을 조용히 빼지 않고 못 읽었다고 남긴다. 여러 리포트를
+        # 한 번에 묶어 보여주는 자리라 예외 대신 표시로 알린다.
         result[PARSE_MISS_KEY] = ["summary"]
-
-    # PDF 링크
-    for a in soup.select("a"):
-        href = a.get("href", "")
-        if ".pdf" in href.lower():
-            result["pdf_url"] = href
-            break
 
     return result
 
