@@ -1,0 +1,38 @@
+{
+ "title": "토스 KR 캔들 계약 불일치 실측 (1.0 차단 근거)",
+ "symbol": "005930",
+ "date": "2026-08-27",
+ "method": "UAT 홈 토스 1m 캐시 vs 실사용 홈 KIS 1m 캐시(공식가 대조 검증본) 전 분 대조",
+ "ran_at": "2026-08-27T21:50:37.658846+09:00",
+ "findings": {
+  "kis_rows": 381,
+  "toss_rows": 391,
+  "timestamp_shift": {
+   "toss_next_minute_ohlc_equals_kis": 210,
+   "same_minute_ohlc_equals_kis": 6,
+   "neither": 165,
+   "interpretation": "토스 timestamp 는 문서(봉 시작)와 달리 봉 끝 라벨로 동작. 09:00 bar 는 시가만 있고 거래량 0"
+  },
+  "volume_basis": {
+   "shift_matched_volume_ratio_median": 1.373,
+   "kis_total_volume": 16599112,
+   "toss_total_volume": 22021385,
+   "interpretation": "KRX 단독이 아닌 통합(NXT 포함 추정) 거래량"
+  },
+  "closing_auction": {
+   "kis_1530": {
+    "open": "266000",
+    "close": "266000",
+    "volume": 1058643
+   },
+   "toss_1530": {
+    "open": "265000",
+    "close": "265000",
+    "volume": 0
+   },
+   "official_close": "266000",
+   "interpretation": "토스는 15:30 마감 동시호가 print 미포함. 마지막 종가가 공식 종가와 다름"
+  }
+ },
+ "decision": "토스 KR 분봉은 정규장 계약 불일치로 코드 차단 (commit 4a3b8d4). 추측 보정 금지 원칙 적용"
+}

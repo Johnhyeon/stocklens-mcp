@@ -42,7 +42,12 @@ ENV/
 .coverage
 htmlcov/
 test_v2.py
-docs/
+# docs 는 기본 무시하되 릴리스 증거(계획·UAT·릴리스 기록)는 예외다 -
+# 증거가 커밋에 빠지면 "로컬에만 있는 증거"가 된다 (리뷰 차단 항목 4).
+docs/*
+!docs/plans/
+!docs/uat/
+!docs/release/
 plays/
 assets/logo_preview.html
 tests/preview_output/

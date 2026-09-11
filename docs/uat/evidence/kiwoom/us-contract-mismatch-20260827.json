@@ -1,0 +1,36 @@
+{
+ "title": "키움 US 분봉 계약 불일치 실측 (1.0 차단 근거)",
+ "symbol": "AAPL",
+ "ran_at": "2026-08-27T22:57:57.827879+09:00",
+ "method": "완결일(2026-08-26) 직접 어댑터 전수 대조 + 과거일(08-20) 야후·KIS 이중 기준 대조",
+ "findings": {
+  "price_mismatch_completed_day": {
+   "date": "2026-08-26",
+   "common_minutes": 82,
+   "close_diff_minutes": 82,
+   "samples": [
+    "09:30 kis 310.37 vs kiwoom 310.87",
+    "09:31 kis 309.39 vs kiwoom 310.99"
+   ]
+  },
+  "price_mismatch_historical": {
+   "date": "2026-08-20",
+   "yahoo_open": "317.46",
+   "kis_0930_open": "317.455",
+   "kiwoom_0930": "311.84",
+   "interpretation": "독립 기준 2개(야후 일봉·KIS 분봉)가 일치하고 키움만 다름"
+  },
+  "volume_basis": {
+   "ratio_range": "0.0004~0.0132",
+   "sample": "08-26 09:30 KIS 491,063주 vs 키움 171",
+   "interpretation": "주수 단위가 아님 (체결 건수 또는 다른 척도 추정, 미확정)"
+  },
+  "coverage": {
+   "completed_day_rows": "82/391 (ET ~11:00 이후 절단)",
+   "note": "cntr_tm 라벨이 같은 KST 달력일 내로 제한되는 구조로 추정, 미확정"
+  },
+  "pagination": "연속조회(cont-yn/next-key) 자체는 정상 (100행/페이지, 커서 과거 진행)",
+  "bad_symbol": "return_code 7"
+ },
+ "decision": "계약 규명·검증 전까지 키움 US 분봉 코드 차단 (unsupported). 키움 HTS 화면 대조는 대표 확인 보류 항목"
+}

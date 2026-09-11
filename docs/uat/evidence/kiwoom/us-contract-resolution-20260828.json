@@ -1,0 +1,37 @@
+{
+ "title": "키움 US 계약 불일치 원인 규명: cntr_tm 은 ET 라벨",
+ "date": "2026-08-28",
+ "verdict": "어댑터 해석 오류 (cntr_tm 시간대 오독). 데이터 자체는 KIS 와 완전 일치",
+ "supersedes": "us-contract-mismatch-20260827.json",
+ "method": {
+  "baseline": "KIS AAPL 2026-08-26 완결일 raw 1m 391행 (야후 일봉으로 시가·종가 교차 검증된 공급자)",
+  "lag_scan": "키움 usa06011 raw 25페이지(2,133 고유 행)를 두 해석(KST/ET)으로 정규화 후 lag -120..+120분 스캔, median|dClose| 와 거래량 피어슨 상관으로 정렬 판정"
+ },
+ "results": {
+  "mode_ET_lag0": {
+   "matched_minutes": "391/391",
+   "median_abs_close_delta": 0.0,
+   "volume_pearson": 1.0,
+   "note": "ET 라벨 그대로 + lag 0 에서 완전 일치. 세션 커버리지 09:30~16:00 마감 print 포함"
+  },
+  "mode_KST_best": {
+   "best_lag_minutes": -31,
+   "median_abs_close_delta": 1.57,
+   "volume_pearson_at_best": -0.012,
+   "note": "KST 해석은 어떤 lag 에서도 정렬 불가 (기존 오독)"
+  },
+  "session_composition_unique_rows": {
+   "2026-08-26": {"regular": 391, "premarket": 302, "after": 180, "overnight": 226},
+   "note": "응답은 24시간 ET 스트림. 오독이 정규장으로 읽던 22:30~05:00 행 = 오버나이트 ATS 체결 (가격 반증 311.84, 거래량 비율 0.0004~0.013, 커버리지 절단의 실체)"
+  },
+  "strt_dt_semantics": {
+   "20260825": {"page1_label_range": "20260825214900..20260825235900", "bus_dt": ["20260825"]},
+   "20260826": {"page1_label_range": "20260826221100..20260826235800", "bus_dt": ["20260826"]},
+   "20260827": {"page1_label_range": "20260827112800..20260827130700", "bus_dt": ["20260827"]},
+   "note": "strt_dt = ET 달력 날짜 필터. D 를 넣으면 D 의 마지막 행부터 과거로 진행. D+1 앵커 불필요"
+  },
+  "exrt_appl_tp": "0/1 완전 동일 출력 (AAPL 8페이지 대조, 환율 가설 기각)"
+ },
+ "code_change": "db51bab (adapter ET label + strt_dt anchor + verifier US probe). 게이트 flip 은 strict UAT failures=0 증거와 짝지어 별도 커밋",
+ "scripts": "scratchpad kiwoom_us_matrix.py / kiwoom_lag_scan.py / kiwoom_contract_repin.py (세션 로그에 원본 출력 보존)"
+}

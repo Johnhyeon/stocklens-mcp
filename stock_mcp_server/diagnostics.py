@@ -170,9 +170,14 @@ class DiagnosticReport:
     checks: list[DiagnosticCheck]
     latest_version: str | None = None
     update_available: bool | None = None
+    # 증권사 연결 확장 (additive). 구 Manager 는 이 키를 몰라도 되고,
+    # 새 Manager 는 capabilities 로 broker UI 지원 여부를 협상한다.
+    # 공통 schema_version 은 올리지 않는다.
+    capabilities: dict | None = None
+    provider_connections: dict | None = None
 
     def to_dict(self) -> dict:
-        return {
+        doc = {
             "schema_version": self.schema_version,
             "product": PRODUCT,
             "package_name": PACKAGE_NAME,
@@ -187,6 +192,11 @@ class DiagnosticReport:
             "targets": self.targets,
             "checks": [c.to_dict() for c in self.checks],
         }
+        if self.capabilities is not None:
+            doc["capabilities"] = self.capabilities
+        if self.provider_connections is not None:
+            doc["provider_connections"] = self.provider_connections
+        return doc
 
     def to_json(self, *, indent: int | None = 2) -> str:
         return json.dumps(self.to_dict(), ensure_ascii=False, indent=indent)
@@ -637,6 +647,121 @@ async def _check_update_check_reachable() -> tuple[DiagnosticCheck, str | None]:
     )
 
 
+def _broker_keyring():
+    """keyring 접근 지점. 테스트가 가짜 keyring 으로 대체한다."""
+    import keyring
+    return keyring
+
+
+_BROKER_CAPABILITIES = {
+    "broker_connection_contract": 1,
+    "market_data_router_contract": 1,
+    # 1.0 멀티 증권사 (additive)
+    "broker_provider_registry_contract": 1,
+    "multi_broker_primary_contract": 1,
+    "credential_schema_contract": 1,
+}
+
+
+def _broker_summary() -> tuple[dict, dict]:
+    """(capabilities, provider_connections). 비밀값 없는 allowlist DTO.
+
+    상태 dict 를 복사하지 않는다 - 필드를 하나씩 옮겨 담아 낯선 필드,
+    credential_ref, 비밀처럼 보이는 값이 doctor 출력에 닿지 못하게 한다.
+    상태 파일에 기록이 없는 공급자는 keychain 을 읽지 않는다.
+    """
+    capabilities = dict(_BROKER_CAPABILITIES)
+
+    from stock_mcp_server.market_data.provider_registry import registry
+
+    connections: dict = {}
+    try:
+        from stock_mcp_server.market_data.connection_state import (
+            load_state_v2,
+        )
+        state = load_state_v2()
+    except Exception:  # noqa: BLE001
+        state = None
+
+    from stock_mcp_server.market_data.provider_registry import (
+        is_release_verified,
+    )
+
+    for pid in registry.ids():
+        descriptor = registry.require(pid)
+        connection: dict = {
+            "status": "not_configured",
+            "primary": False,
+            "lifecycle": None,
+            "active_profile": None,
+            "data_source_mode": "legacy",
+            "profiles": {
+                p: {"configured": False, "verified": False,
+                    "verified_at": None, "capabilities": {}}
+                for p in descriptor.supported_profiles
+            },
+            # 연결 시험(available)과 별개인 출시 검증 상태 (코드 고정 표).
+            "release_verified": {
+                "kr_intraday": is_release_verified(pid, "kr_intraday"),
+                "us_intraday": is_release_verified(pid, "us_intraday"),
+            },
+            "storage": "os-keychain",
+        }
+        connections[pid] = connection
+        if state is None:
+            continue
+        connection["data_source_mode"] = state["data_source_mode"]
+        connection["primary"] = state["primary_provider"] == pid
+        record = state["providers"].get(pid)
+        if record is None:
+            continue
+        connection["lifecycle"] = record["lifecycle"]
+        connection["active_profile"] = record["active_profile"]
+
+        keyring = _broker_keyring()
+        service = f"stocklens-broker-{pid}"
+        unknown = False
+        for name in descriptor.supported_profiles:
+            prec = record["profiles"].get(name)
+            usernames = []
+            ref = (prec or {}).get("credential_ref")
+            if ref and ref != "legacy":
+                usernames.append(f"{pid}:{name}:{ref}")
+            usernames.append(f"{pid}:{name}")
+            configured = False
+            try:
+                for username in dict.fromkeys(usernames):
+                    if keyring.get_password(service, username):
+                        configured = True
+                        break
+            except Exception:  # noqa: BLE001
+                unknown = True
+                break
+            connection["profiles"][name] = {
+                "configured": configured,
+                "verified": bool(
+                    prec and prec.get("verified") and configured),
+                "verified_at": (prec or {}).get("verified_at"),
+                "capabilities": dict((prec or {}).get(
+                    "capabilities") or {}),
+            }
+        if unknown:
+            # keychain 을 못 읽으면 "미설정"으로 단정하지 않는다.
+            connection["status"] = "unknown"
+            continue
+        if record["lifecycle"] != "connected":
+            connection["status"] = "disabled"
+            continue
+        active = record["active_profile"]
+        if active and connection["profiles"].get(
+                active, {}).get("configured"):
+            connection["status"] = "connected"
+        elif any(v["configured"]
+                 for v in connection["profiles"].values()):
+            connection["status"] = "configured"
+    return capabilities, connections
+
+
 async def run_diagnostics_async(*, online: bool = False) -> DiagnosticReport:
     """`run_diagnostics`의 async 코어. 이미 실행 중인 이벤트 루프(예: MCP 도구)
     안에서는 이 쪽을 직접 await 한다 — `run_diagnostics()`는 내부에서
@@ -687,6 +812,12 @@ async def run_diagnostics_async(*, online: bool = False) -> DiagnosticReport:
 
     update_available = _version_gt(latest_version, __version__) if latest_version else None
 
+    try:
+        broker_capabilities, provider_connections = _broker_summary()
+    except Exception:  # noqa: BLE001
+        broker_capabilities, provider_connections = (
+            dict(_BROKER_CAPABILITIES), None)
+
     overall = _overall_status(checks)
     return DiagnosticReport(
         schema_version=SCHEMA_VERSION,
@@ -701,6 +832,8 @@ async def run_diagnostics_async(*, online: bool = False) -> DiagnosticReport:
         checks=checks,
         latest_version=latest_version,
         update_available=update_available,
+        capabilities=broker_capabilities,
+        provider_connections=provider_connections,
     )
 
 

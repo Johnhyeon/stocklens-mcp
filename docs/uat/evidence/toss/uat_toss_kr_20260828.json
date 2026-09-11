@@ -1,0 +1,511 @@
+{
+ "summary": {
+  "provider": "toss",
+  "market": "KR",
+  "ran_at": "2026-08-28T09:56:06.674553+09:00",
+  "release_gate_opened_for_verification": true,
+  "auto_route": {
+   "error": "TossApiError"
+  },
+  "error_classification": {
+   "bad_symbol": "unsupported",
+   "bad_key_auth": "credential_invalid"
+  },
+  "primary_switch": {
+   "before": "toss",
+   "via": "kiwoom",
+   "steps": [
+    "kiwoom",
+    "toss"
+   ],
+   "ok": true
+  },
+  "failures": 93
+ },
+ "symbols": [
+  {
+   "symbol": "005930",
+   "venue": null,
+   "trading_date": "latest",
+   "intervals": {
+    "1m": {
+     "error": "unsupported"
+    },
+    "5m": {
+     "error": "unsupported"
+    },
+    "15m": {
+     "error": "unsupported"
+    },
+    "60m": {
+     "error": "unsupported"
+    },
+    "120m": {
+     "error": "unsupported"
+    },
+    "240m": {
+     "error": "unsupported"
+    }
+   },
+   "kis_cross_check": null
+  },
+  {
+   "symbol": "000660",
+   "venue": null,
+   "trading_date": "latest",
+   "intervals": {
+    "1m": {
+     "error": "unsupported"
+    },
+    "5m": {
+     "error": "unsupported"
+    },
+    "15m": {
+     "error": "unsupported"
+    },
+    "60m": {
+     "error": "unsupported"
+    },
+    "120m": {
+     "error": "unsupported"
+    },
+    "240m": {
+     "error": "unsupported"
+    }
+   },
+   "kis_cross_check": null
+  },
+  {
+   "symbol": "373220",
+   "venue": null,
+   "trading_date": "latest",
+   "intervals": {
+    "1m": {
+     "error": "unsupported"
+    },
+    "5m": {
+     "error": "unsupported"
+    },
+    "15m": {
+     "error": "unsupported"
+    },
+    "60m": {
+     "error": "unsupported"
+    },
+    "120m": {
+     "error": "unsupported"
+    },
+    "240m": {
+     "error": "unsupported"
+    }
+   },
+   "kis_cross_check": null
+  },
+  {
+   "symbol": "035720",
+   "venue": null,
+   "trading_date": "latest",
+   "intervals": {
+    "1m": {
+     "error": "unsupported"
+    },
+    "5m": {
+     "error": "unsupported"
+    },
+    "15m": {
+     "error": "unsupported"
+    },
+    "60m": {
+     "error": "unsupported"
+    },
+    "120m": {
+     "error": "unsupported"
+    },
+    "240m": {
+     "error": "unsupported"
+    }
+   },
+   "kis_cross_check": null
+  },
+  {
+   "symbol": "035420",
+   "venue": null,
+   "trading_date": "latest",
+   "intervals": {
+    "1m": {
+     "error": "unsupported"
+    },
+    "5m": {
+     "error": "unsupported"
+    },
+    "15m": {
+     "error": "unsupported"
+    },
+    "60m": {
+     "error": "unsupported"
+    },
+    "120m": {
+     "error": "unsupported"
+    },
+    "240m": {
+     "error": "unsupported"
+    }
+   },
+   "kis_cross_check": null
+  },
+  {
+   "symbol": "051910",
+   "venue": null,
+   "trading_date": "latest",
+   "intervals": {
+    "1m": {
+     "error": "unsupported"
+    },
+    "5m": {
+     "error": "unsupported"
+    },
+    "15m": {
+     "error": "unsupported"
+    },
+    "60m": {
+     "error": "unsupported"
+    },
+    "120m": {
+     "error": "unsupported"
+    },
+    "240m": {
+     "error": "unsupported"
+    }
+   },
+   "kis_cross_check": null
+  },
+  {
+   "symbol": "950140",
+   "venue": null,
+   "trading_date": "latest",
+   "intervals": {
+    "1m": {
+     "error": "unsupported"
+    },
+    "5m": {
+     "error": "unsupported"
+    },
+    "15m": {
+     "error": "unsupported"
+    },
+    "60m": {
+     "error": "unsupported"
+    },
+    "120m": {
+     "error": "unsupported"
+    },
+    "240m": {
+     "error": "unsupported"
+    }
+   },
+   "kis_cross_check": null
+  },
+  {
+   "symbol": "043370",
+   "venue": null,
+   "trading_date": "latest",
+   "intervals": {
+    "1m": {
+     "error": "unsupported"
+    },
+    "5m": {
+     "error": "unsupported"
+    },
+    "15m": {
+     "error": "unsupported"
+    },
+    "60m": {
+     "error": "unsupported"
+    },
+    "120m": {
+     "error": "unsupported"
+    },
+    "240m": {
+     "error": "unsupported"
+    }
+   },
+   "kis_cross_check": null
+  },
+  {
+   "symbol": "036560",
+   "venue": null,
+   "trading_date": "latest",
+   "intervals": {
+    "1m": {
+     "error": "unsupported"
+    },
+    "5m": {
+     "error": "unsupported"
+    },
+    "15m": {
+     "error": "unsupported"
+    },
+    "60m": {
+     "error": "unsupported"
+    },
+    "120m": {
+     "error": "unsupported"
+    },
+    "240m": {
+     "error": "unsupported"
+    }
+   },
+   "kis_cross_check": null
+  },
+  {
+   "symbol": "069500",
+   "venue": null,
+   "trading_date": "latest",
+   "intervals": {
+    "1m": {
+     "error": "unsupported"
+    },
+    "5m": {
+     "error": "unsupported"
+    },
+    "15m": {
+     "error": "unsupported"
+    },
+    "60m": {
+     "error": "unsupported"
+    },
+    "120m": {
+     "error": "unsupported"
+    },
+    "240m": {
+     "error": "unsupported"
+    }
+   },
+   "kis_cross_check": null
+  },
+  {
+   "symbol": "371460",
+   "venue": null,
+   "trading_date": "latest",
+   "intervals": {
+    "1m": {
+     "error": "unsupported"
+    },
+    "5m": {
+     "error": "unsupported"
+    },
+    "15m": {
+     "error": "unsupported"
+    },
+    "60m": {
+     "error": "unsupported"
+    },
+    "120m": {
+     "error": "unsupported"
+    },
+    "240m": {
+     "error": "unsupported"
+    }
+   },
+   "kis_cross_check": null
+  },
+  {
+   "symbol": "305720",
+   "venue": null,
+   "trading_date": "latest",
+   "intervals": {
+    "1m": {
+     "error": "unsupported"
+    },
+    "5m": {
+     "error": "unsupported"
+    },
+    "15m": {
+     "error": "unsupported"
+    },
+    "60m": {
+     "error": "unsupported"
+    },
+    "120m": {
+     "error": "unsupported"
+    },
+    "240m": {
+     "error": "unsupported"
+    }
+   },
+   "kis_cross_check": null
+  },
+  {
+   "symbol": "005935",
+   "venue": null,
+   "trading_date": "latest",
+   "intervals": {
+    "1m": {
+     "error": "unsupported"
+    },
+    "5m": {
+     "error": "unsupported"
+    },
+    "15m": {
+     "error": "unsupported"
+    },
+    "60m": {
+     "error": "unsupported"
+    },
+    "120m": {
+     "error": "unsupported"
+    },
+    "240m": {
+     "error": "unsupported"
+    }
+   },
+   "kis_cross_check": null
+  },
+  {
+   "symbol": "003555",
+   "venue": null,
+   "trading_date": "latest",
+   "intervals": {
+    "1m": {
+     "error": "unsupported"
+    },
+    "5m": {
+     "error": "unsupported"
+    },
+    "15m": {
+     "error": "unsupported"
+    },
+    "60m": {
+     "error": "unsupported"
+    },
+    "120m": {
+     "error": "unsupported"
+    },
+    "240m": {
+     "error": "unsupported"
+    }
+   },
+   "kis_cross_check": null
+  },
+  {
+   "symbol": "005930",
+   "venue": null,
+   "trading_date": "2026-08-21",
+   "intervals": {
+    "1m": {
+     "rows": 500,
+     "provider": "toss",
+     "complete": true,
+     "pages": null,
+     "warnings": [],
+     "selection_reason": "explicit_source_toss_strict",
+     "primary_provider": "toss",
+     "independent_mismatches": [],
+     "independent_compared": 500,
+     "first": "2026-08-20T13:40:00+09:00",
+     "last": "2026-08-21T15:29:00+09:00"
+    },
+    "5m": {
+     "rows": 200,
+     "provider": "toss",
+     "complete": true,
+     "pages": null,
+     "warnings": [],
+     "selection_reason": "explicit_source_toss_strict",
+     "primary_provider": "toss",
+     "independent_mismatches": [],
+     "independent_compared": 100,
+     "first": "2026-08-19T11:50:00+09:00",
+     "last": "2026-08-21T15:25:00+09:00"
+    },
+    "15m": {
+     "rows": 200,
+     "provider": "toss",
+     "complete": true,
+     "pages": null,
+     "warnings": [],
+     "selection_reason": "explicit_source_toss_strict",
+     "primary_provider": "toss",
+     "independent_mismatches": [],
+     "independent_compared": 33,
+     "first": "2026-08-11T11:00:00+09:00",
+     "last": "2026-08-21T15:15:00+09:00"
+    },
+    "60m": {
+     "rows": 70,
+     "provider": "toss",
+     "complete": true,
+     "pages": null,
+     "warnings": [],
+     "selection_reason": "explicit_source_toss_strict",
+     "primary_provider": "toss",
+     "independent_mismatches": [],
+     "independent_compared": 9,
+     "first": "2026-08-07T09:00:00+09:00",
+     "last": "2026-08-21T15:00:00+09:00"
+    },
+    "120m": {
+     "rows": 40,
+     "provider": "toss",
+     "complete": true,
+     "pages": null,
+     "warnings": [],
+     "selection_reason": "explicit_source_toss_strict",
+     "primary_provider": "toss",
+     "independent_mismatches": [],
+     "independent_compared": 5,
+     "first": "2026-08-07T09:00:00+09:00",
+     "last": "2026-08-21T15:00:00+09:00"
+    },
+    "240m": {
+     "rows": 20,
+     "provider": "toss",
+     "complete": true,
+     "pages": null,
+     "warnings": [],
+     "selection_reason": "explicit_source_toss_strict",
+     "primary_provider": "toss",
+     "independent_mismatches": [],
+     "independent_compared": 2,
+     "first": "2026-08-07T09:00:00+09:00",
+     "last": "2026-08-21T13:00:00+09:00"
+    }
+   },
+   "pagination": {
+    "error": "unsupported"
+   },
+   "cache_second_read": {
+    "cache_hit": true,
+    "provider_calls": 0,
+    "rows": 50
+   },
+   "kis_cross_check": null
+  },
+  {
+   "symbol": "005930",
+   "venue": null,
+   "trading_date": "2026-07-30",
+   "intervals": {
+    "1m": {
+     "error": "unsupported"
+    },
+    "5m": {
+     "error": "unsupported"
+    },
+    "15m": {
+     "error": "unsupported"
+    },
+    "60m": {
+     "error": "unsupported"
+    },
+    "120m": {
+     "error": "unsupported"
+    },
+    "240m": {
+     "error": "unsupported"
+    }
+   },
+   "kis_cross_check": null
+  }
+ ]
+}

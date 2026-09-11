@@ -1,6 +1,6 @@
 [project]
 name = "stocklens-mcp"
-version = "0.9.1"
+version = "1.0.0"
 description = "StockLens — AI가 진짜 데이터로 분석합니다. 한국·미국 주식 + ETF MCP 서버 (차트, 수급, 재무, 실적, 배당, 스크리닝, Excel)"
 readme = "README.md"
 license = { text = "Proprietary" }
@@ -43,6 +43,9 @@ dependencies = [
     # 증권사 리포트 PDF 본문 추출(_pdf.py). pdftotext 계열은 한글이 통째로 날아가서
     # 쓰지 않는다 — 실측에서 pypdf 만 한글이 살아 나왔다.
     "pypdf>=4.0.0",
+    # 증권사 App Key·App Secret 은 OS 자격 증명 저장소에만 둔다(market_data).
+    # 평문 환경변수 fallback 을 기본 경로로 두지 않는다.
+    "keyring>=24,<26",
 ]
 
 [project.urls]
@@ -56,6 +59,7 @@ stocklens = "stock_mcp_server.server:main"
 stocklens-setup = "stock_mcp_server.setup_claude:main"
 stocklens-doctor = "stock_mcp_server.doctor:main"
 stocklens-activate = "stock_mcp_server.licensing:activate_cli"
+stocklens-broker = "stock_mcp_server.broker_cli:main"
 # 하위 호환 (기존 naver-stock-mcp 사용자)
 stock-mcp-server = "stock_mcp_server.server:main"
 stock-mcp-setup = "stock_mcp_server.setup_claude:main"
@@ -84,4 +88,11 @@ exclude = [
     "README.en.md",
     "install.ps1",
     "install.sh",
+    # 고객 배포물에는 내부 자료를 넣지 않는다 (2026-08-28 rc1 검수).
+    # 설계·구현 계획서, UAT 원본 JSON, 릴리스 증거, 내부 실행기가
+    # docs/ 아래에 있고 고객이 쓸 일이 없다.
+    "docs/",
+    ".playwright-mcp/",
+    "*.png",
+    "*.gif",
 ]

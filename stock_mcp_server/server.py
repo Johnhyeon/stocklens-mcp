@@ -5,6 +5,7 @@ Claude에서 자연어로 분석할 수 있게 해줍니다.
 """
 
 import functools
+import os
 import re
 from datetime import datetime
 from pathlib import Path
@@ -7886,6 +7887,778 @@ async def export_us_to_excel(
         f"컬럼: {', '.join(df.columns)}\n\n"
         f"💡 이 파일을 엑셀·Gemini·ChatGPT 등에서 바로 분석 가능. Claude 토큰 소비 없음."
     )
+
+
+# =====================================================================
+# 증권사 분봉 선로 (broker market data routing) — 신규 분봉 도구
+#
+# 설계: docs/plans/2026-08-27-broker-market-data-routing-design.md
+# 기존 get_chart / get_us_chart / get_indicators 는 변경하지 않는다.
+# =====================================================================
+
+from stock_mcp_server.market_data.connection_state import (  # noqa: E402
+    load_state_v2 as _broker_load_state_v2,
+    provider_capabilities_v2 as _provider_capabilities_v2,
+)
+from stock_mcp_server.market_data.runtime import (  # noqa: E402
+    ProviderRuntime as _ProviderRuntimeCls,
+)
+from stock_mcp_server.market_data.indicator_input import (  # noqa: E402
+    bars_to_ohlcv as _bars_to_ohlcv,
+    filter_completed as _filter_completed,
+)
+from stock_mcp_server.market_data.kis_client import (  # noqa: E402
+    KisApiError as _KisApiError,
+)
+from stock_mcp_server.market_data.models import (  # noqa: E402
+    SUPPORTED_INTERVALS as _INTRADAY_INTERVALS,
+    BarDataset as _BDS,
+    BarRequest as _BarRequest,
+    bar_from_dict as _bar_from_dict,
+    bar_to_dict as _bar_to_dict,
+)
+from zoneinfo import ZoneInfo as _ZoneInfo  # noqa: E402
+from stock_mcp_server.market_data.naver_provider import (  # noqa: E402
+    NaverBarProvider as _NaverBarProvider,
+)
+from stock_mcp_server.market_data.resample import (  # noqa: E402
+    resample_intraday as _resample_intraday,
+)
+from stock_mcp_server.market_data.router import (  # noqa: E402
+    RouterError as _RouterError,
+    fetch_with_failover as _fetch_with_failover,
+    resolve_source as _resolve_source,
+)
+from stock_mcp_server.market_data.sessions import (  # noqa: E402
+    session_window as _session_window,
+)
+from stock_mcp_server.market_data.us_symbols import (  # noqa: E402
+    SymbolMappingError as _SymbolMappingError,
+)
+from stock_mcp_server.market_data.yahoo_provider import (  # noqa: E402
+    YahooBarProvider as _YahooBarProvider,
+)
+from stock_mcp_server.market_data._bars import (  # noqa: E402
+    sort_and_dedupe as _sort_and_dedupe_bars,
+)
+
+from stock_mcp_server.market_data.provider_registry import (  # noqa: E402
+    registry as _provider_registry,
+)
+from stock_mcp_server.market_data.kiwoom_client import (  # noqa: E402
+    KiwoomApiError as _KiwoomApiError,
+)
+from stock_mcp_server.market_data.toss_client import (  # noqa: E402
+    TossApiError as _TossApiError,
+)
+
+_INTRADAY_SOURCES = ("auto",) + _provider_registry.ids() + (
+    "naver", "yahoo")
+_EXPERIMENTAL_BROKER_ENV = "LEETKIT_ENABLE_EXPERIMENTAL_BROKERS"
+_EXPERIMENTAL_BROKERS = frozenset({"toss"})
+
+
+def _broker_is_public(provider: str) -> bool:
+    """고객 모드에서는 검증 중인 공급자를 계약 표면에서 감춘다."""
+    return (
+        provider not in _EXPERIMENTAL_BROKERS
+        or os.environ.get(_EXPERIMENTAL_BROKER_ENV) == "1"
+    )
+
+
+def _public_intraday_sources() -> tuple[str, ...]:
+    return tuple(source for source in _INTRADAY_SOURCES
+                 if _broker_is_public(source))
+
+# 완료 거래일 캐시 복원 시 쓰는 공급자별 KR 1m endpoint 이름.
+_BROKER_KR_ENDPOINTS = {
+    "kis": "domestic_minute",
+    "kiwoom": "kiwoom_kr_minute",
+    "toss": "toss_candles",
+}
+
+# KIS 분봉 다일 조회 예산. 이 이상의 이력이 필요하면 partial 로 정직하게
+# 보고한다 (무한 페이지·무한 일수 금지).
+_INTRADAY_MAX_FETCH_DAYS = 10
+
+
+# 공급자 runtime. 클라이언트 캐시((provider, profile, generation))와
+# 어댑터 구성을 담당한다. KIS 토큰 발급 1분 1회 제한 때문에 재사용 필수.
+_PROVIDER_RUNTIME = _ProviderRuntimeCls()
+
+
+def _broker_state() -> dict:
+    """현재 연결 상태. 매 요청 파일에서 읽어 Manager 변경을 즉시 반영한다.
+
+    v2 상태에서 만든 호환 형태를 돌려준다. active_provider 는 주 사용
+    증권사(primary)를 뜻한다.
+    """
+    state = _broker_load_state_v2()
+    primary = state["primary_provider"]
+    record = state["providers"].get(primary) if primary else None
+    return {
+        "data_source_mode": state["data_source_mode"],
+        "active_provider": primary,
+        "active_profile": (record or {}).get("active_profile"),
+        "connection_generation": state["routing_generation"],
+        "state_v2": state,
+    }
+
+
+def _broker_capabilities(state: dict) -> dict:
+    """연결 시험으로 검증된 능력만 산다. 추측으로 활성화하지 않는다."""
+    disconnected = {"connected": False, "kr_intraday": False,
+                    "us_intraday": False, "kr_daily": False,
+                    "us_daily": False}
+    v2 = state.get("state_v2")
+    if v2 is not None:
+        primary = state.get("active_provider")
+        if not primary:
+            return disconnected
+        return _provider_capabilities_v2(v2, primary)
+    # 시험용 v1 형태 dict 호환 경로
+    if state.get("active_provider") != "kis" or \
+            not state.get("active_profile"):
+        return disconnected
+    results = (state.get("capability_results") or {}).get(
+        state["active_profile"]) or {}
+    return {
+        "connected": True,
+        "kr_intraday": results.get("kr_intraday") == "available",
+        "us_intraday": results.get("us_intraday") == "available",
+        # 일·주·월봉은 수정주가·기업행위 검증 전까지 활성화하지 않는다.
+        "kr_daily": False,
+        "us_daily": False,
+    }
+
+
+def _intraday_providers(market: str, source: str = "auto") -> dict:
+    return _PROVIDER_RUNTIME.providers_for(market, source)
+
+
+def _previous_trading_day(market: str, day):
+    for step in range(1, 31):
+        candidate = day - _dt.timedelta(days=step)
+        if _session_window(market, candidate) is not None:
+            return candidate
+    return None
+
+
+def _intraday_disk_cache():
+    """공급자별 디스크 캐시. STOCKLENS_HOME 을 호출 시점에 읽는다."""
+    from stock_mcp_server.market_data.provider_cache import ProviderCache
+    return ProviderCache()
+
+
+def _trading_day_completed(market: str, day, now) -> bool:
+    win = _session_window(market, day)
+    return win is not None and now >= win.close_at
+
+
+def _broker_day_cache_key(provider: str, profile: str, market: str,
+                          symbol: str, venue: str, session: str,
+                          day) -> dict:
+    return {
+        "provider": provider, "profile": profile, "market": market,
+        "symbol": symbol, "venue": venue, "session": session,
+        "source_interval": "1m", "trading_date": day.strftime("%Y%m%d"),
+        "cursor": "", "adjustment": "unadjusted",
+    }
+
+
+def _load_cached_broker_day(cache, key: dict):
+    """완전(complete) entry 만 봉으로 복원한다. 손상 시 None.
+
+    봉 날짜가 키의 trading_date 와 다르면 오염된 entry 다 - 복원을
+    거부한다 (2026-08-27 실측: 테스트 오염 캐시가 실서비스 조회에
+    가짜 하루로 잡혔다).
+    """
+    try:
+        entry = cache.get(key, connected=True)
+    except Exception:  # noqa: BLE001
+        return None
+    if not entry or not entry.get("complete"):
+        return None
+    payload = entry.get("payload") or {}
+    try:
+        bars = tuple(_bar_from_dict(r) for r in payload.get("bars", []))
+    except Exception:  # noqa: BLE001
+        return None
+    expected = str(key.get("trading_date") or "")
+    for bar in bars:
+        if bar.start_at.strftime("%Y%m%d") != expected:
+            return None
+    return bars or None
+
+
+def _store_broker_day(cache, key: dict, bars) -> None:
+    """캐시 저장 실패는 조회 실패가 아니다. 조용히 넘어간다."""
+    try:
+        cache.put(key, {"bars": [_bar_to_dict(b) for b in bars]},
+                  complete=True)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+async def _fetch_intraday_dataset(
+    *,
+    symbol: str,
+    market: str,
+    interval: str,
+    trading_date,
+    row_limit: int,
+    venue: str | None,
+    session: str,
+    completed_only: bool,
+    source: str,
+    now=None,
+):
+    """공급원 고정 → 조회(필요 시 다일) → 세션 집계 → 완성 봉 필터."""
+    state = _broker_state()
+    primary = state.get("active_provider")
+    if primary is not None and not _broker_is_public(primary):
+        primary = None
+        caps = {
+            "connected": False,
+            "kr_intraday": False,
+            "us_intraday": False,
+            "kr_daily": False,
+            "us_daily": False,
+        }
+    else:
+        caps = _broker_capabilities(state)
+    caps_by_provider = {primary: caps} if primary else {}
+    v2 = state.get("state_v2")
+    if v2 is not None:
+        # 명시 source 로 지정될 수 있는 다른 연결 공급자의 능력도 싣는다.
+        from stock_mcp_server.market_data.provider_registry import (
+            registry as _registry,
+        )
+        for pid in _registry.ids():
+            if not _broker_is_public(pid):
+                continue
+            caps_by_provider.setdefault(
+                pid, _provider_capabilities_v2(v2, pid))
+    resolution = _resolve_source(
+        mode=state.get("data_source_mode", "legacy"),
+        market=market, interval=interval,
+        requested_source=source, capabilities=caps_by_provider,
+        primary_provider=primary)
+
+    selected_caps = caps_by_provider.get(resolution.selected_provider) or {}
+    if not selected_caps.get("connected"):
+        profile = None
+    elif v2 is not None:
+        profile = (v2["providers"].get(resolution.selected_provider)
+                   or {}).get("active_profile")
+    else:
+        profile = state.get("active_profile")
+    providers = _intraday_providers(market, source)
+
+    if now is None:
+        now = _dt.datetime.now(
+            _ZoneInfo("Asia/Seoul") if market == "KR"
+            else _ZoneInfo("America/New_York"))
+
+    target_minutes = _INTRADAY_INTERVALS[interval]
+    default_venue = "KRX" if market == "KR" else (venue or "")
+
+    # 공급자별 원천 간격: KIS 는 1m 원천에서 집계, Yahoo 는 검증된
+    # native 간격이 있으면 직접 사용한다.
+    selected = resolution.selected_provider
+    if selected == "yahoo" and interval in ("1m", "5m", "15m", "30m", "60m"):
+        fetch_interval = interval
+    else:
+        fetch_interval = "1m"
+
+    def _make_request(day) -> _BarRequest:
+        base_rows = max(row_limit * max(
+            target_minutes // _INTRADAY_INTERVALS[fetch_interval], 1),
+            row_limit)
+        # 완료 거래일은 캐시에 '완전한 하루'로 저장된다. 부분 조회가 완전
+        # 캐시로 둔갑하지 않도록 그날 세션 전체를 요청한다.
+        if market == "KR" and fetch_interval == "1m" and \
+                _trading_day_completed(market, day, now):
+            win = _session_window(market, day)
+            if win is not None:
+                base_rows = max(base_rows, win.minutes + 1)
+        return _BarRequest(
+            symbol=symbol, market=market, interval=fetch_interval,
+            start=None, end=None, trading_date=day,
+            row_limit=base_rows,
+            venue=venue if venue is not None else default_venue,
+            session=session, adjustment="unadjusted",
+            completed_only=completed_only, source=source)
+
+    # --- 완료 거래일 디스크 캐시 (KR KIS 1m 원천 전용) ---
+    # 진행 중 거래일은 캐시하지 않는다 (낡은 장중 데이터 금지). 캐시는
+    # 연결 능력을 대신하지 않는다 - 이 분기는 라우터가 KIS 를 선택했을
+    # 때만 도달한다.
+    cache = _intraday_disk_cache()
+    selected = resolution.selected_provider
+    broker_kr = (selected in _provider_registry.ids()
+                 and market == "KR" and profile is not None)
+    primary_completed = _trading_day_completed(market, trading_date, now)
+
+    dataset = None
+    route_meta = None
+    if broker_kr and primary_completed:
+        key = _broker_day_cache_key(
+            selected, profile, market, symbol, "KRX", session,
+            trading_date)
+        cached_bars = _load_cached_broker_day(cache, key)
+        if cached_bars:
+            dataset = _BDS(
+                bars=cached_bars, market=market, symbol=symbol,
+                provider=selected, profile=profile, venue="KRX",
+                timezone="Asia/Seoul", session=session,
+                requested_interval=fetch_interval, source_interval="1m",
+                aggregation_method="provider_native",
+                adjustment_basis="unadjusted",
+                source_endpoint=_BROKER_KR_ENDPOINTS.get(
+                    selected, "broker_minute"),
+                coverage={"complete": True,
+                          "returned_rows": len(cached_bars),
+                          "cache_hit": True},
+                warnings=())
+            route_meta = {
+                "requested_source": resolution.requested_source,
+                "selected_provider": selected,
+                "selection_reason": resolution.selection_reason,
+                "mode": resolution.mode,
+                "fallback_used": False,
+                "fallback_from": None,
+                "primary_provider": resolution.primary_provider,
+                "cache_hit": True,
+            }
+
+    if dataset is None:
+        dataset, route_meta = await _fetch_with_failover(
+            resolution, providers, _make_request(trading_date))
+        if broker_kr and primary_completed and \
+                dataset.provider == selected and dataset.bars and \
+                dataset.coverage.get("complete"):
+            key = _broker_day_cache_key(
+                selected, profile, market, symbol, "KRX", session,
+                trading_date)
+            _store_broker_day(cache, key, dataset.bars)
+
+    # KIS 국내 1m 원천은 하루 단위 endpoint 다. 필요한 이력이 부족하면 예산
+    # 안에서 이전 거래일을 이어 붙인다. 공급원은 바꾸지 않는다.
+    # 해외 endpoint 는 날짜 인자 없이 KEYB 로만 페이지네이션하므로 다일
+    # 루프를 돌리면 같은 호출만 반복된다 (2026-08-27 실측) - KR 전용.
+    needed_rows = row_limit * (
+        target_minutes // _INTRADAY_INTERVALS[dataset.source_interval]
+        if dataset.source_interval in _INTRADAY_INTERVALS else 1)
+    if dataset.provider in _provider_registry.ids() and market == "KR" \
+            and len(dataset.bars) < needed_rows:
+        merged = list(dataset.bars)
+        warnings = list(dataset.warnings)
+        day = trading_date
+        days_used = 1
+        provider_obj = providers.get(dataset.provider)
+        source_endpoint = dataset.source_endpoint
+        while len(merged) < needed_rows and \
+                days_used < _INTRADAY_MAX_FETCH_DAYS:
+            day = _previous_trading_day(market, day)
+            if day is None:
+                break
+            days_used += 1
+            day_key = _broker_day_cache_key(
+                dataset.provider, profile, market, symbol, "KRX",
+                session, day)
+            extra_bars = _load_cached_broker_day(cache, day_key) \
+                if profile else None
+            if extra_bars is None:
+                try:
+                    extra_ds = await provider_obj.fetch_bars(
+                        _make_request(day))
+                except Exception:  # noqa: BLE001
+                    # 과거 일자 실패는 이미 받은 구간을 버릴 이유가 아니다.
+                    warnings.append(
+                        f"{day.isoformat()} 분봉 조회에 실패해 그 이전 이력 "
+                        "없이 계산합니다.")
+                    break
+                extra_bars = extra_ds.bars
+                if profile and extra_bars and \
+                        extra_ds.coverage.get("complete") and \
+                        _trading_day_completed(market, day, now):
+                    _store_broker_day(cache, day_key, extra_bars)
+            before = len(merged)
+            merged.extend(extra_bars)
+            merged_sorted, dd_warns = _sort_and_dedupe_bars(merged)
+            merged = list(merged_sorted)
+            warnings.extend(dd_warns)
+            if len(merged) <= before:
+                break
+        ordered, dd_warns = _sort_and_dedupe_bars(merged)
+        warnings.extend(dd_warns)
+        coverage = dict(dataset.coverage)
+        coverage["days_fetched"] = days_used
+        dataset = _BDS(
+            bars=ordered, market=market, symbol=symbol,
+            provider=dataset.provider, profile=profile,
+            venue=default_venue if market == "KR" else (venue or ""),
+            timezone="Asia/Seoul" if market == "KR"
+            else "America/New_York",
+            session=session, requested_interval=fetch_interval,
+            source_interval="1m",
+            aggregation_method="provider_native",
+            adjustment_basis="unadjusted",
+            source_endpoint=source_endpoint,
+            coverage=coverage, warnings=tuple(warnings))
+
+    # 세션 집계 (동일 간격이어도 세션 필터·완성 판정을 위해 통과시킨다)
+    dataset = _resample_intraday(dataset, interval, now=now)
+
+    if completed_only:
+        kept = _filter_completed(dataset.bars)
+        if len(kept) != len(dataset.bars):
+            dataset = _BDS(
+                bars=kept, market=dataset.market, symbol=dataset.symbol,
+                provider=dataset.provider, profile=dataset.profile,
+                venue=dataset.venue, timezone=dataset.timezone,
+                session=dataset.session,
+                requested_interval=dataset.requested_interval,
+                source_interval=dataset.source_interval,
+                aggregation_method=dataset.aggregation_method,
+                adjustment_basis=dataset.adjustment_basis,
+                source_endpoint=dataset.source_endpoint,
+                coverage=dataset.coverage,
+                warnings=dataset.warnings)
+
+    if len(dataset.bars) > row_limit:
+        dataset = _BDS(
+            bars=dataset.bars[-row_limit:], market=dataset.market,
+            symbol=dataset.symbol, provider=dataset.provider,
+            profile=dataset.profile, venue=dataset.venue,
+            timezone=dataset.timezone, session=dataset.session,
+            requested_interval=dataset.requested_interval,
+            source_interval=dataset.source_interval,
+            aggregation_method=dataset.aggregation_method,
+            adjustment_basis=dataset.adjustment_basis,
+            source_endpoint=dataset.source_endpoint,
+            coverage=dataset.coverage, warnings=dataset.warnings)
+
+    return dataset, route_meta
+
+
+def _intraday_meta_extra(dataset, route_meta: dict) -> dict:
+    # rmeta.provider_extension 이 값 계약(허용 status, tz 포함 timestamp)을
+    # 검증한다. 계약 위반이면 응답을 내보내기 전에 여기서 죽는 게 맞다.
+    extra = rmeta.provider_extension(
+        provider=dataset.provider,
+        provider_status="ok",
+        provider_profile=dataset.profile,
+        requested_source=route_meta.get("requested_source"),
+        selection_reason=route_meta.get("selection_reason"),
+        fallback_used=bool(route_meta.get("fallback_used")),
+        fallback_from=route_meta.get("fallback_from"),
+        venue=dataset.venue,
+        timezone=dataset.timezone,
+        requested_interval=dataset.requested_interval,
+        source_interval=dataset.source_interval,
+        aggregation_method=dataset.aggregation_method,
+        adjustment_basis=dataset.adjustment_basis,
+        data_as_of_timestamp=(
+            dataset.bars[-1].end_at.isoformat() if dataset.bars else None),
+        primary_provider=route_meta.get("primary_provider"),
+    )
+    if route_meta.get("cache_hit"):
+        extra["cache_hit"] = True
+    return extra
+
+
+def _intraday_error_result(symbol: str, market: str, message: str,
+                           provider_status: str) -> str:
+    # 자동 전환이 없으므로(1.0 정책) 장애 시 사용자가 스스로 고를 수 있는
+    # 대안을 안내한다. Yahoo 는 거래량 기준이 달라 명시 선택으로만 쓴다.
+    if provider_status == "unsupported":
+        # 키 문제가 아니다 - 이 공급자가 해당 시장·요청의 데이터 계약을
+        # 지원하지 않거나 검증되지 않아 제공하지 않는 상태다.
+        message = (
+            f"{message}\n이 증권사는 해당 시장 분봉을 지원하지 않거나 "
+            "데이터 계약이 검증되지 않았습니다. API 키 문제가 아닙니다. "
+            "다른 source(예: 주 사용 증권사 또는 KR 일봉은 기본 데이터)를 "
+            "사용하세요.")
+    if market == "US" and provider_status in (
+            "rate_limited", "provider_unavailable",
+            "authentication_failed", "permission_denied"):
+        message = (
+            f"{message}\n일시 장애면 잠시 후 재시도하세요. "
+            "지금 바로 조회가 필요하면 source=\"yahoo\" 를 명시해 Yahoo "
+            "데이터로 볼 수 있습니다 (거래량 기준이 증권사와 다릅니다).")
+    meta_fn = _kr_meta if market == "KR" else _us_meta
+    kwargs = {"code": symbol} if market == "KR" else {"ticker": symbol}
+    meta = meta_fn(
+        kind="bars", data_completeness=rmeta.NONE,
+        warnings=[message],
+        extra={"provider_status": provider_status},
+        **kwargs)
+    return _append_result_meta(message, meta)
+
+
+def _validate_intraday_args(market: str, interval: str, source: str,
+                            date_str, session: str = "regular",
+                            ) -> tuple[str | None, object]:
+    """(오류 메시지, trading_date) 를 돌려준다."""
+    if market not in ("KR", "US"):
+        return ("market은 KR 또는 US여야 합니다.", None)
+    if session != "regular":
+        # 시간외·주간거래는 세션 경계와 집계가 검증된 뒤에 연다 (설계 14절).
+        return (f"지원하지 않는 session입니다: {session} "
+                "(현재 regular만 지원, 검증 후 확대 예정)", None)
+    if interval not in _INTRADAY_INTERVALS:
+        return (f"지원하지 않는 interval입니다: {interval} "
+                f"(지원: {', '.join(_INTRADAY_INTERVALS)})", None)
+    public_sources = _public_intraday_sources()
+    if source not in public_sources:
+        return (f"지원하지 않는 source입니다: {source} "
+                f"(지원: {', '.join(public_sources)})", None)
+    if date_str is None:
+        clock_key = "krx" if market == "KR" else "us"
+        raw = build_market_clock()[clock_key].get("last_trading_day")
+        try:
+            return None, _dt.date.fromisoformat(str(raw))
+        except (TypeError, ValueError):
+            return ("기준 거래일을 결정할 수 없습니다. date를 지정하세요.", None)
+    cleaned = str(date_str).strip().replace(".", "-")
+    if len(cleaned) == 8 and cleaned.isdigit():
+        cleaned = f"{cleaned[:4]}-{cleaned[4:6]}-{cleaned[6:8]}"
+    try:
+        return None, _dt.date.fromisoformat(cleaned)
+    except ValueError:
+        return ("날짜 형식이 올바르지 않습니다 (YYYY-MM-DD).", None)
+
+
+@mcp.tool()
+@safe_tool
+@track_metrics("get_intraday_chart")
+async def get_intraday_chart(
+    symbol: str,
+    market: str = "KR",
+    interval: str = "5m",
+    date: str | None = None,
+    row_limit: int = 120,
+    venue: str | None = None,
+    session: str = "regular",
+    completed_only: bool = True,
+    source: str = "auto",
+) -> str:
+    """분봉차트 — 국내·미국 분봉/시간봉 OHLCV (증권사 연결 필요 구간 있음).
+
+    증권사(한국투자증권·키움증권 중 하나) Open API 를 연결한
+    사용자는 주 사용 증권사에서 KR·US 분봉을 받는다. 미연결 사용자는
+    US 분봉만 Yahoo 에서 받는다 (KR 분봉은 증권사 연결 필요).
+    검증된 능력만 활성화된다.
+    일·주·월봉은 기존 get_chart / get_us_chart 를 사용.
+
+    Args:
+        symbol: KR 종목코드 6자리 또는 US 티커
+        market: "KR" | "US"
+        interval: 1m|3m|5m|10m|15m|30m|60m|120m|240m
+        date: 기준 거래일 (YYYY-MM-DD, 기본 최근 거래일)
+        row_limit: 최대 반환 봉 수 (기본 120, 최대 500)
+        venue: KR 은 KRX 고정. US 는 증권사 사용 시 NYS|NAS|AMS 필요
+        session: "regular" (기타 세션은 능력 검증 후 지원)
+        completed_only: 완성 봉만 반환 (기본 True)
+        source: auto|kis|kiwoom|naver|yahoo.
+            auto 는 주 사용 증권사 하나에 고정되고, 증권사 명시는
+            strict(실패해도 다른 공급원으로 대체하지 않음)
+    """
+    err, trading_date = _validate_intraday_args(
+        market, interval, source, date, session)
+    if err:
+        return err
+    row_limit = max(1, min(row_limit, 500))
+
+    try:
+        dataset, route_meta = await _fetch_intraday_dataset(
+            symbol=symbol, market=market, interval=interval,
+            trading_date=trading_date, row_limit=row_limit,
+            venue=venue, session=session, completed_only=completed_only,
+            source=source)
+    except _RouterError as exc:
+        return _intraday_error_result(
+            symbol, market, str(exc), exc.provider_status)
+    except (_KisApiError, _KiwoomApiError, _TossApiError) as exc:
+        return _intraday_error_result(
+            symbol, market,
+            f"증권사 데이터 조회 실패: {exc.provider_status}",
+            exc.provider_status)
+    except _SymbolMappingError as exc:
+        return _intraday_error_result(symbol, market, str(exc),
+                                      "entity_not_found")
+
+    extra = _intraday_meta_extra(dataset, route_meta)
+    warnings = list(dataset.warnings)
+    if route_meta.get("fallback_used"):
+        warnings.append(
+            f"{route_meta['fallback_from']} 사용 불가로 요청 전체를 "
+            f"{dataset.provider}에서 새로 시작했습니다.")
+
+    meta_fn = _kr_meta if market == "KR" else _us_meta
+    kwargs = {"code": symbol} if market == "KR" else {"ticker": symbol}
+
+    if not dataset.bars:
+        meta = meta_fn(
+            kind="bars", data_completeness=rmeta.NONE,
+            warnings=warnings + ["조회된 봉이 없습니다."],
+            extra=extra, **kwargs)
+        return _append_result_meta(
+            f"{symbol} {interval} 분봉 데이터가 없습니다.", meta)
+
+    rows = [{
+        "datetime": b.start_at.strftime("%Y-%m-%d %H:%M"),
+        "open": float(b.open), "high": float(b.high),
+        "low": float(b.low), "close": float(b.close),
+        "volume": b.volume,
+    } for b in dataset.bars]
+
+    decimals = 0 if market == "KR" else 2
+    header = (f"**{symbol}** {market} {interval} 분봉 OHLCV "
+              f"({len(rows)} bars, {dataset.venue}, "
+              f"{dataset.session} session)")
+    lines = [header, ""]
+    lines.extend(_format_ohlcv_rows(rows, is_intraday=True,
+                                    decimals=decimals))
+
+    tails = [b for b in dataset.bars if b.session_tail]
+    if tails:
+        lines.append("")
+        lines.append(
+            f"※ 세션 꼬리 봉 {len(tails)}개 포함 "
+            f"(예: {tails[-1].start_at.strftime('%H:%M')}~"
+            f"{tails[-1].end_at.strftime('%H:%M')}, "
+            f"{tails[-1].actual_minutes}분). 일반 {interval} 봉과 거래량을 "
+            "직접 비교하지 마세요.")
+
+    partial = any(b.data_integrity != "complete" for b in dataset.bars)
+    completeness = rmeta.PARTIAL if partial or \
+        not dataset.coverage.get("complete", True) else rmeta.COMPLETE
+
+    last = dataset.bars[-1]
+    meta = meta_fn(
+        kind="bars",
+        data_as_of=last.start_at.date().isoformat(),
+        data_completeness=completeness,
+        warnings=warnings,
+        extra=extra,
+        **kwargs)
+    return _append_result_meta("\n".join(lines), meta)
+
+
+@mcp.tool()
+@safe_tool
+@track_metrics("get_intraday_indicators")
+async def get_intraday_indicators(
+    symbol: str,
+    market: str = "KR",
+    interval: str = "60m",
+    bars: int = 260,
+    include: list[str] | None = None,
+    venue: str | None = None,
+    session: str = "regular",
+    completed_only: bool = True,
+    source: str = "auto",
+    params: dict | None = None,
+) -> str:
+    """분봉지표 — 분봉/시간봉 기준 기술지표 (JSON).
+
+    차트와 같은 봉 데이터로 계산한다(공급원 혼합 없음). 일봉 지표는
+    기존 get_indicators 사용. days 가 아니라 **bars**(봉 개수) 기준이다.
+
+    Args:
+        symbol: KR 종목코드 또는 US 티커
+        market: "KR" | "US"
+        interval: 1m|3m|5m|10m|15m|30m|60m|120m|240m
+        bars: 계산에 쓸 봉 개수 (기본 260, 30~500)
+        include: 지표 키 (기본 ["ma","ma_phase","volume","candle"])
+        venue / session / completed_only / source: get_intraday_chart 와 동일
+        params: 지표 파라미터 오버라이드
+    """
+    err, trading_date = _validate_intraday_args(market, interval, source,
+                                                None, session)
+    if err:
+        return err
+    if include is None:
+        include = ["ma", "ma_phase", "volume", "candle"]
+    unknown = [k for k in include if k not in AVAILABLE_INDICATORS]
+    if unknown:
+        return (f"지원하지 않는 지표: {unknown}\n"
+                f"사용 가능: {AVAILABLE_INDICATORS}")
+    bars = max(30, min(bars, 500))
+
+    try:
+        dataset, route_meta = await _fetch_intraday_dataset(
+            symbol=symbol, market=market, interval=interval,
+            trading_date=trading_date, row_limit=bars,
+            venue=venue, session=session, completed_only=completed_only,
+            source=source)
+    except _RouterError as exc:
+        return _intraday_error_result(
+            symbol, market, str(exc), exc.provider_status)
+    except (_KisApiError, _KiwoomApiError, _TossApiError) as exc:
+        return _intraday_error_result(
+            symbol, market,
+            f"증권사 데이터 조회 실패: {exc.provider_status}",
+            exc.provider_status)
+    except _SymbolMappingError as exc:
+        return _intraday_error_result(symbol, market, str(exc),
+                                      "entity_not_found")
+
+    ohlcv = _bars_to_ohlcv(dataset.bars)
+    if not ohlcv:
+        return _intraday_error_result(
+            symbol, market,
+            f"{symbol} {interval} 분봉 데이터가 없어 지표를 계산할 수 "
+            "없습니다.", "no_session")
+
+    result = compute_indicators(ohlcv, include, params=params)
+    ind_errors = _indicator_error_list(result)
+    ind_cov = _indicator_coverage(
+        include=include, available_bars=len(ohlcv), params=params)
+
+    extra = _intraday_meta_extra(dataset, route_meta)
+    extra["indicator_coverage"] = ind_cov
+    if ind_errors:
+        extra["indicator_errors"] = ind_errors
+
+    warnings = list(dataset.warnings)
+    if route_meta.get("fallback_used"):
+        warnings.append(
+            f"{route_meta['fallback_from']} 사용 불가로 요청 전체를 "
+            f"{dataset.provider}에서 새로 시작했습니다.")
+    if ind_cov["insufficient"]:
+        warnings.append(
+            "봉이 모자라 계산되지 않은 지표: "
+            + ", ".join(ind_cov["insufficient"])
+            + f" ({len(ohlcv)}봉 기준). 값이 없는 것이지 신호가 없는 것이 "
+            "아닙니다.")
+
+    completeness = rmeta.COMPLETE
+    if ind_cov["insufficient"] or ind_errors or \
+            not dataset.coverage.get("complete", True):
+        completeness = rmeta.PARTIAL
+
+    meta_fn = _kr_meta if market == "KR" else _us_meta
+    kwargs = {"code": symbol} if market == "KR" else {"ticker": symbol}
+    last_date = (dataset.bars[-1].start_at.date().isoformat()
+                 if dataset.bars else None)
+    meta = meta_fn(
+        kind="bars", data_as_of=last_date,
+        data_completeness=completeness,
+        warnings=warnings, extra=extra, **kwargs)
+
+    payload = {
+        "symbol": symbol,
+        "market": market,
+        "interval": interval,
+        "bars": bars,
+        "indicators": result,
+        "_meta": meta,
+    }
+    return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
 
 
 def main():

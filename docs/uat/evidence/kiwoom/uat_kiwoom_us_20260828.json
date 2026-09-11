@@ -1,0 +1,1568 @@
+{
+ "summary": {
+  "provider": "kiwoom",
+  "market": "US",
+  "ran_at": "2026-08-28T02:35:23.648461+09:00",
+  "release_gate_opened_for_verification": true,
+  "auto_route": {
+   "gate_preview": true,
+   "selected_provider": "kiwoom",
+   "primary_provider": "kiwoom",
+   "selection_reason": "broker_connected_and_intraday_supported",
+   "rows": 49,
+   "provider_matches": true
+  },
+  "error_classification": {
+   "bad_symbol": "entity_not_found",
+   "bad_key_auth": "credential_invalid"
+  },
+  "primary_switch": {
+   "before": "kiwoom",
+   "via": "toss",
+   "steps": [
+    "toss",
+    "kiwoom"
+   ],
+   "ok": true
+  },
+  "pagination_continuation": {
+   "market": "US",
+   "page1_rows": 100,
+   "page2_rows": 100,
+   "cont_yn": "Y",
+   "cursor_progressed": true,
+   "ok": true
+  },
+  "failures": 0
+ },
+ "symbols": [
+  {
+   "symbol": "AAPL",
+   "venue": "NAS",
+   "trading_date": "latest",
+   "intervals": {
+    "1m": {
+     "rows": 235,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 6,
+     "warnings": [
+      "정규장 밖 행 330개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 235,
+     "first": "2026-08-27T09:30:00-04:00",
+     "last": "2026-08-27T13:24:00-04:00"
+    },
+    "5m": {
+     "rows": 47,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 6,
+     "warnings": [
+      "정규장 밖 행 330개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 47,
+     "first": "2026-08-27T09:30:00-04:00",
+     "last": "2026-08-27T13:20:00-04:00"
+    },
+    "15m": {
+     "rows": 15,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 6,
+     "warnings": [
+      "정규장 밖 행 330개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 15,
+     "first": "2026-08-27T09:30:00-04:00",
+     "last": "2026-08-27T13:00:00-04:00"
+    },
+    "60m": {
+     "rows": 3,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 6,
+     "warnings": [
+      "정규장 밖 행 330개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 3,
+     "first": "2026-08-27T09:30:00-04:00",
+     "last": "2026-08-27T11:30:00-04:00"
+    },
+    "120m": {
+     "rows": 1,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 6,
+     "warnings": [
+      "정규장 밖 행 330개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 1,
+     "first": "2026-08-27T09:30:00-04:00",
+     "last": "2026-08-27T09:30:00-04:00"
+    },
+    "240m": {
+     "rows": 0,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 6,
+     "warnings": [
+      "정규장 밖 행 330개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 0,
+     "first": null,
+     "last": null
+    }
+   },
+   "pagination": {
+    "pages": 6,
+    "rows": 236,
+    "complete": true
+   },
+   "kis_cross_check": {
+    "available": false,
+    "error": "kis_empty"
+   }
+  },
+  {
+   "symbol": "MSFT",
+   "venue": "NAS",
+   "trading_date": "latest",
+   "intervals": {
+    "1m": {
+     "rows": 235,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 6,
+     "warnings": [
+      "정규장 밖 행 328개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 235,
+     "first": "2026-08-27T09:30:00-04:00",
+     "last": "2026-08-27T13:24:00-04:00"
+    },
+    "5m": {
+     "rows": 47,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 6,
+     "warnings": [
+      "정규장 밖 행 328개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 47,
+     "first": "2026-08-27T09:30:00-04:00",
+     "last": "2026-08-27T13:20:00-04:00"
+    },
+    "15m": {
+     "rows": 15,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 6,
+     "warnings": [
+      "정규장 밖 행 328개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 15,
+     "first": "2026-08-27T09:30:00-04:00",
+     "last": "2026-08-27T13:00:00-04:00"
+    },
+    "60m": {
+     "rows": 3,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 6,
+     "warnings": [
+      "정규장 밖 행 328개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 3,
+     "first": "2026-08-27T09:30:00-04:00",
+     "last": "2026-08-27T11:30:00-04:00"
+    },
+    "120m": {
+     "rows": 1,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 6,
+     "warnings": [
+      "정규장 밖 행 328개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 1,
+     "first": "2026-08-27T09:30:00-04:00",
+     "last": "2026-08-27T09:30:00-04:00"
+    },
+    "240m": {
+     "rows": 0,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 6,
+     "warnings": [
+      "정규장 밖 행 328개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 0,
+     "first": null,
+     "last": null
+    }
+   },
+   "pagination": {
+    "pages": 6,
+    "rows": 237,
+    "complete": true
+   },
+   "kis_cross_check": {
+    "available": false,
+    "error": "kis_empty"
+   }
+  },
+  {
+   "symbol": "NVDA",
+   "venue": "NAS",
+   "trading_date": "latest",
+   "intervals": {
+    "1m": {
+     "rows": 236,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 6,
+     "warnings": [
+      "정규장 밖 행 330개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 236,
+     "first": "2026-08-27T09:30:00-04:00",
+     "last": "2026-08-27T13:25:00-04:00"
+    },
+    "5m": {
+     "rows": 47,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 6,
+     "warnings": [
+      "정규장 밖 행 330개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 47,
+     "first": "2026-08-27T09:30:00-04:00",
+     "last": "2026-08-27T13:20:00-04:00"
+    },
+    "15m": {
+     "rows": 15,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 6,
+     "warnings": [
+      "정규장 밖 행 330개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 15,
+     "first": "2026-08-27T09:30:00-04:00",
+     "last": "2026-08-27T13:00:00-04:00"
+    },
+    "60m": {
+     "rows": 3,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 6,
+     "warnings": [
+      "정규장 밖 행 330개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 3,
+     "first": "2026-08-27T09:30:00-04:00",
+     "last": "2026-08-27T11:30:00-04:00"
+    },
+    "120m": {
+     "rows": 1,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 6,
+     "warnings": [
+      "정규장 밖 행 330개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 1,
+     "first": "2026-08-27T09:30:00-04:00",
+     "last": "2026-08-27T09:30:00-04:00"
+    },
+    "240m": {
+     "rows": 0,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 6,
+     "warnings": [
+      "정규장 밖 행 330개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 0,
+     "first": null,
+     "last": null
+    }
+   },
+   "pagination": {
+    "pages": 6,
+    "rows": 237,
+    "complete": true
+   },
+   "kis_cross_check": {
+    "available": false,
+    "error": "kis_empty"
+   }
+  },
+  {
+   "symbol": "TSLA",
+   "venue": "NAS",
+   "trading_date": "latest",
+   "intervals": {
+    "1m": {
+     "rows": 236,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 6,
+     "warnings": [
+      "정규장 밖 행 330개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 236,
+     "first": "2026-08-27T09:30:00-04:00",
+     "last": "2026-08-27T13:25:00-04:00"
+    },
+    "5m": {
+     "rows": 47,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 6,
+     "warnings": [
+      "정규장 밖 행 330개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 47,
+     "first": "2026-08-27T09:30:00-04:00",
+     "last": "2026-08-27T13:20:00-04:00"
+    },
+    "15m": {
+     "rows": 15,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 6,
+     "warnings": [
+      "정규장 밖 행 330개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 15,
+     "first": "2026-08-27T09:30:00-04:00",
+     "last": "2026-08-27T13:00:00-04:00"
+    },
+    "60m": {
+     "rows": 3,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 6,
+     "warnings": [
+      "정규장 밖 행 330개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 3,
+     "first": "2026-08-27T09:30:00-04:00",
+     "last": "2026-08-27T11:30:00-04:00"
+    },
+    "120m": {
+     "rows": 1,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 6,
+     "warnings": [
+      "정규장 밖 행 330개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 1,
+     "first": "2026-08-27T09:30:00-04:00",
+     "last": "2026-08-27T09:30:00-04:00"
+    },
+    "240m": {
+     "rows": 0,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 6,
+     "warnings": [
+      "정규장 밖 행 330개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 0,
+     "first": null,
+     "last": null
+    }
+   },
+   "pagination": {
+    "pages": 6,
+    "rows": 237,
+    "complete": true
+   },
+   "kis_cross_check": {
+    "available": false,
+    "error": "kis_empty"
+   }
+  },
+  {
+   "symbol": "IBM",
+   "venue": "NYS",
+   "trading_date": "latest",
+   "intervals": {
+    "1m": {
+     "rows": 236,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 5,
+     "warnings": [
+      "정규장 밖 행 177개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 236,
+     "first": "2026-08-27T09:30:00-04:00",
+     "last": "2026-08-27T13:25:00-04:00"
+    },
+    "5m": {
+     "rows": 47,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 5,
+     "warnings": [
+      "정규장 밖 행 177개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 47,
+     "first": "2026-08-27T09:30:00-04:00",
+     "last": "2026-08-27T13:20:00-04:00"
+    },
+    "15m": {
+     "rows": 15,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 5,
+     "warnings": [
+      "정규장 밖 행 177개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 15,
+     "first": "2026-08-27T09:30:00-04:00",
+     "last": "2026-08-27T13:00:00-04:00"
+    },
+    "60m": {
+     "rows": 3,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 5,
+     "warnings": [
+      "정규장 밖 행 177개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 3,
+     "first": "2026-08-27T09:30:00-04:00",
+     "last": "2026-08-27T11:30:00-04:00"
+    },
+    "120m": {
+     "rows": 1,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 5,
+     "warnings": [
+      "정규장 밖 행 177개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 1,
+     "first": "2026-08-27T09:30:00-04:00",
+     "last": "2026-08-27T09:30:00-04:00"
+    },
+    "240m": {
+     "rows": 0,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 5,
+     "warnings": [
+      "정규장 밖 행 177개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 0,
+     "first": null,
+     "last": null
+    }
+   },
+   "pagination": {
+    "pages": 5,
+    "rows": 238,
+    "complete": true
+   },
+   "kis_cross_check": {
+    "available": false,
+    "error": "kis_empty"
+   }
+  },
+  {
+   "symbol": "KO",
+   "venue": "NYS",
+   "trading_date": "latest",
+   "intervals": {
+    "1m": {
+     "rows": 237,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 6,
+     "warnings": [
+      "정규장 밖 행 309개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 237,
+     "first": "2026-08-27T09:30:00-04:00",
+     "last": "2026-08-27T13:26:00-04:00"
+    },
+    "5m": {
+     "rows": 47,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 6,
+     "warnings": [
+      "정규장 밖 행 309개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 47,
+     "first": "2026-08-27T09:30:00-04:00",
+     "last": "2026-08-27T13:20:00-04:00"
+    },
+    "15m": {
+     "rows": 15,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 6,
+     "warnings": [
+      "정규장 밖 행 309개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 15,
+     "first": "2026-08-27T09:30:00-04:00",
+     "last": "2026-08-27T13:00:00-04:00"
+    },
+    "60m": {
+     "rows": 3,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 6,
+     "warnings": [
+      "정규장 밖 행 309개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 3,
+     "first": "2026-08-27T09:30:00-04:00",
+     "last": "2026-08-27T11:30:00-04:00"
+    },
+    "120m": {
+     "rows": 1,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 6,
+     "warnings": [
+      "정규장 밖 행 309개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 1,
+     "first": "2026-08-27T09:30:00-04:00",
+     "last": "2026-08-27T09:30:00-04:00"
+    },
+    "240m": {
+     "rows": 0,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 6,
+     "warnings": [
+      "정규장 밖 행 309개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 0,
+     "first": null,
+     "last": null
+    }
+   },
+   "pagination": {
+    "pages": 6,
+    "rows": 238,
+    "complete": true
+   },
+   "kis_cross_check": {
+    "available": false,
+    "error": "kis_empty"
+   }
+  },
+  {
+   "symbol": "JPM",
+   "venue": "NYS",
+   "trading_date": "latest",
+   "intervals": {
+    "1m": {
+     "rows": 237,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 4,
+     "warnings": [
+      "정규장 밖 행 158개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 237,
+     "first": "2026-08-27T09:30:00-04:00",
+     "last": "2026-08-27T13:26:00-04:00"
+    },
+    "5m": {
+     "rows": 47,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 4,
+     "warnings": [
+      "정규장 밖 행 158개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 47,
+     "first": "2026-08-27T09:30:00-04:00",
+     "last": "2026-08-27T13:20:00-04:00"
+    },
+    "15m": {
+     "rows": 15,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 4,
+     "warnings": [
+      "정규장 밖 행 158개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 15,
+     "first": "2026-08-27T09:30:00-04:00",
+     "last": "2026-08-27T13:00:00-04:00"
+    },
+    "60m": {
+     "rows": 3,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 4,
+     "warnings": [
+      "정규장 밖 행 158개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 3,
+     "first": "2026-08-27T09:30:00-04:00",
+     "last": "2026-08-27T11:30:00-04:00"
+    },
+    "120m": {
+     "rows": 1,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 4,
+     "warnings": [
+      "정규장 밖 행 158개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 1,
+     "first": "2026-08-27T09:30:00-04:00",
+     "last": "2026-08-27T09:30:00-04:00"
+    },
+    "240m": {
+     "rows": 0,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 4,
+     "warnings": [
+      "정규장 밖 행 158개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 0,
+     "first": null,
+     "last": null
+    }
+   },
+   "pagination": {
+    "pages": 4,
+    "rows": 238,
+    "complete": true
+   },
+   "kis_cross_check": {
+    "available": false,
+    "error": "kis_empty"
+   }
+  },
+  {
+   "symbol": "QQQ",
+   "venue": "NAS",
+   "trading_date": "latest",
+   "intervals": {
+    "1m": {
+     "rows": 237,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 6,
+     "warnings": [
+      "정규장 밖 행 330개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 237,
+     "first": "2026-08-27T09:30:00-04:00",
+     "last": "2026-08-27T13:26:00-04:00"
+    },
+    "5m": {
+     "rows": 47,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 6,
+     "warnings": [
+      "정규장 밖 행 330개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 47,
+     "first": "2026-08-27T09:30:00-04:00",
+     "last": "2026-08-27T13:20:00-04:00"
+    },
+    "15m": {
+     "rows": 15,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 6,
+     "warnings": [
+      "정규장 밖 행 330개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 15,
+     "first": "2026-08-27T09:30:00-04:00",
+     "last": "2026-08-27T13:00:00-04:00"
+    },
+    "60m": {
+     "rows": 3,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 6,
+     "warnings": [
+      "정규장 밖 행 330개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 3,
+     "first": "2026-08-27T09:30:00-04:00",
+     "last": "2026-08-27T11:30:00-04:00"
+    },
+    "120m": {
+     "rows": 1,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 6,
+     "warnings": [
+      "정규장 밖 행 330개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 1,
+     "first": "2026-08-27T09:30:00-04:00",
+     "last": "2026-08-27T09:30:00-04:00"
+    },
+    "240m": {
+     "rows": 0,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 6,
+     "warnings": [
+      "정규장 밖 행 330개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 0,
+     "first": null,
+     "last": null
+    }
+   },
+   "pagination": {
+    "pages": 6,
+    "rows": 239,
+    "complete": true
+   },
+   "kis_cross_check": {
+    "available": false,
+    "error": "kis_empty"
+   }
+  },
+  {
+   "symbol": "SPY",
+   "venue": "NYS",
+   "trading_date": "latest",
+   "intervals": {
+    "1m": {
+     "rows": 238,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 6,
+     "warnings": [
+      "정규장 밖 행 304개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 238,
+     "first": "2026-08-27T09:30:00-04:00",
+     "last": "2026-08-27T13:27:00-04:00"
+    },
+    "5m": {
+     "rows": 47,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 6,
+     "warnings": [
+      "정규장 밖 행 304개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 47,
+     "first": "2026-08-27T09:30:00-04:00",
+     "last": "2026-08-27T13:20:00-04:00"
+    },
+    "15m": {
+     "rows": 15,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 6,
+     "warnings": [
+      "정규장 밖 행 304개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 15,
+     "first": "2026-08-27T09:30:00-04:00",
+     "last": "2026-08-27T13:00:00-04:00"
+    },
+    "60m": {
+     "rows": 3,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 6,
+     "warnings": [
+      "정규장 밖 행 304개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 3,
+     "first": "2026-08-27T09:30:00-04:00",
+     "last": "2026-08-27T11:30:00-04:00"
+    },
+    "120m": {
+     "rows": 1,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 6,
+     "warnings": [
+      "정규장 밖 행 304개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 1,
+     "first": "2026-08-27T09:30:00-04:00",
+     "last": "2026-08-27T09:30:00-04:00"
+    },
+    "240m": {
+     "rows": 0,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 6,
+     "warnings": [
+      "정규장 밖 행 304개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 0,
+     "first": null,
+     "last": null
+    }
+   },
+   "pagination": {
+    "pages": 6,
+    "rows": 240,
+    "complete": true
+   },
+   "kis_cross_check": {
+    "available": false,
+    "error": "kis_empty"
+   }
+  },
+  {
+   "symbol": "IWM",
+   "venue": "NYS",
+   "trading_date": "latest",
+   "intervals": {
+    "1m": {
+     "rows": 239,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 5,
+     "warnings": [
+      "정규장 밖 행 179개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 239,
+     "first": "2026-08-27T09:30:00-04:00",
+     "last": "2026-08-27T13:28:00-04:00"
+    },
+    "5m": {
+     "rows": 47,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 5,
+     "warnings": [
+      "정규장 밖 행 179개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 47,
+     "first": "2026-08-27T09:30:00-04:00",
+     "last": "2026-08-27T13:20:00-04:00"
+    },
+    "15m": {
+     "rows": 15,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 5,
+     "warnings": [
+      "정규장 밖 행 179개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 15,
+     "first": "2026-08-27T09:30:00-04:00",
+     "last": "2026-08-27T13:00:00-04:00"
+    },
+    "60m": {
+     "rows": 3,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 5,
+     "warnings": [
+      "정규장 밖 행 179개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 3,
+     "first": "2026-08-27T09:30:00-04:00",
+     "last": "2026-08-27T11:30:00-04:00"
+    },
+    "120m": {
+     "rows": 1,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 5,
+     "warnings": [
+      "정규장 밖 행 179개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 1,
+     "first": "2026-08-27T09:30:00-04:00",
+     "last": "2026-08-27T09:30:00-04:00"
+    },
+    "240m": {
+     "rows": 0,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 5,
+     "warnings": [
+      "정규장 밖 행 179개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 0,
+     "first": null,
+     "last": null
+    }
+   },
+   "pagination": {
+    "pages": 5,
+    "rows": 240,
+    "complete": true
+   },
+   "kis_cross_check": {
+    "available": false,
+    "error": "kis_empty"
+   }
+  },
+  {
+   "symbol": "PLTR",
+   "venue": "NAS",
+   "trading_date": "latest",
+   "intervals": {
+    "1m": {
+     "rows": 240,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 6,
+     "warnings": [
+      "정규장 밖 행 321개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 240,
+     "first": "2026-08-27T09:30:00-04:00",
+     "last": "2026-08-27T13:29:00-04:00"
+    },
+    "5m": {
+     "rows": 48,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 6,
+     "warnings": [
+      "정규장 밖 행 321개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 48,
+     "first": "2026-08-27T09:30:00-04:00",
+     "last": "2026-08-27T13:25:00-04:00"
+    },
+    "15m": {
+     "rows": 16,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 6,
+     "warnings": [
+      "정규장 밖 행 321개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 16,
+     "first": "2026-08-27T09:30:00-04:00",
+     "last": "2026-08-27T13:15:00-04:00"
+    },
+    "60m": {
+     "rows": 4,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 6,
+     "warnings": [
+      "정규장 밖 행 321개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 4,
+     "first": "2026-08-27T09:30:00-04:00",
+     "last": "2026-08-27T12:30:00-04:00"
+    },
+    "120m": {
+     "rows": 2,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 6,
+     "warnings": [
+      "정규장 밖 행 321개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 2,
+     "first": "2026-08-27T09:30:00-04:00",
+     "last": "2026-08-27T11:30:00-04:00"
+    },
+    "240m": {
+     "rows": 1,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 6,
+     "warnings": [
+      "정규장 밖 행 321개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 1,
+     "first": "2026-08-27T09:30:00-04:00",
+     "last": "2026-08-27T09:30:00-04:00"
+    }
+   },
+   "pagination": {
+    "pages": 6,
+    "rows": 242,
+    "complete": true
+   },
+   "kis_cross_check": {
+    "available": false,
+    "error": "kis_empty"
+   }
+  },
+  {
+   "symbol": "SOFI",
+   "venue": "NAS",
+   "trading_date": "latest",
+   "intervals": {
+    "1m": {
+     "rows": 241,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 6,
+     "warnings": [
+      "정규장 밖 행 269개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 241,
+     "first": "2026-08-27T09:30:00-04:00",
+     "last": "2026-08-27T13:30:00-04:00"
+    },
+    "5m": {
+     "rows": 48,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 6,
+     "warnings": [
+      "정규장 밖 행 269개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 48,
+     "first": "2026-08-27T09:30:00-04:00",
+     "last": "2026-08-27T13:25:00-04:00"
+    },
+    "15m": {
+     "rows": 16,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 6,
+     "warnings": [
+      "정규장 밖 행 269개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 16,
+     "first": "2026-08-27T09:30:00-04:00",
+     "last": "2026-08-27T13:15:00-04:00"
+    },
+    "60m": {
+     "rows": 4,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 6,
+     "warnings": [
+      "정규장 밖 행 269개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 4,
+     "first": "2026-08-27T09:30:00-04:00",
+     "last": "2026-08-27T12:30:00-04:00"
+    },
+    "120m": {
+     "rows": 2,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 6,
+     "warnings": [
+      "정규장 밖 행 269개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 2,
+     "first": "2026-08-27T09:30:00-04:00",
+     "last": "2026-08-27T11:30:00-04:00"
+    },
+    "240m": {
+     "rows": 1,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 6,
+     "warnings": [
+      "정규장 밖 행 269개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 1,
+     "first": "2026-08-27T09:30:00-04:00",
+     "last": "2026-08-27T09:30:00-04:00"
+    }
+   },
+   "pagination": {
+    "pages": 6,
+    "rows": 243,
+    "complete": true
+   },
+   "kis_cross_check": {
+    "available": false,
+    "error": "kis_empty"
+   }
+  },
+  {
+   "symbol": "BRK.B",
+   "venue": "NYS",
+   "trading_date": "latest",
+   "intervals": {
+    "1m": {
+     "error": "entity_not_found"
+    },
+    "5m": {
+     "error": "entity_not_found"
+    },
+    "15m": {
+     "error": "entity_not_found"
+    },
+    "60m": {
+     "error": "entity_not_found"
+    },
+    "120m": {
+     "error": "entity_not_found"
+    },
+    "240m": {
+     "error": "entity_not_found"
+    }
+   },
+   "kis_cross_check": null
+  },
+  {
+   "symbol": "AAPL",
+   "venue": "NAS",
+   "trading_date": "2026-08-21",
+   "intervals": {
+    "1m": {
+     "rows": 390,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 11,
+     "warnings": [
+      "정규장 밖 행 699개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 390,
+     "first": "2026-08-21T09:30:00-04:00",
+     "last": "2026-08-21T15:59:00-04:00"
+    },
+    "5m": {
+     "rows": 78,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 11,
+     "warnings": [
+      "정규장 밖 행 699개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 78,
+     "first": "2026-08-21T09:30:00-04:00",
+     "last": "2026-08-21T15:55:00-04:00"
+    },
+    "15m": {
+     "rows": 26,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 11,
+     "warnings": [
+      "정규장 밖 행 699개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 26,
+     "first": "2026-08-21T09:30:00-04:00",
+     "last": "2026-08-21T15:45:00-04:00"
+    },
+    "60m": {
+     "rows": 7,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 11,
+     "warnings": [
+      "정규장 밖 행 699개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 7,
+     "first": "2026-08-21T09:30:00-04:00",
+     "last": "2026-08-21T15:30:00-04:00"
+    },
+    "120m": {
+     "rows": 4,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 11,
+     "warnings": [
+      "정규장 밖 행 699개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 4,
+     "first": "2026-08-21T09:30:00-04:00",
+     "last": "2026-08-21T15:30:00-04:00"
+    },
+    "240m": {
+     "rows": 2,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 11,
+     "warnings": [
+      "정규장 밖 행 699개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 2,
+     "first": "2026-08-21T09:30:00-04:00",
+     "last": "2026-08-21T13:30:00-04:00"
+    }
+   },
+   "pagination": {
+    "pages": 11,
+    "rows": 391,
+    "complete": true
+   },
+   "kis_cross_check": {
+    "available": true,
+    "kis_rows": 391,
+    "provider_rows": 391,
+    "common": 391,
+    "only_kis": 0,
+    "only_provider": 0,
+    "only_kis_timestamps": [],
+    "only_provider_timestamps": [],
+    "ohlc_diff_minutes": 0,
+    "ohlc_diff_samples": [],
+    "volume_ratio_median": 1.0
+   }
+  },
+  {
+   "symbol": "AAPL",
+   "venue": "NAS",
+   "trading_date": "2026-07-31",
+   "intervals": {
+    "1m": {
+     "rows": 390,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 12,
+     "warnings": [
+      "정규장 밖 행 746개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 390,
+     "first": "2026-07-31T09:30:00-04:00",
+     "last": "2026-07-31T15:59:00-04:00"
+    },
+    "5m": {
+     "rows": 78,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 12,
+     "warnings": [
+      "정규장 밖 행 746개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 78,
+     "first": "2026-07-31T09:30:00-04:00",
+     "last": "2026-07-31T15:55:00-04:00"
+    },
+    "15m": {
+     "rows": 26,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 12,
+     "warnings": [
+      "정규장 밖 행 746개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 26,
+     "first": "2026-07-31T09:30:00-04:00",
+     "last": "2026-07-31T15:45:00-04:00"
+    },
+    "60m": {
+     "rows": 7,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 12,
+     "warnings": [
+      "정규장 밖 행 746개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 7,
+     "first": "2026-07-31T09:30:00-04:00",
+     "last": "2026-07-31T15:30:00-04:00"
+    },
+    "120m": {
+     "rows": 4,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 12,
+     "warnings": [
+      "정규장 밖 행 746개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 4,
+     "first": "2026-07-31T09:30:00-04:00",
+     "last": "2026-07-31T15:30:00-04:00"
+    },
+    "240m": {
+     "rows": 2,
+     "provider": "kiwoom",
+     "complete": true,
+     "pages": 12,
+     "warnings": [
+      "정규장 밖 행 746개를 제외했습니다."
+     ],
+     "selection_reason": "explicit_source_kiwoom_strict",
+     "primary_provider": "kiwoom",
+     "independent_mismatches": [],
+     "independent_compared": 2,
+     "first": "2026-07-31T09:30:00-04:00",
+     "last": "2026-07-31T13:30:00-04:00"
+    }
+   },
+   "pagination": {
+    "pages": 12,
+    "rows": 391,
+    "complete": true
+   },
+   "kis_cross_check": {
+    "available": true,
+    "kis_rows": 391,
+    "provider_rows": 391,
+    "common": 391,
+    "only_kis": 0,
+    "only_provider": 0,
+    "only_kis_timestamps": [],
+    "only_provider_timestamps": [],
+    "ohlc_diff_minutes": 0,
+    "ohlc_diff_samples": [],
+    "volume_ratio_median": 1.0
+   }
+  }
+ ]
+}

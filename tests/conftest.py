@@ -15,6 +15,34 @@ import pytest
 
 
 @pytest.fixture(autouse=True)
+def _isolate_stocklens_home(tmp_path_factory, monkeypatch):
+    """모든 테스트에 tmp STOCKLENS_HOME 을 강제한다.
+
+    실제로 당했다 (2026-08-27). STOCKLENS_HOME 미설정으로 돌던 분봉
+    테스트들이 가짜 봉을 개발자 실사용 캐시(~/.stocklens/cache)에
+    '완전한 하루'로 저장했고, 실서비스 조회가 그 가짜 캐시를 맞았다.
+    개별 테스트가 자기 home 을 다시 설정하는 것은 그대로 동작한다.
+
+    라이선스 파일만 실사용 홈에서 복사해 온다. 수많은 도구 테스트가
+    유료 게이트 뒤에 있어서, 격리 홈이 비면 전부 라이선스 오류로
+    무너진다 (읽기 전용 복사라 실사용 파일은 건드리지 않는다).
+    """
+    import shutil
+    from pathlib import Path
+
+    root = tmp_path_factory.mktemp("stocklens_home")
+    real_home = Path.home() / ".stocklens"
+    for name in ("license.key", "revoked_cache.json", "clock_seen"):
+        src = real_home / name
+        if src.exists():
+            try:
+                shutil.copy2(src, root / name)
+            except OSError:
+                pass
+    monkeypatch.setenv("STOCKLENS_HOME", str(root))
+
+
+@pytest.fixture(autouse=True)
 def _isolate_license_state(tmp_path_factory, monkeypatch):
     root = tmp_path_factory.mktemp("license_state")
     try:

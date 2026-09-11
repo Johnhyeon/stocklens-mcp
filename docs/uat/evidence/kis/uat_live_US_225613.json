@@ -1,0 +1,1632 @@
+[
+ {
+  "symbol": "AAPL",
+  "market": "US",
+  "venue": "NAS",
+  "intervals": {
+   "1m": {
+    "provider": "kis",
+    "fallback": false,
+    "cache_hit": false,
+    "bars": 498,
+    "first": "2026-08-25T14:12:00-04:00",
+    "last": "2026-08-26T15:59:00-04:00",
+    "tails": 0,
+    "warnings": [
+     "정규장 세션 밖 행 776개를 제외했습니다."
+    ],
+    "secs": 8.99
+   },
+   "5m": {
+    "provider": "kis",
+    "fallback": false,
+    "cache_hit": false,
+    "bars": 312,
+    "first": "2026-08-21T09:30:00-04:00",
+    "last": "2026-08-26T15:55:00-04:00",
+    "tails": 0,
+    "warnings": [
+     "페이지 예산(30)을 소진해 중단했습니다.",
+     "정규장 세션 밖 행 2036개를 제외했습니다."
+    ],
+    "secs": 19.75
+   },
+   "15m": {
+    "provider": "kis",
+    "fallback": false,
+    "cache_hit": false,
+    "bars": 104,
+    "first": "2026-08-21T09:30:00-04:00",
+    "last": "2026-08-26T15:45:00-04:00",
+    "tails": 0,
+    "warnings": [
+     "페이지 예산(30)을 소진해 중단했습니다.",
+     "정규장 세션 밖 행 2036개를 제외했습니다."
+    ],
+    "secs": 19.58
+   },
+   "60m": {
+    "provider": "kis",
+    "fallback": false,
+    "cache_hit": false,
+    "bars": 28,
+    "first": "2026-08-21T09:30:00-04:00",
+    "last": "2026-08-26T15:30:00-04:00",
+    "tails": 4,
+    "warnings": [
+     "페이지 예산(30)을 소진해 중단했습니다.",
+     "정규장 세션 밖 행 2036개를 제외했습니다."
+    ],
+    "secs": 22.37
+   },
+   "120m": {
+    "provider": "kis",
+    "fallback": false,
+    "cache_hit": false,
+    "bars": 16,
+    "first": "2026-08-21T09:30:00-04:00",
+    "last": "2026-08-26T15:30:00-04:00",
+    "tails": 4,
+    "warnings": [
+     "페이지 예산(30)을 소진해 중단했습니다.",
+     "정규장 세션 밖 행 2036개를 제외했습니다."
+    ],
+    "secs": 24.22
+   },
+   "240m": {
+    "provider": "kis",
+    "fallback": false,
+    "cache_hit": false,
+    "bars": 8,
+    "first": "2026-08-21T09:30:00-04:00",
+    "last": "2026-08-26T13:30:00-04:00",
+    "tails": 4,
+    "warnings": [
+     "페이지 예산(30)을 소진해 중단했습니다.",
+     "정규장 세션 밖 행 2036개를 제외했습니다."
+    ],
+    "secs": 25.77
+   }
+  },
+  "recompute": {
+   "5m": {
+    "checked": 99,
+    "mismatches": []
+   },
+   "60m": {
+    "checked": 9,
+    "mismatches": []
+   },
+   "240m": {
+    "checked": 2,
+    "mismatches": []
+   }
+  },
+  "indicators": {
+   "status": "insufficient"
+  },
+  "verdict": "PASS",
+  "notes": []
+ },
+ {
+  "symbol": "MSFT",
+  "market": "US",
+  "venue": "NAS",
+  "intervals": {
+   "1m": {
+    "provider": "kis",
+    "fallback": false,
+    "cache_hit": false,
+    "bars": 498,
+    "first": "2026-08-25T14:12:00-04:00",
+    "last": "2026-08-26T15:59:00-04:00",
+    "tails": 0,
+    "warnings": [
+     "정규장 세션 밖 행 764개를 제외했습니다."
+    ],
+    "secs": 8.65
+   },
+   "5m": {
+    "provider": "kis",
+    "fallback": false,
+    "cache_hit": false,
+    "bars": 312,
+    "first": "2026-08-21T09:30:00-04:00",
+    "last": "2026-08-26T15:55:00-04:00",
+    "tails": 0,
+    "warnings": [
+     "페이지 예산(30)을 소진해 중단했습니다.",
+     "정규장 세션 밖 행 2036개를 제외했습니다."
+    ],
+    "secs": 24.98
+   },
+   "15m": {
+    "provider": "kis",
+    "fallback": false,
+    "cache_hit": false,
+    "bars": 104,
+    "first": "2026-08-21T09:30:00-04:00",
+    "last": "2026-08-26T15:45:00-04:00",
+    "tails": 0,
+    "warnings": [
+     "페이지 예산(30)을 소진해 중단했습니다.",
+     "정규장 세션 밖 행 2036개를 제외했습니다."
+    ],
+    "secs": 24.53
+   },
+   "60m": {
+    "provider": "kis",
+    "fallback": false,
+    "cache_hit": false,
+    "bars": 28,
+    "first": "2026-08-21T09:30:00-04:00",
+    "last": "2026-08-26T15:30:00-04:00",
+    "tails": 4,
+    "warnings": [
+     "페이지 예산(30)을 소진해 중단했습니다.",
+     "정규장 세션 밖 행 2036개를 제외했습니다."
+    ],
+    "secs": 24.24
+   },
+   "120m": {
+    "provider": "kis",
+    "fallback": false,
+    "cache_hit": false,
+    "bars": 16,
+    "first": "2026-08-21T09:30:00-04:00",
+    "last": "2026-08-26T15:30:00-04:00",
+    "tails": 4,
+    "warnings": [
+     "페이지 예산(30)을 소진해 중단했습니다.",
+     "정규장 세션 밖 행 2036개를 제외했습니다."
+    ],
+    "secs": 23.78
+   },
+   "240m": {
+    "provider": "kis",
+    "fallback": false,
+    "cache_hit": false,
+    "bars": 8,
+    "first": "2026-08-21T09:30:00-04:00",
+    "last": "2026-08-26T13:30:00-04:00",
+    "tails": 4,
+    "warnings": [
+     "페이지 예산(30)을 소진해 중단했습니다.",
+     "정규장 세션 밖 행 2036개를 제외했습니다."
+    ],
+    "secs": 22.97
+   }
+  },
+  "recompute": {
+   "5m": {
+    "checked": 99,
+    "mismatches": []
+   },
+   "60m": {
+    "checked": 9,
+    "mismatches": []
+   },
+   "240m": {
+    "checked": 2,
+    "mismatches": []
+   }
+  },
+  "indicators": {
+   "status": "insufficient"
+  },
+  "verdict": "PASS",
+  "notes": []
+ },
+ {
+  "symbol": "NVDA",
+  "market": "US",
+  "venue": "NAS",
+  "intervals": {
+   "1m": {
+    "provider": "kis",
+    "fallback": false,
+    "cache_hit": false,
+    "bars": 498,
+    "first": "2026-08-25T14:12:00-04:00",
+    "last": "2026-08-26T15:59:00-04:00",
+    "tails": 0,
+    "warnings": [
+     "정규장 세션 밖 행 808개를 제외했습니다."
+    ],
+    "secs": 7.78
+   },
+   "5m": {
+    "provider": "kis",
+    "fallback": false,
+    "cache_hit": false,
+    "bars": 312,
+    "first": "2026-08-21T09:30:00-04:00",
+    "last": "2026-08-26T15:55:00-04:00",
+    "tails": 0,
+    "warnings": [
+     "페이지 예산(30)을 소진해 중단했습니다.",
+     "정규장 세션 밖 행 2036개를 제외했습니다."
+    ],
+    "secs": 22.93
+   },
+   "15m": {
+    "provider": "kis",
+    "fallback": false,
+    "cache_hit": false,
+    "bars": 104,
+    "first": "2026-08-21T09:30:00-04:00",
+    "last": "2026-08-26T15:45:00-04:00",
+    "tails": 0,
+    "warnings": [
+     "페이지 예산(30)을 소진해 중단했습니다.",
+     "정규장 세션 밖 행 2036개를 제외했습니다."
+    ],
+    "secs": 23.48
+   },
+   "60m": {
+    "provider": "kis",
+    "fallback": false,
+    "cache_hit": false,
+    "bars": 28,
+    "first": "2026-08-21T09:30:00-04:00",
+    "last": "2026-08-26T15:30:00-04:00",
+    "tails": 4,
+    "warnings": [
+     "페이지 예산(30)을 소진해 중단했습니다.",
+     "정규장 세션 밖 행 2036개를 제외했습니다."
+    ],
+    "secs": 23.31
+   },
+   "120m": {
+    "provider": "kis",
+    "fallback": false,
+    "cache_hit": false,
+    "bars": 16,
+    "first": "2026-08-21T09:30:00-04:00",
+    "last": "2026-08-26T15:30:00-04:00",
+    "tails": 4,
+    "warnings": [
+     "페이지 예산(30)을 소진해 중단했습니다.",
+     "정규장 세션 밖 행 2036개를 제외했습니다."
+    ],
+    "secs": 23.62
+   },
+   "240m": {
+    "provider": "kis",
+    "fallback": false,
+    "cache_hit": false,
+    "bars": 8,
+    "first": "2026-08-21T09:30:00-04:00",
+    "last": "2026-08-26T13:30:00-04:00",
+    "tails": 4,
+    "warnings": [
+     "페이지 예산(30)을 소진해 중단했습니다.",
+     "정규장 세션 밖 행 2036개를 제외했습니다."
+    ],
+    "secs": 23.15
+   }
+  },
+  "recompute": {
+   "5m": {
+    "checked": 99,
+    "mismatches": []
+   },
+   "60m": {
+    "checked": 9,
+    "mismatches": []
+   },
+   "240m": {
+    "checked": 2,
+    "mismatches": []
+   }
+  },
+  "indicators": {
+   "status": "insufficient"
+  },
+  "verdict": "PASS",
+  "notes": []
+ },
+ {
+  "symbol": "TSLA",
+  "market": "US",
+  "venue": "NAS",
+  "intervals": {
+   "1m": {
+    "provider": "kis",
+    "fallback": false,
+    "cache_hit": false,
+    "bars": 498,
+    "first": "2026-08-25T14:12:00-04:00",
+    "last": "2026-08-26T15:59:00-04:00",
+    "tails": 0,
+    "warnings": [
+     "정규장 세션 밖 행 800개를 제외했습니다."
+    ],
+    "secs": 8.91
+   },
+   "5m": {
+    "provider": "kis",
+    "fallback": false,
+    "cache_hit": false,
+    "bars": 312,
+    "first": "2026-08-21T09:30:00-04:00",
+    "last": "2026-08-26T15:55:00-04:00",
+    "tails": 0,
+    "warnings": [
+     "페이지 예산(30)을 소진해 중단했습니다.",
+     "정규장 세션 밖 행 2036개를 제외했습니다."
+    ],
+    "secs": 23.72
+   },
+   "15m": {
+    "provider": "kis",
+    "fallback": false,
+    "cache_hit": false,
+    "bars": 104,
+    "first": "2026-08-21T09:30:00-04:00",
+    "last": "2026-08-26T15:45:00-04:00",
+    "tails": 0,
+    "warnings": [
+     "페이지 예산(30)을 소진해 중단했습니다.",
+     "정규장 세션 밖 행 2036개를 제외했습니다."
+    ],
+    "secs": 20.17
+   },
+   "60m": {
+    "provider": "kis",
+    "fallback": false,
+    "cache_hit": false,
+    "bars": 28,
+    "first": "2026-08-21T09:30:00-04:00",
+    "last": "2026-08-26T15:30:00-04:00",
+    "tails": 4,
+    "warnings": [
+     "페이지 예산(30)을 소진해 중단했습니다.",
+     "정규장 세션 밖 행 2036개를 제외했습니다."
+    ],
+    "secs": 17.74
+   },
+   "120m": {
+    "provider": "kis",
+    "fallback": false,
+    "cache_hit": false,
+    "bars": 16,
+    "first": "2026-08-21T09:30:00-04:00",
+    "last": "2026-08-26T15:30:00-04:00",
+    "tails": 4,
+    "warnings": [
+     "페이지 예산(30)을 소진해 중단했습니다.",
+     "정규장 세션 밖 행 2036개를 제외했습니다."
+    ],
+    "secs": 21.92
+   },
+   "240m": {
+    "provider": "kis",
+    "fallback": false,
+    "cache_hit": false,
+    "bars": 8,
+    "first": "2026-08-21T09:30:00-04:00",
+    "last": "2026-08-26T13:30:00-04:00",
+    "tails": 4,
+    "warnings": [
+     "페이지 예산(30)을 소진해 중단했습니다.",
+     "정규장 세션 밖 행 2036개를 제외했습니다."
+    ],
+    "secs": 14.02
+   }
+  },
+  "recompute": {
+   "5m": {
+    "checked": 99,
+    "mismatches": []
+   },
+   "60m": {
+    "checked": 9,
+    "mismatches": []
+   },
+   "240m": {
+    "checked": 2,
+    "mismatches": []
+   }
+  },
+  "indicators": {
+   "status": "insufficient"
+  },
+  "verdict": "PASS",
+  "notes": []
+ },
+ {
+  "symbol": "AMZN",
+  "market": "US",
+  "venue": "NAS",
+  "intervals": {
+   "1m": {
+    "provider": "kis",
+    "fallback": false,
+    "cache_hit": false,
+    "bars": 498,
+    "first": "2026-08-25T14:12:00-04:00",
+    "last": "2026-08-26T15:59:00-04:00",
+    "tails": 0,
+    "warnings": [
+     "정규장 세션 밖 행 790개를 제외했습니다."
+    ],
+    "secs": 5.72
+   },
+   "5m": {
+    "provider": "kis",
+    "fallback": false,
+    "cache_hit": false,
+    "bars": 312,
+    "first": "2026-08-21T09:30:00-04:00",
+    "last": "2026-08-26T15:55:00-04:00",
+    "tails": 0,
+    "warnings": [
+     "페이지 예산(30)을 소진해 중단했습니다.",
+     "정규장 세션 밖 행 2036개를 제외했습니다."
+    ],
+    "secs": 19.25
+   },
+   "15m": {
+    "provider": "kis",
+    "fallback": false,
+    "cache_hit": false,
+    "bars": 104,
+    "first": "2026-08-21T09:30:00-04:00",
+    "last": "2026-08-26T15:45:00-04:00",
+    "tails": 0,
+    "warnings": [
+     "페이지 예산(30)을 소진해 중단했습니다.",
+     "정규장 세션 밖 행 2036개를 제외했습니다."
+    ],
+    "secs": 20.56
+   },
+   "60m": {
+    "provider": "kis",
+    "fallback": false,
+    "cache_hit": false,
+    "bars": 28,
+    "first": "2026-08-21T09:30:00-04:00",
+    "last": "2026-08-26T15:30:00-04:00",
+    "tails": 4,
+    "warnings": [
+     "페이지 예산(30)을 소진해 중단했습니다.",
+     "정규장 세션 밖 행 2036개를 제외했습니다."
+    ],
+    "secs": 20.04
+   },
+   "120m": {
+    "provider": "kis",
+    "fallback": false,
+    "cache_hit": false,
+    "bars": 16,
+    "first": "2026-08-21T09:30:00-04:00",
+    "last": "2026-08-26T15:30:00-04:00",
+    "tails": 4,
+    "warnings": [
+     "페이지 예산(30)을 소진해 중단했습니다.",
+     "정규장 세션 밖 행 2036개를 제외했습니다."
+    ],
+    "secs": 20.89
+   },
+   "240m": {
+    "provider": "kis",
+    "fallback": false,
+    "cache_hit": false,
+    "bars": 8,
+    "first": "2026-08-21T09:30:00-04:00",
+    "last": "2026-08-26T13:30:00-04:00",
+    "tails": 4,
+    "warnings": [
+     "페이지 예산(30)을 소진해 중단했습니다.",
+     "정규장 세션 밖 행 2036개를 제외했습니다."
+    ],
+    "secs": 20.03
+   }
+  },
+  "recompute": {
+   "5m": {
+    "checked": 99,
+    "mismatches": []
+   },
+   "60m": {
+    "checked": 9,
+    "mismatches": []
+   },
+   "240m": {
+    "checked": 2,
+    "mismatches": []
+   }
+  },
+  "indicators": {
+   "status": "insufficient"
+  },
+  "verdict": "PASS",
+  "notes": []
+ },
+ {
+  "symbol": "GOOGL",
+  "market": "US",
+  "venue": "NAS",
+  "intervals": {
+   "1m": {
+    "provider": "kis",
+    "fallback": false,
+    "cache_hit": false,
+    "bars": 498,
+    "first": "2026-08-25T14:12:00-04:00",
+    "last": "2026-08-26T15:59:00-04:00",
+    "tails": 0,
+    "warnings": [
+     "정규장 세션 밖 행 791개를 제외했습니다."
+    ],
+    "secs": 7.56
+   },
+   "5m": {
+    "provider": "kis",
+    "fallback": false,
+    "cache_hit": false,
+    "bars": 312,
+    "first": "2026-08-21T09:30:00-04:00",
+    "last": "2026-08-26T15:55:00-04:00",
+    "tails": 0,
+    "warnings": [
+     "페이지 예산(30)을 소진해 중단했습니다.",
+     "정규장 세션 밖 행 2036개를 제외했습니다."
+    ],
+    "secs": 21.29
+   },
+   "15m": {
+    "provider": "kis",
+    "fallback": false,
+    "cache_hit": false,
+    "bars": 104,
+    "first": "2026-08-21T09:30:00-04:00",
+    "last": "2026-08-26T15:45:00-04:00",
+    "tails": 0,
+    "warnings": [
+     "페이지 예산(30)을 소진해 중단했습니다.",
+     "정규장 세션 밖 행 2036개를 제외했습니다."
+    ],
+    "secs": 21.11
+   },
+   "60m": {
+    "provider": "kis",
+    "fallback": false,
+    "cache_hit": false,
+    "bars": 28,
+    "first": "2026-08-21T09:30:00-04:00",
+    "last": "2026-08-26T15:30:00-04:00",
+    "tails": 4,
+    "warnings": [
+     "페이지 예산(30)을 소진해 중단했습니다.",
+     "정규장 세션 밖 행 2036개를 제외했습니다."
+    ],
+    "secs": 13.68
+   },
+   "120m": {
+    "provider": "kis",
+    "fallback": false,
+    "cache_hit": false,
+    "bars": 16,
+    "first": "2026-08-21T09:30:00-04:00",
+    "last": "2026-08-26T15:30:00-04:00",
+    "tails": 4,
+    "warnings": [
+     "페이지 예산(30)을 소진해 중단했습니다.",
+     "정규장 세션 밖 행 2036개를 제외했습니다."
+    ],
+    "secs": 14.24
+   },
+   "240m": {
+    "provider": "kis",
+    "fallback": false,
+    "cache_hit": false,
+    "bars": 8,
+    "first": "2026-08-21T09:30:00-04:00",
+    "last": "2026-08-26T13:30:00-04:00",
+    "tails": 4,
+    "warnings": [
+     "페이지 예산(30)을 소진해 중단했습니다.",
+     "정규장 세션 밖 행 2036개를 제외했습니다."
+    ],
+    "secs": 15.05
+   }
+  },
+  "recompute": {
+   "5m": {
+    "checked": 99,
+    "mismatches": []
+   },
+   "60m": {
+    "checked": 9,
+    "mismatches": []
+   },
+   "240m": {
+    "checked": 2,
+    "mismatches": []
+   }
+  },
+  "indicators": {
+   "status": "insufficient"
+  },
+  "verdict": "PASS",
+  "notes": []
+ },
+ {
+  "symbol": "META",
+  "market": "US",
+  "venue": "NAS",
+  "intervals": {
+   "1m": {
+    "provider": "kis",
+    "fallback": false,
+    "cache_hit": false,
+    "bars": 498,
+    "first": "2026-08-25T14:12:00-04:00",
+    "last": "2026-08-26T15:59:00-04:00",
+    "tails": 0,
+    "warnings": [
+     "정규장 세션 밖 행 808개를 제외했습니다."
+    ],
+    "secs": 4.8
+   },
+   "5m": {
+    "provider": "kis",
+    "fallback": false,
+    "cache_hit": false,
+    "bars": 312,
+    "first": "2026-08-21T09:30:00-04:00",
+    "last": "2026-08-26T15:55:00-04:00",
+    "tails": 0,
+    "warnings": [
+     "페이지 예산(30)을 소진해 중단했습니다.",
+     "정규장 세션 밖 행 2036개를 제외했습니다."
+    ],
+    "secs": 13.28
+   },
+   "15m": {
+    "provider": "kis",
+    "fallback": false,
+    "cache_hit": false,
+    "bars": 104,
+    "first": "2026-08-21T09:30:00-04:00",
+    "last": "2026-08-26T15:45:00-04:00",
+    "tails": 0,
+    "warnings": [
+     "페이지 예산(30)을 소진해 중단했습니다.",
+     "정규장 세션 밖 행 2036개를 제외했습니다."
+    ],
+    "secs": 10.21
+   },
+   "60m": {
+    "provider": "kis",
+    "fallback": false,
+    "cache_hit": false,
+    "bars": 28,
+    "first": "2026-08-21T09:30:00-04:00",
+    "last": "2026-08-26T15:30:00-04:00",
+    "tails": 4,
+    "warnings": [
+     "페이지 예산(30)을 소진해 중단했습니다.",
+     "정규장 세션 밖 행 2036개를 제외했습니다."
+    ],
+    "secs": 12.63
+   },
+   "120m": {
+    "provider": "kis",
+    "fallback": false,
+    "cache_hit": false,
+    "bars": 16,
+    "first": "2026-08-21T09:30:00-04:00",
+    "last": "2026-08-26T15:30:00-04:00",
+    "tails": 4,
+    "warnings": [
+     "페이지 예산(30)을 소진해 중단했습니다.",
+     "정규장 세션 밖 행 2036개를 제외했습니다."
+    ],
+    "secs": 11.55
+   },
+   "240m": {
+    "provider": "kis",
+    "fallback": false,
+    "cache_hit": false,
+    "bars": 8,
+    "first": "2026-08-21T09:30:00-04:00",
+    "last": "2026-08-26T13:30:00-04:00",
+    "tails": 4,
+    "warnings": [
+     "페이지 예산(30)을 소진해 중단했습니다.",
+     "정규장 세션 밖 행 2036개를 제외했습니다."
+    ],
+    "secs": 10.94
+   }
+  },
+  "recompute": {
+   "5m": {
+    "checked": 99,
+    "mismatches": []
+   },
+   "60m": {
+    "checked": 9,
+    "mismatches": []
+   },
+   "240m": {
+    "checked": 2,
+    "mismatches": []
+   }
+  },
+  "indicators": {
+   "status": "insufficient"
+  },
+  "verdict": "PASS",
+  "notes": []
+ },
+ {
+  "symbol": "AMD",
+  "market": "US",
+  "venue": "NAS",
+  "intervals": {
+   "1m": {
+    "provider": "kis",
+    "fallback": false,
+    "cache_hit": false,
+    "bars": 498,
+    "first": "2026-08-25T14:12:00-04:00",
+    "last": "2026-08-26T15:59:00-04:00",
+    "tails": 0,
+    "warnings": [
+     "정규장 세션 밖 행 797개를 제외했습니다."
+    ],
+    "secs": 3.24
+   },
+   "5m": {
+    "provider": "kis",
+    "fallback": false,
+    "cache_hit": false,
+    "bars": 312,
+    "first": "2026-08-21T09:30:00-04:00",
+    "last": "2026-08-26T15:55:00-04:00",
+    "tails": 0,
+    "warnings": [
+     "페이지 예산(30)을 소진해 중단했습니다.",
+     "정규장 세션 밖 행 2036개를 제외했습니다."
+    ],
+    "secs": 8.59
+   },
+   "15m": {
+    "provider": "kis",
+    "fallback": false,
+    "cache_hit": false,
+    "bars": 104,
+    "first": "2026-08-21T09:30:00-04:00",
+    "last": "2026-08-26T15:45:00-04:00",
+    "tails": 0,
+    "warnings": [
+     "페이지 예산(30)을 소진해 중단했습니다.",
+     "정규장 세션 밖 행 2036개를 제외했습니다."
+    ],
+    "secs": 8.38
+   },
+   "60m": {
+    "provider": "kis",
+    "fallback": false,
+    "cache_hit": false,
+    "bars": 28,
+    "first": "2026-08-21T09:30:00-04:00",
+    "last": "2026-08-26T15:30:00-04:00",
+    "tails": 4,
+    "warnings": [
+     "페이지 예산(30)을 소진해 중단했습니다.",
+     "정규장 세션 밖 행 2036개를 제외했습니다."
+    ],
+    "secs": 8.44
+   },
+   "120m": {
+    "provider": "kis",
+    "fallback": false,
+    "cache_hit": false,
+    "bars": 16,
+    "first": "2026-08-21T09:30:00-04:00",
+    "last": "2026-08-26T15:30:00-04:00",
+    "tails": 4,
+    "warnings": [
+     "페이지 예산(30)을 소진해 중단했습니다.",
+     "정규장 세션 밖 행 2036개를 제외했습니다."
+    ],
+    "secs": 8.38
+   },
+   "240m": {
+    "provider": "kis",
+    "fallback": false,
+    "cache_hit": false,
+    "bars": 8,
+    "first": "2026-08-21T09:30:00-04:00",
+    "last": "2026-08-26T13:30:00-04:00",
+    "tails": 4,
+    "warnings": [
+     "페이지 예산(30)을 소진해 중단했습니다.",
+     "정규장 세션 밖 행 2036개를 제외했습니다."
+    ],
+    "secs": 8.6
+   }
+  },
+  "recompute": {
+   "5m": {
+    "checked": 99,
+    "mismatches": []
+   },
+   "60m": {
+    "checked": 9,
+    "mismatches": []
+   },
+   "240m": {
+    "checked": 2,
+    "mismatches": []
+   }
+  },
+  "indicators": {
+   "status": "insufficient"
+  },
+  "verdict": "PASS",
+  "notes": []
+ },
+ {
+  "symbol": "NFLX",
+  "market": "US",
+  "venue": "NAS",
+  "intervals": {
+   "1m": {
+    "provider": "kis",
+    "fallback": false,
+    "cache_hit": false,
+    "bars": 498,
+    "first": "2026-08-25T14:12:00-04:00",
+    "last": "2026-08-26T15:59:00-04:00",
+    "tails": 0,
+    "warnings": [
+     "정규장 세션 밖 행 732개를 제외했습니다."
+    ],
+    "secs": 3.62
+   },
+   "5m": {
+    "provider": "kis",
+    "fallback": false,
+    "cache_hit": false,
+    "bars": 312,
+    "first": "2026-08-21T09:30:00-04:00",
+    "last": "2026-08-26T15:55:00-04:00",
+    "tails": 0,
+    "warnings": [
+     "페이지 예산(30)을 소진해 중단했습니다.",
+     "정규장 세션 밖 행 2036개를 제외했습니다."
+    ],
+    "secs": 8.36
+   },
+   "15m": {
+    "provider": "kis",
+    "fallback": false,
+    "cache_hit": false,
+    "bars": 104,
+    "first": "2026-08-21T09:30:00-04:00",
+    "last": "2026-08-26T15:45:00-04:00",
+    "tails": 0,
+    "warnings": [
+     "페이지 예산(30)을 소진해 중단했습니다.",
+     "정규장 세션 밖 행 2036개를 제외했습니다."
+    ],
+    "secs": 8.3
+   },
+   "60m": {
+    "provider": "kis",
+    "fallback": false,
+    "cache_hit": false,
+    "bars": 28,
+    "first": "2026-08-21T09:30:00-04:00",
+    "last": "2026-08-26T15:30:00-04:00",
+    "tails": 4,
+    "warnings": [
+     "페이지 예산(30)을 소진해 중단했습니다.",
+     "정규장 세션 밖 행 2036개를 제외했습니다."
+    ],
+    "secs": 8.52
+   },
+   "120m": {
+    "provider": "kis",
+    "fallback": false,
+    "cache_hit": false,
+    "bars": 16,
+    "first": "2026-08-21T09:30:00-04:00",
+    "last": "2026-08-26T15:30:00-04:00",
+    "tails": 4,
+    "warnings": [
+     "페이지 예산(30)을 소진해 중단했습니다.",
+     "정규장 세션 밖 행 2036개를 제외했습니다."
+    ],
+    "secs": 8.5
+   },
+   "240m": {
+    "provider": "kis",
+    "fallback": false,
+    "cache_hit": false,
+    "bars": 8,
+    "first": "2026-08-21T09:30:00-04:00",
+    "last": "2026-08-26T13:30:00-04:00",
+    "tails": 4,
+    "warnings": [
+     "페이지 예산(30)을 소진해 중단했습니다.",
+     "정규장 세션 밖 행 2036개를 제외했습니다."
+    ],
+    "secs": 8.39
+   }
+  },
+  "recompute": {
+   "5m": {
+    "checked": 99,
+    "mismatches": []
+   },
+   "60m": {
+    "checked": 9,
+    "mismatches": []
+   },
+   "240m": {
+    "checked": 2,
+    "mismatches": []
+   }
+  },
+  "indicators": {
+   "status": "insufficient"
+  },
+  "verdict": "PASS",
+  "notes": []
+ },
+ {
+  "symbol": "JPM",
+  "market": "US",
+  "venue": "NYS",
+  "intervals": {
+   "1m": {
+    "provider": "kis",
+    "fallback": false,
+    "cache_hit": false,
+    "bars": 498,
+    "first": "2026-08-25T14:12:00-04:00",
+    "last": "2026-08-26T15:59:00-04:00",
+    "tails": 0,
+    "warnings": [
+     "정규장 세션 밖 행 269개를 제외했습니다."
+    ],
+    "secs": 1.89
+   },
+   "5m": {
+    "provider": "kis",
+    "fallback": false,
+    "cache_hit": false,
+    "bars": 461,
+    "first": "2026-08-19T10:05:00-04:00",
+    "last": "2026-08-26T15:55:00-04:00",
+    "tails": 0,
+    "warnings": [
+     "페이지 예산(30)을 소진해 중단했습니다.",
+     "정규장 세션 밖 행 1290개를 제외했습니다."
+    ],
+    "secs": 8.37
+   },
+   "15m": {
+    "provider": "kis",
+    "fallback": false,
+    "cache_hit": false,
+    "bars": 154,
+    "first": "2026-08-19T10:00:00-04:00",
+    "last": "2026-08-26T15:45:00-04:00",
+    "tails": 0,
+    "warnings": [
+     "페이지 예산(30)을 소진해 중단했습니다.",
+     "정규장 세션 밖 행 1290개를 제외했습니다."
+    ],
+    "secs": 8.78
+   },
+   "60m": {
+    "provider": "kis",
+    "fallback": false,
+    "cache_hit": false,
+    "bars": 42,
+    "first": "2026-08-19T09:30:00-04:00",
+    "last": "2026-08-26T15:30:00-04:00",
+    "tails": 6,
+    "warnings": [
+     "페이지 예산(30)을 소진해 중단했습니다.",
+     "정규장 세션 밖 행 1290개를 제외했습니다."
+    ],
+    "secs": 8.48
+   },
+   "120m": {
+    "provider": "kis",
+    "fallback": false,
+    "cache_hit": false,
+    "bars": 24,
+    "first": "2026-08-19T09:30:00-04:00",
+    "last": "2026-08-26T15:30:00-04:00",
+    "tails": 6,
+    "warnings": [
+     "페이지 예산(30)을 소진해 중단했습니다.",
+     "정규장 세션 밖 행 1290개를 제외했습니다."
+    ],
+    "secs": 8.28
+   },
+   "240m": {
+    "provider": "kis",
+    "fallback": false,
+    "cache_hit": false,
+    "bars": 12,
+    "first": "2026-08-19T09:30:00-04:00",
+    "last": "2026-08-26T13:30:00-04:00",
+    "tails": 6,
+    "warnings": [
+     "페이지 예산(30)을 소진해 중단했습니다.",
+     "정규장 세션 밖 행 1290개를 제외했습니다."
+    ],
+    "secs": 8.04
+   }
+  },
+  "recompute": {
+   "5m": {
+    "checked": 99,
+    "mismatches": []
+   },
+   "60m": {
+    "checked": 9,
+    "mismatches": []
+   },
+   "240m": {
+    "checked": 2,
+    "mismatches": []
+   }
+  },
+  "indicators": {
+   "status": "PASS",
+   "rsi": 44.05,
+   "ma20": 356,
+   "macd_hist": 0.21,
+   "vol_avg20": 285270
+  },
+  "verdict": "PASS",
+  "notes": []
+ },
+ {
+  "symbol": "XOM",
+  "market": "US",
+  "venue": "NYS",
+  "intervals": {
+   "1m": {
+    "provider": "kis",
+    "fallback": false,
+    "cache_hit": false,
+    "bars": 500,
+    "first": "2026-08-25T14:10:00-04:00",
+    "last": "2026-08-26T15:59:00-04:00",
+    "tails": 0,
+    "warnings": [
+     "정규장 세션 밖 행 455개를 제외했습니다."
+    ],
+    "secs": 2.27
+   },
+   "5m": {
+    "provider": "kis",
+    "fallback": false,
+    "cache_hit": false,
+    "bars": 406,
+    "first": "2026-08-19T14:40:00-04:00",
+    "last": "2026-08-26T15:55:00-04:00",
+    "tails": 0,
+    "warnings": [
+     "페이지 예산(30)을 소진해 중단했습니다.",
+     "정규장 세션 밖 행 1568개를 제외했습니다."
+    ],
+    "secs": 8.28
+   },
+   "15m": {
+    "provider": "kis",
+    "fallback": false,
+    "cache_hit": false,
+    "bars": 136,
+    "first": "2026-08-19T14:30:00-04:00",
+    "last": "2026-08-26T15:45:00-04:00",
+    "tails": 0,
+    "warnings": [
+     "페이지 예산(30)을 소진해 중단했습니다.",
+     "정규장 세션 밖 행 1568개를 제외했습니다."
+    ],
+    "secs": 8.2
+   },
+   "60m": {
+    "provider": "kis",
+    "fallback": false,
+    "cache_hit": false,
+    "bars": 37,
+    "first": "2026-08-19T14:30:00-04:00",
+    "last": "2026-08-26T15:30:00-04:00",
+    "tails": 6,
+    "warnings": [
+     "페이지 예산(30)을 소진해 중단했습니다.",
+     "정규장 세션 밖 행 1568개를 제외했습니다."
+    ],
+    "secs": 7.86
+   },
+   "120m": {
+    "provider": "kis",
+    "fallback": false,
+    "cache_hit": false,
+    "bars": 22,
+    "first": "2026-08-19T13:30:00-04:00",
+    "last": "2026-08-26T15:30:00-04:00",
+    "tails": 6,
+    "warnings": [
+     "페이지 예산(30)을 소진해 중단했습니다.",
+     "정규장 세션 밖 행 1568개를 제외했습니다."
+    ],
+    "secs": 7.96
+   },
+   "240m": {
+    "provider": "kis",
+    "fallback": false,
+    "cache_hit": false,
+    "bars": 11,
+    "first": "2026-08-19T13:30:00-04:00",
+    "last": "2026-08-26T13:30:00-04:00",
+    "tails": 6,
+    "warnings": [
+     "페이지 예산(30)을 소진해 중단했습니다.",
+     "정규장 세션 밖 행 1568개를 제외했습니다."
+    ],
+    "secs": 7.88
+   }
+  },
+  "recompute": {
+   "5m": {
+    "checked": 100,
+    "mismatches": []
+   },
+   "60m": {
+    "checked": 9,
+    "mismatches": []
+   },
+   "240m": {
+    "checked": 2,
+    "mismatches": []
+   }
+  },
+  "indicators": {
+   "status": "PASS",
+   "rsi": 19.71,
+   "ma20": 161,
+   "macd_hist": -0.25,
+   "vol_avg20": 877616
+  },
+  "verdict": "PASS",
+  "notes": []
+ },
+ {
+  "symbol": "JNJ",
+  "market": "US",
+  "venue": "NYS",
+  "intervals": {
+   "1m": {
+    "provider": "kis",
+    "fallback": false,
+    "cache_hit": false,
+    "bars": 498,
+    "first": "2026-08-25T14:12:00-04:00",
+    "last": "2026-08-26T15:59:00-04:00",
+    "tails": 0,
+    "warnings": [
+     "정규장 세션 밖 행 265개를 제외했습니다."
+    ],
+    "secs": 2.38
+   },
+   "5m": {
+    "provider": "kis",
+    "fallback": false,
+    "cache_hit": false,
+    "bars": 468,
+    "first": "2026-08-19T09:30:00-04:00",
+    "last": "2026-08-26T15:55:00-04:00",
+    "tails": 0,
+    "warnings": [
+     "페이지 예산(30)을 소진해 중단했습니다.",
+     "정규장 세션 밖 행 1254개를 제외했습니다."
+    ],
+    "secs": 11.18
+   },
+   "15m": {
+    "provider": "kis",
+    "fallback": false,
+    "cache_hit": false,
+    "bars": 156,
+    "first": "2026-08-19T09:30:00-04:00",
+    "last": "2026-08-26T15:45:00-04:00",
+    "tails": 0,
+    "warnings": [
+     "페이지 예산(30)을 소진해 중단했습니다.",
+     "정규장 세션 밖 행 1254개를 제외했습니다."
+    ],
+    "secs": 9.62
+   },
+   "60m": {
+    "provider": "kis",
+    "fallback": false,
+    "cache_hit": false,
+    "bars": 42,
+    "first": "2026-08-19T09:30:00-04:00",
+    "last": "2026-08-26T15:30:00-04:00",
+    "tails": 6,
+    "warnings": [
+     "페이지 예산(30)을 소진해 중단했습니다.",
+     "정규장 세션 밖 행 1254개를 제외했습니다."
+    ],
+    "secs": 8.58
+   },
+   "120m": {
+    "provider": "kis",
+    "fallback": false,
+    "cache_hit": false,
+    "bars": 24,
+    "first": "2026-08-19T09:30:00-04:00",
+    "last": "2026-08-26T15:30:00-04:00",
+    "tails": 6,
+    "warnings": [
+     "페이지 예산(30)을 소진해 중단했습니다.",
+     "정규장 세션 밖 행 1254개를 제외했습니다."
+    ],
+    "secs": 8.24
+   },
+   "240m": {
+    "provider": "kis",
+    "fallback": false,
+    "cache_hit": false,
+    "bars": 12,
+    "first": "2026-08-19T09:30:00-04:00",
+    "last": "2026-08-26T13:30:00-04:00",
+    "tails": 6,
+    "warnings": [
+     "페이지 예산(30)을 소진해 중단했습니다.",
+     "정규장 세션 밖 행 1254개를 제외했습니다."
+    ],
+    "secs": 7.95
+   }
+  },
+  "recompute": {
+   "5m": {
+    "checked": 99,
+    "mismatches": []
+   },
+   "60m": {
+    "checked": 9,
+    "mismatches": []
+   },
+   "240m": {
+    "checked": 2,
+    "mismatches": []
+   }
+  },
+  "indicators": {
+   "status": "PASS",
+   "rsi": 36.58,
+   "ma20": 272,
+   "macd_hist": -0.29,
+   "vol_avg20": 322690
+  },
+  "verdict": "PASS",
+  "notes": []
+ },
+ {
+  "symbol": "KO",
+  "market": "US",
+  "venue": "NYS",
+  "intervals": {
+   "1m": {
+    "provider": "kis",
+    "fallback": false,
+    "cache_hit": false,
+    "bars": 498,
+    "first": "2026-08-25T14:12:00-04:00",
+    "last": "2026-08-26T15:59:00-04:00",
+    "tails": 0,
+    "warnings": [
+     "정규장 세션 밖 행 600개를 제외했습니다."
+    ],
+    "secs": 2.86
+   },
+   "5m": {
+    "provider": "kis",
+    "fallback": false,
+    "cache_hit": false,
+    "bars": 325,
+    "first": "2026-08-20T14:55:00-04:00",
+    "last": "2026-08-26T15:55:00-04:00",
+    "tails": 0,
+    "warnings": [
+     "페이지 예산(30)을 소진해 중단했습니다.",
+     "정규장 세션 밖 행 1973개를 제외했습니다."
+    ],
+    "secs": 8.93
+   },
+   "15m": {
+    "provider": "kis",
+    "fallback": false,
+    "cache_hit": false,
+    "bars": 109,
+    "first": "2026-08-20T14:45:00-04:00",
+    "last": "2026-08-26T15:45:00-04:00",
+    "tails": 0,
+    "warnings": [
+     "페이지 예산(30)을 소진해 중단했습니다.",
+     "정규장 세션 밖 행 1973개를 제외했습니다."
+    ],
+    "secs": 8.74
+   },
+   "60m": {
+    "provider": "kis",
+    "fallback": false,
+    "cache_hit": false,
+    "bars": 30,
+    "first": "2026-08-20T14:30:00-04:00",
+    "last": "2026-08-26T15:30:00-04:00",
+    "tails": 5,
+    "warnings": [
+     "페이지 예산(30)을 소진해 중단했습니다.",
+     "정규장 세션 밖 행 1973개를 제외했습니다."
+    ],
+    "secs": 8.91
+   },
+   "120m": {
+    "provider": "kis",
+    "fallback": false,
+    "cache_hit": false,
+    "bars": 18,
+    "first": "2026-08-20T13:30:00-04:00",
+    "last": "2026-08-26T15:30:00-04:00",
+    "tails": 5,
+    "warnings": [
+     "페이지 예산(30)을 소진해 중단했습니다.",
+     "정규장 세션 밖 행 1973개를 제외했습니다."
+    ],
+    "secs": 8.49
+   },
+   "240m": {
+    "provider": "kis",
+    "fallback": false,
+    "cache_hit": false,
+    "bars": 9,
+    "first": "2026-08-20T13:30:00-04:00",
+    "last": "2026-08-26T13:30:00-04:00",
+    "tails": 5,
+    "warnings": [
+     "페이지 예산(30)을 소진해 중단했습니다.",
+     "정규장 세션 밖 행 1973개를 제외했습니다."
+    ],
+    "secs": 8.14
+   }
+  },
+  "recompute": {
+   "5m": {
+    "checked": 99,
+    "mismatches": []
+   },
+   "60m": {
+    "checked": 9,
+    "mismatches": []
+   },
+   "240m": {
+    "checked": 2,
+    "mismatches": []
+   }
+  },
+  "indicators": {
+   "status": "PASS",
+   "rsi": 22.31,
+   "ma20": 91,
+   "macd_hist": null,
+   "vol_avg20": 924023
+  },
+  "verdict": "PASS",
+  "notes": []
+ },
+ {
+  "symbol": "IBM",
+  "market": "US",
+  "venue": "NYS",
+  "intervals": {
+   "1m": {
+    "provider": "kis",
+    "fallback": false,
+    "cache_hit": false,
+    "bars": 498,
+    "first": "2026-08-25T14:12:00-04:00",
+    "last": "2026-08-26T15:59:00-04:00",
+    "tails": 0,
+    "warnings": [
+     "정규장 세션 밖 행 419개를 제외했습니다."
+    ],
+    "secs": 2.54
+   },
+   "5m": {
+    "provider": "kis",
+    "fallback": false,
+    "cache_hit": false,
+    "bars": 390,
+    "first": "2026-08-20T09:30:00-04:00",
+    "last": "2026-08-26T15:55:00-04:00",
+    "tails": 0,
+    "warnings": [
+     "페이지 예산(30)을 소진해 중단했습니다.",
+     "정규장 세션 밖 행 1645개를 제외했습니다."
+    ],
+    "secs": 9.6
+   },
+   "15m": {
+    "provider": "kis",
+    "fallback": false,
+    "cache_hit": false,
+    "bars": 130,
+    "first": "2026-08-20T09:30:00-04:00",
+    "last": "2026-08-26T15:45:00-04:00",
+    "tails": 0,
+    "warnings": [
+     "페이지 예산(30)을 소진해 중단했습니다.",
+     "정규장 세션 밖 행 1645개를 제외했습니다."
+    ],
+    "secs": 10.04
+   },
+   "60m": {
+    "provider": "kis",
+    "fallback": false,
+    "cache_hit": false,
+    "bars": 35,
+    "first": "2026-08-20T09:30:00-04:00",
+    "last": "2026-08-26T15:30:00-04:00",
+    "tails": 5,
+    "warnings": [
+     "페이지 예산(30)을 소진해 중단했습니다.",
+     "정규장 세션 밖 행 1645개를 제외했습니다."
+    ],
+    "secs": 9.77
+   },
+   "120m": {
+    "provider": "kis",
+    "fallback": false,
+    "cache_hit": false,
+    "bars": 20,
+    "first": "2026-08-20T09:30:00-04:00",
+    "last": "2026-08-26T15:30:00-04:00",
+    "tails": 5,
+    "warnings": [
+     "페이지 예산(30)을 소진해 중단했습니다.",
+     "정규장 세션 밖 행 1645개를 제외했습니다."
+    ],
+    "secs": 10.61
+   },
+   "240m": {
+    "provider": "kis",
+    "fallback": false,
+    "cache_hit": false,
+    "bars": 10,
+    "first": "2026-08-20T09:30:00-04:00",
+    "last": "2026-08-26T13:30:00-04:00",
+    "tails": 5,
+    "warnings": [
+     "페이지 예산(30)을 소진해 중단했습니다.",
+     "정규장 세션 밖 행 1645개를 제외했습니다."
+    ],
+    "secs": 10.8
+   }
+  },
+  "recompute": {
+   "5m": {
+    "checked": 99,
+    "mismatches": []
+   },
+   "60m": {
+    "checked": 9,
+    "mismatches": []
+   },
+   "240m": {
+    "checked": 2,
+    "mismatches": []
+   }
+  },
+  "indicators": {
+   "status": "PASS",
+   "rsi": 48.76,
+   "ma20": 232,
+   "macd_hist": -0.17,
+   "vol_avg20": 243945
+  },
+  "verdict": "PASS",
+  "notes": []
+ },
+ {
+  "symbol": "BRK.B",
+  "market": "US",
+  "venue": "NYS",
+  "intervals": {
+   "1m": {
+    "provider": "kis",
+    "fallback": false,
+    "cache_hit": false,
+    "bars": 0,
+    "first": null,
+    "last": null,
+    "tails": 0,
+    "warnings": [],
+    "secs": 0.32
+   },
+   "5m": {
+    "provider": "kis",
+    "fallback": false,
+    "cache_hit": false,
+    "bars": 0,
+    "first": null,
+    "last": null,
+    "tails": 0,
+    "warnings": [],
+    "secs": 0.37
+   },
+   "15m": {
+    "provider": "kis",
+    "fallback": false,
+    "cache_hit": false,
+    "bars": 0,
+    "first": null,
+    "last": null,
+    "tails": 0,
+    "warnings": [],
+    "secs": 0.4
+   },
+   "60m": {
+    "provider": "kis",
+    "fallback": false,
+    "cache_hit": false,
+    "bars": 0,
+    "first": null,
+    "last": null,
+    "tails": 0,
+    "warnings": [],
+    "secs": 0.49
+   },
+   "120m": {
+    "provider": "kis",
+    "fallback": false,
+    "cache_hit": false,
+    "bars": 0,
+    "first": null,
+    "last": null,
+    "tails": 0,
+    "warnings": [],
+    "secs": 0.49
+   },
+   "240m": {
+    "provider": "kis",
+    "fallback": false,
+    "cache_hit": false,
+    "bars": 0,
+    "first": null,
+    "last": null,
+    "tails": 0,
+    "warnings": [],
+    "secs": 0.38
+   }
+  },
+  "recompute": {},
+  "indicators": null,
+  "verdict": "WARN",
+  "notes": [
+   "1m: 0 bars",
+   "5m: 0 bars",
+   "15m: 0 bars",
+   "60m: 0 bars",
+   "120m: 0 bars",
+   "240m: 0 bars"
+  ]
+ }
+]
