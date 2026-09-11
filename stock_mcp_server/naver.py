@@ -818,7 +818,9 @@ async def list_sectors() -> list[dict]:
     return results
 
 
-@cached(ttl_market=1800, ttl_closed=7200)
+# 업종 이름은 거의 안 바뀌지만 per_ttm 은 현재가에서 나온다. 장중에 30분 캐시를
+# 걸면 PER 이 낡은 채로 업종 비교에 들어간다 — 시세 쪽 TTL 을 따른다.
+@cached(ttl_market=300, ttl_closed=3600)  # 장중 5분, 장마감 1시간
 async def get_stock_sector(code: str) -> dict:
     """종목 → 소속 업종(네이버 기준). 역방향 조회가 없어 비교 기준을 못 잡던 구멍.
 
