@@ -46,9 +46,18 @@ class RuntimeSnapshot:
 
 class ProviderRuntime:
     def __init__(self, keyring_module=None,
-                 home: Path | str | None = None) -> None:
+                 home: Path | str | None = None,
+                 token_store=None) -> None:
+        if token_store is None:
+            from stock_mcp_server.market_data.token_store import TokenStore
+            try:
+                token_store = TokenStore(keyring_module=keyring_module)
+            except Exception:  # noqa: BLE001
+                token_store = None
+        self._token_store = token_store
         self._credentials = CredentialStore(
-            keyring_module=keyring_module, home=home)
+            keyring_module=keyring_module, home=home,
+            token_store=token_store)
         self._home = home
         # (provider, profile) -> (generation, client)
         self._clients: dict[tuple[str, str], tuple[int, object]] = {}
@@ -96,20 +105,28 @@ class ProviderRuntime:
             return load_state_v2(home)["providers"].get(
                 provider, {}).get("generation", -1)
 
+        # 토큰은 프로세스 사이에서도 재사용한다. 실측(2026-08-28) 결과
+        # KIS·키움은 재발급해도 같은 토큰을 주고(발급 자체는 KIS 가 1분
+        # 1회 제한), 토스는 재발급이 이전 토큰을 즉시 무효화한다. 새
+        # 프로세스가 매번 받으면 토스에서는 다른 프로세스를 망가뜨린다.
+        store = self._token_store
         if provider == "kis":
             from stock_mcp_server.market_data.kis_client import KisClient
             return KisClient(payload, profile,
-                             generation_provider=_generation)
+                             generation_provider=_generation,
+                             token_store=store)
         if provider == "kiwoom":
             from stock_mcp_server.market_data.kiwoom_client import (
                 KiwoomClient,
             )
             return KiwoomClient(payload, profile,
-                                generation_provider=_generation)
+                                generation_provider=_generation,
+                                token_store=store)
         if provider == "toss":
             from stock_mcp_server.market_data.toss_client import TossClient
             return TossClient(payload, profile,
-                              generation_provider=_generation)
+                              generation_provider=_generation,
+                              token_store=store)
         return None
 
     def providers_for(self, market: str, source: str = "auto",
@@ -147,6 +164,40 @@ class ProviderRuntime:
         if adapter is not None:
             providers[candidate] = adapter
         return providers
+
+    def evidence_provider_for(self, provider: str,
+                              snapshot: RuntimeSnapshot | None = None):
+        """상세 수급 어댑터 하나. 연결·자격 증명이 없으면 None.
+
+        시세 어댑터와 따로 두는 이유는 구성이 다르기 때문이다. 증거는
+        국내만 있고 시장별 분기가 없으며, 네이버·야후는 아예 후보가
+        아니다 (증권사 연결 없이는 받을 수 없는 데이터다).
+
+        클라이언트는 `client()` 가 쓰는 것과 같은 캐시를 공유한다.
+        증거 조회 때문에 토큰을 새로 발급하지 않는다.
+        """
+        if snapshot is None:
+            snapshot = self.snapshot()
+        if not snapshot.capabilities(provider)["connected"]:
+            return None
+        profile = snapshot.active_profile(provider)
+        if not profile:
+            return None
+        client = self.client(provider, profile, snapshot=snapshot)
+        if client is None:
+            return None
+        if provider == "kis":
+            from stock_mcp_server.market_data.kis_evidence import (
+                KisEvidenceProvider,
+            )
+            return KisEvidenceProvider(client, profile)
+        if provider == "kiwoom":
+            from stock_mcp_server.market_data.kiwoom_evidence import (
+                KiwoomEvidenceProvider,
+            )
+            return KiwoomEvidenceProvider(client, profile)
+        # 토스 증거 어댑터는 없다. 개발자 모드에서도 구성하지 않는다.
+        return None
 
     def _build_adapter(self, provider: str, client, profile: str,
                        market: str):

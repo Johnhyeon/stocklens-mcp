@@ -1,0 +1,10 @@
+PASS [kis 단독] 연결 인식  ['kis']
+PASS [kis 단독] 주 사용 = kis  kis
+PASS [kis 단독] KR 분봉을 kis에서 수신  {"provider": "kis", "rows": 30, "reason": "broker_connected_and_intraday_supported", "primary": "kis"}
+PASS [kis 단독] US 분봉을 kis에서 수신  {"provider": "kis", "rows": 30, "reason": "broker_connected_and_intraday_supported", "primary": "kis"}
+PASS [kiwoom 단독] 연결 인식  ['kiwoom']
+PASS [kiwoom 단독] 주 사용 = kiwoom  kiwoom
+PASS [kiwoom 단독] KR 분봉을 kiwoom에서 수신  {"provider": "kiwoom", "rows": 30, "reason": "broker_connected_and_intraday_supported", "primary": "kiwoom"}
+PASS [kiwoom 단독] US 분봉을 kiwoom에서 수신  {"provider": "kiwoom", "rows": 30, "reason": "broker_connected_and_intraday_supported", "primary": "kiwoom"}
+
+FAILURES: 0 []

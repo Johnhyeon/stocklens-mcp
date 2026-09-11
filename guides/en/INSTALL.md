@@ -152,16 +152,31 @@ Then follow the buyer installation guide. `stocklens-setup` updates the existing
 
 ## Broker connection (optional, intraday bars)
 
-Connect your Korea Investment & Securities (KIS) Open API to unlock Korean
-and US intraday bars.
+Connect a broker Open API to unlock Korean and US intraday bars plus
+detailed investor flow. **One broker is enough** - pick Korea Investment
+& Securities (KIS) or Kiwoom Securities.
 
-1. Issue a quotation-scope App Key and App Secret at
-   https://apiportal.koreainvestment.com
+| | KIS | Kiwoom |
+|---|---|---|
+| KR / US intraday bars | yes | yes |
+| Detailed flow investor kinds | 3 (retail, foreign, institution total) | 13 (institution broken out) |
+| Buy / sell split in flow | yes | no (net only) |
+| Lending, credit, foreign holding | no | yes |
+| Where you can use it | no IP restriction; pick this for a laptop | only from the IP you registered |
+| Key issuance | https://apiportal.koreainvestment.com | https://openapi.kiwoom.com |
+
+Neither is a superset of the other. Choose Kiwoom to break institutions
+apart, KIS to separate buys from sells.
+
+1. Issue a quotation-scope App Key and App Secret at the portal above
 2. Open LeetKit Manager and click the broker connection button on the
    StockLens card
-3. Keep the default live (real) profile, paste the App Key and App Secret,
-   then run the connection test and save
+3. Pick the broker tab, keep the default live (real) profile, paste the
+   App Key and App Secret, then run the connection test and save
 4. Done when Korean and US intraday availability is shown
+
+Connecting both still serves data from **one primary broker only**. It
+never switches to the other broker silently when one fails.
 
 Notes:
 
@@ -170,12 +185,12 @@ Notes:
 - Keys are stored only in the OS credential store, never in files
 - Two levels of disconnect: current-profile disconnect removes only the
   active environment's keys; full provider disconnect removes all keys and
-  the KIS intraday cache. Neither touches the package, license, MCP
+  that broker's intraday cache. Neither touches the package, license, MCP
   registrations, or the Naver/Yahoo features
 - Uninstalling the package alone keeps the broker profiles; reinstalling
   picks them up again. Use the Manager's full cleanup to wipe everything
 - If anything misbehaves, switch the data source mode to legacy in
-  Manager: zero KIS calls, identical to pre-connection behavior
+  Manager: zero broker calls, identical to pre-connection behavior
 
 ---
 

@@ -25,6 +25,9 @@ from stock_mcp_server.market_data.broker_http import (
     BrokerHttpTransport,
 )
 from stock_mcp_server.market_data.provider_registry import registry
+from stock_mcp_server.market_data.token_store import (
+    credential_fingerprint as _fingerprint,
+)
 
 _DESCRIPTOR = registry.require("toss")
 
@@ -74,6 +77,7 @@ class TossClient:
         transport: httpx.AsyncBaseTransport | None = None,
         generation_provider=None,
         clock=None,
+        token_store=None,
     ) -> None:
         if profile not in _DESCRIPTOR.supported_profiles:
             raise ValueError(f"지원하지 않는 프로필: {profile}")
@@ -83,6 +87,9 @@ class TossClient:
         self._transport = BrokerHttpTransport(transport=transport)
         self._generation_provider = generation_provider or (lambda: 0)
         self._clock = clock or time.monotonic
+        self._token_store = token_store
+        self._fingerprint = _fingerprint({"client_id": self._client_id,
+                                          "client_secret": self._client_secret})
         self._lock = asyncio.Lock()
 
         self._token: str | None = None
@@ -147,11 +154,37 @@ class TossClient:
 
         self._token = token
         self._token_expires_at = self._clock() + expires_in
+        if self._token_store is not None:
+            self._token_store.save(
+                "toss", self.profile, self._fingerprint,
+                token, time.time() + expires_in)
         self._token_generation = self._generation_provider()
+
+    def _load_shared_token(self) -> bool:
+        """다른 프로세스가 받아 둔 유효한 토큰을 쓴다.
+
+        실측(2026-08-28): 토스는 재발급하면 새 토큰을 주고 **이전 토큰을
+        즉시 무효화**한다(401). 프로세스마다 새로 받으면 서로의 토큰을
+        죽이므로, 공유 토큰이 있으면 반드시 그것을 쓴다. 저장된 만료는
+        벽시계라 이 프로세스의 monotonic 기준으로 환산한다.
+        """
+        if self._token_store is None:
+            return False
+        got = self._token_store.load("toss", self.profile,
+                                     self._fingerprint)
+        if got is None:
+            return False
+        token, wall_expires_at = got
+        self._token = token
+        self._token_expires_at = self._clock() + (
+            wall_expires_at - time.time())
+        self._token_generation = self._generation_provider()
+        return True
 
     async def _ensure_token(self) -> str:
         async with self._lock:
-            if not self._token_valid():
+            if not self._token_valid() and \
+                    not self._load_shared_token():
                 await self._issue_token()
             assert self._token is not None
             return self._token

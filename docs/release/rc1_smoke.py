@@ -44,6 +44,8 @@ def _resolve_paths() -> "tuple[Path, str]":
 
 VENV, UAT = _resolve_paths()
 fails = []
+# 설치본에 없는 실행 파일. 마지막에 한 번에 보고한다.
+_missing: list[str] = []
 # 자식 출력이 깨진 채로 검증을 통과시키지 않기 위한 목록
 _mojibake: list = []
 
@@ -58,6 +60,16 @@ def run(exe, args, request=None, flag=False, home=UAT):
     env.pop("LEETKIT_ENABLE_EXPERIMENTAL_BROKERS", None)
     if flag:
         env["LEETKIT_ENABLE_EXPERIMENTAL_BROKERS"] = "1"
+    target = VENV / exe
+    if not target.exists():
+        # 실행 파일이 없으면 traceback 으로 죽지 않고 실패로 보고한다.
+        # 검증기가 죽으면 나머지 검사 결과가 통째로 사라진다.
+        class _Missing:
+            returncode = 127
+            stdout = ""
+            stderr = f"실행 파일 없음: {exe}"
+        _missing.append(exe)
+        return _Missing()
     p = subprocess.run([str(VENV / exe)] + args,
                        input=json.dumps(request) if request else None,
                        capture_output=True, text=True, encoding="utf-8",
@@ -156,5 +168,9 @@ print()
 if _mojibake:
     print("DECODE 실패:", len(_mojibake), _mojibake[:3])
     fails.append("child-output-decode")
+if _missing:
+    # 검증 대상이 설치돼 있지 않았다는 사실을 통과로 넘기지 않는다.
+    print("설치본에 없는 실행 파일:", sorted(set(_missing)))
+    fails.append("missing-executable")
 print("FAILURES:", len(fails), fails)
 sys.exit(1 if fails else 0)

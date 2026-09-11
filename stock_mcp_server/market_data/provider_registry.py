@@ -83,6 +83,12 @@ _KIS = ProviderDescriptor(
         "/oauth2/tokenP",
         "/uapi/domestic-stock/v1/quotations/inquire-time-dailychartprice",
         "/uapi/overseas-price/v1/quotations/inquire-time-itemchartprice",
+        # 상세 수급 (1.1, 2026-08-28 실측). 시세 조회 전용 경로만 올린다.
+        # 실측으로 데이터를 확인한 것만 올린다 - daily-loan-trans(시장
+        # 전체만)와 daily-credit-balance(빈 결과)는 넣지 않는다.
+        "/uapi/domestic-stock/v1/quotations/inquire-investor",
+        "/uapi/domestic-stock/v1/quotations/daily-short-sale",
+        "/uapi/domestic-stock/v1/quotations/program-trade-by-stock",
     ),
     credential_schema=(
         CredentialField(name="app_key", label="앱 키"),
@@ -103,6 +109,18 @@ _KIS = ProviderDescriptor(
         EndpointSpec(
             "us_minute", "GET",
             "/uapi/overseas-price/v1/quotations/inquire-time-itemchartprice"),
+        # 종목별 투자자 일별 수급 (FHKST01010900)
+        EndpointSpec(
+            "kr_investor_daily", "GET",
+            "/uapi/domestic-stock/v1/quotations/inquire-investor"),
+        # 공매도 일별추이 (FHPST04830000)
+        EndpointSpec(
+            "kr_short_selling", "GET",
+            "/uapi/domestic-stock/v1/quotations/daily-short-sale"),
+        # 프로그램매매 종목별 (FHPPG04650100) - 장중 시계열이다
+        EndpointSpec(
+            "kr_program_trade", "GET",
+            "/uapi/domestic-stock/v1/quotations/program-trade-by-stock"),
     ),
 )
 
@@ -117,6 +135,14 @@ _KIWOOM = ProviderDescriptor(
         "/oauth2/token",
         "/api/dostk/chart",
         "/api/us/chart",
+        # 상세 수급 (1.1). 2026-08-28 실측으로 확정한 경로만 올린다.
+        # 계좌·주문·잔고 계열 경로는 어떤 이유로도 추가하지 않는다.
+        # (키움 신용 '주문' TR kt100xx 는 조회 TR 과 별개이며 쓰지 않는다.)
+        "/api/dostk/stkinfo",
+        "/api/dostk/mrkcond",
+        "/api/dostk/shsa",
+        "/api/dostk/slb",
+        "/api/dostk/frgnistt",
     ),
     credential_schema=(
         CredentialField(name="app_key", label="앱 키"),
@@ -134,6 +160,23 @@ _KIWOOM = ProviderDescriptor(
         EndpointSpec("kr_chart", "POST", "/api/dostk/chart"),
         # 공식 스펙(usa06011): 미국주식 분 차트. POST /api/us/chart
         EndpointSpec("us_chart", "POST", "/api/us/chart"),
+        # 상세 수급 (1.1, 2026-08-28 실측):
+        # ka10059 종목별 투자자·기관별 일별 -> /api/dostk/stkinfo
+        #
+        # 시장 단위 투자자 수급 endpoint 는 등록하지 않는다. ka10063·
+        # ka10066 은 이름과 달리 시장 집계가 아니라 종목별 행(stk_cd)을
+        # 돌려주고, mrkt_tp 를 바꿔도 결과가 같다 (2026-08-28 실측).
+        # 상위 100종목을 더해 '시장 전체'라고 부를 수 없다.
+        EndpointSpec("kr_investor_daily", "POST", "/api/dostk/stkinfo"),
+        # 수급 압력 (1.1, 2026-08-28 실측):
+        # ka90013 프로그램매매(종목별) / ka10014 공매도추이 /
+        # ka10013 신용매매동향 / ka20068 대차거래추이 /
+        # ka10008 주식외국인종목별매매동향
+        EndpointSpec("kr_program_trade", "POST", "/api/dostk/mrkcond"),
+        EndpointSpec("kr_short_selling", "POST", "/api/dostk/shsa"),
+        EndpointSpec("kr_credit_trade", "POST", "/api/dostk/stkinfo"),
+        EndpointSpec("kr_securities_lending", "POST", "/api/dostk/slb"),
+        EndpointSpec("kr_foreign_holding", "POST", "/api/dostk/frgnistt"),
     ),
 )
 
@@ -198,6 +241,34 @@ _RELEASE_VERIFIED: dict[tuple[str, str], bool] = {
     ("toss", "kr_intraday"): False,
     ("toss", "us_intraday"): False,
     # 일·주·월봉은 수정주가·기업행위 검증 게이트 전이라 전부 미검증.
+    #
+    # 1.1 상세 수급 증거 (2026-08-28). 어댑터는 실계좌 실측으로 만들었지만
+    # 실계좌 UAT 러너를 아직 돌리지 않았다. **전부 닫아 둔다.** 여는 커밋은
+    # 분봉과 마찬가지로 해당 UAT 증거 커밋과 짝을 이룬다.
+    #
+    # 종류마다 따로 두는 이유: 한 종류를 검증했다고 나머지가 검증된 것이
+    # 아니다. 특히 프로그램매매는 KIS 가 장중, 키움이 일별이라 같은 이름의
+    # 게이트를 공유하면 한쪽 UAT 로 다른 쪽이 열린다.
+    # 투자자 수급 (KIS·키움): 실계좌 UAT 14종목 failures=0 (2026-08-28,
+    # docs/uat/evidence/common/uat_evidence_flow_20260828.json).
+    # 근거 네 겹 -
+    # (1) 증권사 교차 KIS↔키움 1,260건 불일치 0 (개인·외국인·기관계).
+    # (2) 네이버 교차 812건 불일치 0. 증권사와 무관한 독립 파이프라인.
+    # (3) KIS 응답 내부 산술 순매수=매수-매도 1,260건 불일치 0.
+    # (4) 키움 5주체 합 0 + 기관 세부 8종 합=기관계 검산, 어댑터가
+    #     원본을 그대로 옮기는지 대조.
+    # 이 UAT 가 잡아낸 것: 키움 frgnr_invsr 를 `foreign` 이라 부르면
+    # KIS·네이버의 외국인과 다른 범위가 된다. 실측 32/32 로
+    # frgnr_invsr + natfor 임을 확정하고 이름표를 고친 뒤 열었다.
+    ("kis", "kr_investor_flow"): True,
+    ("kis", "kr_short_selling"): False,
+    ("kis", "kr_program_trading"): False,
+    ("kiwoom", "kr_investor_flow"): True,
+    ("kiwoom", "kr_short_selling"): False,
+    ("kiwoom", "kr_program_trading"): False,
+    ("kiwoom", "kr_credit"): False,
+    ("kiwoom", "kr_securities_lending"): False,
+    ("kiwoom", "kr_foreign_holding"): False,
 }
 
 
@@ -226,12 +297,19 @@ class ProviderRegistry:
         factory·host·path 는 포함하지 않는다. host·path 는 transport
         계층이 레지스트리에서 직접 읽는다.
         """
+        from stock_mcp_server.market_data.evidence_capabilities import (
+            catalog_projection,
+        )
+
         entries = []
         for provider_id in self._order:
             d = self._by_id[provider_id]
             entries.append({
                 "provider_id": d.provider_id,
                 "display_name": d.display_name,
+                # 1.1 additive: 연결하면 무엇이 열리는지. 기존 필드는
+                # 그대로라 구버전 Manager 가 계속 읽는다.
+                **catalog_projection(provider_id),
                 "supported_profiles": list(d.supported_profiles),
                 "signup_url": d.signup_url,
                 "docs_url": d.docs_url,

@@ -46,6 +46,8 @@ def _resolve_paths() -> "tuple[Path, str]":
 
 VENV, UAT = _resolve_paths()
 fails = []
+# 설치본에 없는 실행 파일. 마지막에 한 번에 보고한다.
+_missing: list[str] = []
 _mojibake: list = []
 
 
@@ -146,5 +148,9 @@ print()
 if _mojibake:
     print("DECODE 실패:", len(_mojibake))
     fails.append("child-output-decode")
+if _missing:
+    # 검증 대상이 설치돼 있지 않았다는 사실을 통과로 넘기지 않는다.
+    print("설치본에 없는 실행 파일:", sorted(set(_missing)))
+    fails.append("missing-executable")
 print("FAILURES:", len(fails), fails)
 sys.exit(1 if fails else 0)
