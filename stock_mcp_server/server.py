@@ -218,6 +218,15 @@ def safe_tool(func):
 
     return wrapper
 
+# 체험판이면 모델이 그 사실을 알고 있어야 "언제 끝나?"에 답할 수 있다.
+# 구매자면 빈 문자열이라 아무것도 붙지 않는다(trial_notice.session_context 참고).
+try:
+    import stock_mcp_server.trial_notice as _trial_notice
+
+    _SESSION_CONTEXT = _trial_notice.session_context() or ""
+except Exception:
+    _SESSION_CONTEXT = ""
+
 mcp = FastMCP(
     "StockLens",
     instructions="""StockLens — 한국 주식 데이터를 네이버 증권에서 실시간 조회합니다.
@@ -417,7 +426,8 @@ payload 안 `_meta` 키로) 붙인다. **날짜를 말하기 전에 반드시 �
 
 ⚠️ **데이터 제약:** Yahoo Finance는 최대 15분 지연. 실시간 호가창·다크풀 미지원.
 프리/포스트 마켓은 `get_us_chart(prepost=True)` 사용.
-""",
+"""
+    + _SESSION_CONTEXT,
 )
 
 @mcp.tool()

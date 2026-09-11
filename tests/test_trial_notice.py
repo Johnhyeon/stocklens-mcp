@@ -149,3 +149,60 @@ class TestAppendNotice:
         trial(4)
         monkeypatch.setattr(L, "expires_on", lambda: 1 / 0)
         assert N.append_notice("데이터") == "데이터"
+
+
+class TestSessionContext:
+    """세션이 열릴 때 모델에게 넘기는 체험 상태.
+
+    여기가 틀리면 모델이 사용자에게 직접 틀린 날짜·틀린 일차를 말한다. 도구 응답에
+    붙는 안내(append_notice)와 달리 사용자가 묻지 않아도 모델의 머릿속에 들어가 있다.
+    """
+
+    def test_paid_key_gets_nothing(self, trial):
+        """구매자 세션에 체험 이야기가 섞이면 그건 광고다."""
+        trial(None)
+        assert N.session_context() is None
+
+    def test_no_key_is_silent(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(L, "_home", lambda: tmp_path)
+        monkeypatch.setattr(L, "stored_key", lambda: None)
+        assert N.session_context() is None
+
+    def test_first_day_is_day_one(self, trial):
+        """키를 넣은 날이 가이드의 1일차다 — 남은 날짜는 그날 14다."""
+        trial(14)
+        assert "체험 1일차" in N.session_context()
+
+    def test_last_course_day_is_day_fourteen(self, trial):
+        trial(1)
+        assert "체험 14일차" in N.session_context()
+
+    @pytest.mark.parametrize("left,day", [(14, 1), (13, 2), (7, 8), (2, 13), (1, 14)])
+    def test_day_number_matches_guide_course(self, trial, left, day):
+        """가이드는 1~14일차로 하루에 하나씩 간다. 번호가 어긋나면 그날 할 일이 어긋난다."""
+        trial(left)
+        assert f"체험 {day}일차" in N.session_context()
+
+    def test_grace_day_has_no_day_number(self, trial):
+        """만료일 당일은 아직 쓸 수 있지만 코스 14일은 지났다 — 15일차라고 부르지 않는다."""
+        trial(0)
+        ctx = N.session_context()
+        assert "일차" not in ctx
+        assert "0일 남았다" in ctx
+
+    def test_expired_says_so_without_day_number(self, trial):
+        trial(-1)
+        ctx = N.session_context()
+        assert "기간이 끝났다" in ctx
+        assert "일차" not in ctx
+
+    def test_states_the_expiry_date(self, trial):
+        """날짜를 지어내지 않게 하려면 실제 만료일이 문장에 있어야 한다."""
+        trial(5)
+        expiry = _today() + timedelta(days=5)
+        assert f"{expiry.year}년 {expiry.month}월 {expiry.day}일" in N.session_context()
+
+    def test_tells_the_model_not_to_bring_it_up(self, trial):
+        """사실만 주고 규칙을 안 주면 모델이 매 답변에 체험 이야기를 붙인다."""
+        trial(5)
+        assert "먼저 꺼내지 않는다" in N.session_context()

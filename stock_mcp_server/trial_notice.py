@@ -97,3 +97,67 @@ def append_notice(result):
         return result
     notice = pending_notice()
     return f"{result}\n\n{notice}" if notice else result
+
+
+# ── 세션 시작 시 모델에게 알리는 상태 ────────────────────────────────────────
+#
+# 위의 append_notice 는 7·4·1일에만 한 줄을 붙인다. 그 사이 기간에는 모델이 이 설치가
+# 체험판인지조차 모른다. 그래서 "체험 언제 끝나?" 같은 질문에 아는 게 없어 답을 못
+# 하거나, 없는 날짜를 지어낸다.
+#
+# MCP 서버 instructions 는 세션이 열릴 때 한 번 모델에게 전달된다. 여기에 사실 몇 줄과
+# **말하지 않을 규칙**을 같이 넣는다. 규칙이 없으면 반대 문제가 생긴다 — 알게 된 모델이
+# 매 답변마다 체험 이야기를 꺼내고, 그건 광고로 읽힌다. 우리가 파는 게 데이터 신뢰라서
+# 그 손해가 더 크다.
+#
+# 구매자(기간 없는 키)에게는 아무것도 붙이지 않는다.
+#
+# 세션이 열릴 때 한 번 계산되므로, 자정을 넘겨 계속 켜둔 세션에서는 남은 날짜가 하루
+# 지날 수 있다. 정확한 시점 안내는 도구 응답에 붙는 append_notice 쪽이 담당한다.
+
+_TRIAL_DAYS = 14
+
+
+def _trial_day(expiry: date) -> int | None:
+    """체험 며칠차인가. 가이드의 14일 코스와 같은 번호여야 한다.
+
+    키를 넣은 날이 1일차다. 그날은 남은 날짜가 14라서, 빼기만 하면 0이 나와 첫날에는
+    아무 말도 못 하고 그 뒤로는 계속 하루씩 낮게 센다. 가이드는 "1일차 — 오늘 조건에
+    맞는 종목 찾기"부터 시작하는데 모델이 다른 번호를 부르면 그날 할 일이 어긋난다.
+    """
+    day = _TRIAL_DAYS - _days_left(expiry) + 1
+    return day if 1 <= day <= _TRIAL_DAYS else None
+
+
+def session_context() -> str | None:
+    """세션 instructions 뒤에 붙일 체험 상태. 체험이 아니거나 알 수 없으면 None."""
+    try:
+        expiry = licensing.expires_on()
+        if expiry is None:
+            return None  # 기간 없는 키 = 구매자
+
+        left = _days_left(expiry)
+        when = f"{expiry.year}년 {expiry.month}월 {expiry.day}일"
+
+        lines = ["", "", "## 이 설치에 대해"]
+        if left < 0:
+            lines.append(f"이 설치는 LeetKit 체험판이고 {when}로 기간이 끝났다.")
+        else:
+            lines.append(
+                f"이 설치는 LeetKit 14일 체험판이다. {when}까지 쓸 수 있고 {left}일 남았다."
+            )
+            day = _trial_day(expiry)
+            if day:
+                lines.append(f"오늘은 체험 {day}일차다.")
+
+        lines += [
+            "",
+            "이 사실을 다룰 때 지킬 것:",
+            "- 사용자가 묻지 않으면 체험이라는 말을 먼저 꺼내지 않는다. 매 답변에 붙이지 않는다.",
+            "- 남은 기간·만료일·체험 며칠차인지 물으면 위 값으로 답한다. 날짜를 지어내지 않는다.",
+            "- 구매를 권하지 않는다. 도구 응답 끝에 안내가 붙어 나오면 그것만 그대로 전달한다.",
+            "- 무엇을 물어야 할지 모르겠다고 하면, 가이드의 14일 코스에서 그날 질문을 안내해도 된다.",
+        ]
+        return "\n".join(lines)
+    except Exception:
+        return None
