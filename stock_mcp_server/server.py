@@ -46,7 +46,7 @@ from stock_mcp_server.naver import (
     get_consensus as naver_get_consensus,
     get_reports as naver_get_reports,
     get_report_detail as naver_get_report_detail,
-    REPORT_READ_URL as naver_report_read_url,
+    REPORT_PAGE_URL as naver_report_page_url,
     get_disclosure_list as naver_get_disclosure_list,
     _ttm_eps as _ttm_eps_for,
     _latest_confirmed_annual as _latest_fin,
@@ -1256,10 +1256,9 @@ async def get_price(code: str) -> str:
 @safe_tool
 @track_metrics("get_flow")
 async def get_flow(code: str, days: int = 20) -> str:
-    """투자자수급 — 투자자별 매매동향 (기관/외국인 순매매 주식 수)을 가져옵니다.
+    """투자자수급 — 투자자별 매매동향 (개인/기관/외국인 순매매 주식 수)을 가져옵니다.
 
     ⚠️ **종목이 2개 이상이면 이 도구를 반복하지 말고 `get_flow_batch`를 쓰세요.**
-    네이버 증권 소스 특성상 **개인 순매매는 제공되지 않습니다** (기관·외국인만).
     "외국인 수급", "기관 순매수", "수급 분석", "누가 사고 있어" 같은 질문에 사용합니다.
 
     Args:
@@ -1286,19 +1285,25 @@ async def get_flow(code: str, days: int = 20) -> str:
         )
 
     lines = [f"종목 {code} 투자자별 매매동향 ({len(data)}일):", ""]
-    lines.append("날짜 | [주] 기관 순매매 | [주] 외국인 순매매 | [참고] 종가 | [참고] 거래량")
-    lines.append("---|---|---|---|---")
+    lines.append("날짜 | [주] 기관 순매매 | [주] 외국인 순매매 | [주] 개인 순매매 "
+                 "| [참고] 종가 | [참고] 거래량")
+    lines.append("---|---|---|---|---|---")
     for row in data:
+        # 개인은 결측일 수 있다 — 0으로 채우지 않고 '-' 로 둔다.
+        indiv = row.get("individual")
+        indiv_s = f"{indiv:,}" if indiv is not None else "-"
         lines.append(
-            f"{row['date']} | {row['institutional']:,} | {row['foreign']:,} | "
+            f"{row['date']} | {row['institutional']:,} | {row['foreign']:,} | {indiv_s} | "
             f"{row['close']:,} | {row['volume']:,}"
         )
 
     # 합계
     total_inst = sum(r["institutional"] for r in data)
     total_frgn = sum(r["foreign"] for r in data)
+    indiv_vals = [r["individual"] for r in data if r.get("individual") is not None]
+    total_indiv = f"{sum(indiv_vals):,}" if len(indiv_vals) == len(data) else "-"
     lines.append("")
-    lines.append(f"합계 | {total_inst:,} | {total_frgn:,} | - | -")
+    lines.append(f"합계 | {total_inst:,} | {total_frgn:,} | {total_indiv} | - | -")
     lines.append("")
     lines.append(
         "※ [주] 필드는 이 도구의 주 목적 (수급 분석). "
@@ -2221,17 +2226,16 @@ async def list_themes(page: int = 1) -> str:
         return f"페이지 {page}의 테마 목록을 가져올 수 없습니다."
 
     lines = [f"테마 목록 (page {page}, {len(themes)}개):", ""]
-    lines.append("테마명 | 전일대비 | 최근3일 | 상승/보합/하락 | 주도주")
-    lines.append("---|---|---|---|---")
+    lines.append("테마명 | 전일대비 | 종목수 | 상승/보합/하락")
+    lines.append("---|---|---:|---")
     for t in themes:
-        leaders = ", ".join(
-            f"{ld['name']}({ld['code']})" if ld.get("code") else ld["name"]
-            for ld in t["leaders"]
-        )
         counts = f"{t['up_count']}/{t['flat_count']}/{t['down_count']}"
         lines.append(
-            f"{t['name']} | {t['change_rate']} | {t['recent_3d_rate']} | {counts} | {leaders}"
+            f"{t['name']} | {t['change_rate']} | {t['total_count']} | {counts}"
         )
+    lines.append("")
+    lines.append("※ 네이버가 목록에서 '최근3일 등락률'과 '주도주'를 더 이상 제공하지 않습니다. "
+                 "구성 종목은 get_theme_stocks 로 확인하세요.")
     return "\n".join(lines)
 
 
@@ -3701,8 +3705,8 @@ async def save_analysis_to_excel(
         )
     except Exception:
         pass
-    auto_notes.append("개인 순매매는 제공되지 않습니다(기관·외국인만). "
-                      "'개인이 받았다'는 판단은 이 자료로 할 수 없습니다.")
+    auto_notes.append("수급 열은 기관·외국인 순매매입니다. 개인 순매매는 get_flow 에서 "
+                      "볼 수 있고, 이 파일에는 넣지 않았습니다.")
     auto_notes.append("PER 은 현재가 ÷ 최근 4분기 EPS(TTM) 기준입니다. "
                       "실적표의 PER(각 기간말 주가 기준)과 값이 다를 수 있습니다.")
 
@@ -3927,8 +3931,7 @@ async def save_analysis_to_excel(
                 reps = await naver_get_reports(c)
                 for it in (reps or [])[:3]:
                     nid = it.get("nid")
-                    url = (f"https://finance.naver.com/research/company_read.naver?nid={nid}"
-                           if nid else None)
+                    url = f"{naver_report_page_url}/{nid}" if nid else None
                     news.append({
                         "date": it.get("date"),
                         "title": "[리포트] " + str(it.get("broker", "")) + " " + str(it.get("title", "")),
@@ -6461,7 +6464,7 @@ async def get_report_content(
     pdf_url = detail.get("pdf_url") or ""
     # 사람이 열어 볼 자리는 원문 PDF보다 네이버 리포트 페이지가 낫다(요약·목표가가
     # 같이 있고, PDF가 없는 리포트도 여기는 열린다).
-    page_url = f"{naver_report_read_url}?nid={nid}"
+    page_url = f"{naver_report_page_url}/{nid}"
 
     if mode_key == "link":
         # 본문을 안 볼 거면 PDF를 받을 이유도 없다 — 내려받지 않고 링크만 준다.
