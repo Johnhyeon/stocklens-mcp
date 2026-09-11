@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""1.0.0rc1 설치본 스모크 (Phase 1 step 6).
+"""1.0.0 설치본 스모크 (Phase 1 step 6).
 
 경로를 인자나 환경변수로 받는다 (임시 폴더 하드코딩 금지).
 
@@ -21,13 +21,17 @@ sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
 sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8")
 
 
-def _resolve_paths() -> "tuple[Path, str]":
+def _resolve_paths() -> "tuple[Path, str, str]":
     parser = argparse.ArgumentParser(add_help=True)
     parser.add_argument("--venv", default=os.environ.get("RC1_VENV"),
                         help="산출물을 설치한 venv 경로 (Scripts 상위)")
     parser.add_argument("--home",
                         default=os.environ.get("RC1_STOCKLENS_HOME"),
                         help="검증에 쓸 STOCKLENS_HOME")
+    # 기대 버전을 소스에 박아 두면 판올림마다 여기를 놓쳐서 멀쩡한 빌드가
+    # 실패한다. 1.0.0rc1 -> 1.0.0 때 실제로 그랬다.
+    parser.add_argument("--version", default=os.environ.get("RC1_VERSION", "1.0.0"),
+                        help="설치본에서 기대하는 버전 (기본 1.0.0)")
     args = parser.parse_args()
     if not args.venv:
         parser.error("--venv 또는 RC1_VENV 가 필요합니다 "
@@ -39,10 +43,10 @@ def _resolve_paths() -> "tuple[Path, str]":
     home = args.home or os.environ.get("STOCKLENS_HOME") or ""
     if not home:
         parser.error("--home 또는 RC1_STOCKLENS_HOME 이 필요합니다")
-    return scripts, home
+    return scripts, home, args.version
 
 
-VENV, UAT = _resolve_paths()
+VENV, UAT, EXPECT_VERSION = _resolve_paths()
 fails = []
 # 설치본에 없는 실행 파일. 마지막에 한 번에 보고한다.
 _missing: list[str] = []
@@ -152,13 +156,13 @@ try:
     doc = json.loads(p.stdout)
     ver = doc.get("installed_version") or doc.get("version")
     check("doctor --json 동작", isinstance(doc, dict), f"version={ver}")
-    check("doctor 버전 = 1.0.0rc1", str(ver) == "1.0.0rc1", str(ver))
+    check(f"doctor 버전 = {EXPECT_VERSION}", str(ver) == EXPECT_VERSION, str(ver))
 except Exception as exc:  # noqa: BLE001
     check("doctor --json 동작", False, f"{type(exc).__name__} {p.stdout[:120]}")
 
 # 8) Manager 버전과 selftest (CLI 에 --version 은 없다: 하위 명령 구조)
 p = run("python.exe", ["-c", "import leetkit_manager as m; print(m.__version__)"])
-check("manager __version__ = 1.0.0rc1", p.stdout.strip() == "1.0.0rc1",
+check(f"manager __version__ = {EXPECT_VERSION}", p.stdout.strip() == EXPECT_VERSION,
       p.stdout.strip())
 p = run("leetkit-manager.exe", ["selftest"])
 check("manager selftest 통과", p.returncode == 0,
