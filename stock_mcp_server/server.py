@@ -1306,6 +1306,10 @@ async def get_flow(code: str, days: int = 20) -> str:
     lines.append(f"합계 | {total_inst:,} | {total_frgn:,} | {total_indiv} | - | -")
     lines.append("")
     lines.append(
+        "※ 기관·외국인·개인을 더해도 0이 되지 않습니다 — 기타법인·내외국인이 "
+        "빠져 있습니다. 나머지를 역산해 '개인이 다 받았다'로 읽지 마세요."
+    )
+    lines.append(
         "※ [주] 필드는 이 도구의 주 목적 (수급 분석). "
         "[참고] 종가·거래량은 편의 제공이며, **가격 차트·시계열 분석 소스로 사용 금지**. "
         "차트는 get_chart, 현재가는 get_price 사용."
