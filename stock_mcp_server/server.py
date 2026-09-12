@@ -108,7 +108,6 @@ from stock_mcp_server._update_check import get_update_notice
 import asyncio
 import json
 import datetime as _dt
-import sys
 import pandas as pd
 
 
@@ -116,25 +115,32 @@ def _support_hint() -> str:
     """safe_tool 의 '예상 못한 오류' 버킷에서만 붙이는 자가진단 안내.
 
     이미 원인이 명확한 예외(라이선스/타임아웃/연결오류 등)엔 안 붙인다 — 사소한 것까지
-    문의로 유도하면 노이즈만 늘어난다. sys.platform 은 이 프로세스가 실제 도는 OS라
-    Mac/Win 명령을 헷갈릴 일 없이 바로 골라 보여줄 수 있다.
+    문의로 유도하면 노이즈만 늘어난다.
+
+    예전엔 여기서 OS별 zip 명령을 띄워 "Claude 로그를 직접 압축해 메일로 보내라"고
+    안내했다. 그대로 따라 보내온 문의(2026-09-11)를 받아보니, 손으로 만든 zip에는
+    LeetKit Manager 번들이 넣어주는 것이 통째로 빠져 있었다 — 3-Lens 온라인 진단
+    요약도, metrics 기록에서 센 최근 호출 실패 집계도, 홈 경로·키 마스킹도. 받는
+    쪽은 원인을 좁힐 재료가 없고, 보내는 쪽은 마스킹 안 된 로그를 그대로 내보낸다.
+    안내하는 길은 하나로 둔다.
     """
-    if sys.platform == "darwin":
-        log_cmd = "cd ~/Library/Logs/Claude && zip -r ~/Desktop/claude_logs.zip . && open ~/Desktop"
-    elif sys.platform == "win32":
-        log_cmd = (
-            'powershell -c "Compress-Archive $env:APPDATA\\Claude\\logs\\* '
-            '$env:USERPROFILE\\Desktop\\claude_logs.zip -Force; explorer $env:USERPROFILE\\Desktop"'
-        )
-    else:
-        log_cmd = None
-    hint = "\n\n계속되면:\n1) Claude 완전 종료 후 재시작 → 다시 시도"
-    if log_cmd:
-        hint += (
-            "\n2) 그래도 안 되면 아래 명령으로 로그를 모아서 osy980315@gmail.com 으로 "
-            f"보내주세요\n   {log_cmd}"
-        )
-    return hint
+    return (
+        "\n\n계속되면:\n"
+        "1) Claude 완전 종료 후 재시작 → 다시 시도\n"
+        "2) 그래도 안 되면 LeetKit Manager를 열고 [지원 문의]를 눌러주세요 "
+        "(진단 로그 zip과 메일 초안이 자동으로 만들어집니다)."
+    )
+
+
+# 네이버 페이지 구조 변경이 의심될 때의 다음 걸음. _support_hint 와 달리 "Claude 재시작"은
+# 넣지 않는다 — 파싱 실패는 껐다 켜서 풀리는 종류가 아니고, 안 듣는 조치를 먼저 시키면
+# 진짜 할 일(업데이트 · 문의)이 세 번째 줄로 밀린다. 업데이트 다음 줄을 꼭 같이 적는다 —
+# 이미 최신인 사람에게 업데이트만 말하면 거기서 길이 끊긴다(2026-09-11 문의가 그랬다).
+_PARSE_FAIL_NEXT = (
+    "LeetKit Manager를 열고 StockLens 카드의 [업데이트]를 확인해 주세요.\n"
+    "업데이트 후에도 같으면 LeetKit Manager의 [지원 문의]를 눌러주세요 "
+    "(진단 로그 zip과 메일 초안이 자동으로 만들어집니다)."
+)
 
 
 _QUERY_RE = re.compile(r"\?[^\s'\"]*")
@@ -197,8 +203,8 @@ def safe_tool(func):
                 "⚠️ 네이버 증권 페이지를 읽지 못했습니다 "
                 "(데이터가 없는 것이 아니라 **파싱 실패**입니다).\n"
                 f"(원인: {e})\n"
-                "페이지 구조가 바뀌었을 수 있습니다. StockLens 업데이트를 확인해 주세요."
-                + _support_hint()
+                "페이지 구조가 바뀌었을 수 있습니다.\n"
+                + _PARSE_FAIL_NEXT
             )
         except Exception as e:
             return (
@@ -1197,7 +1203,7 @@ async def get_price(code: str) -> str:
                 f"{data['name']}({code})의 시세를 읽지 못했습니다 "
                 f"(데이터가 없는 것이 아니라 **파싱 실패**입니다).\n"
                 f"못 읽은 항목: {', '.join(missing) or '현재가'}\n"
-                f"네이버 증권 페이지 구조가 바뀌었을 수 있습니다. StockLens 업데이트를 확인해 주세요."
+                f"네이버 증권 페이지 구조가 바뀌었을 수 있습니다. {_PARSE_FAIL_NEXT}"
             )
             warns = [f"현재가 파싱 실패(구조 변경 의심): {', '.join(missing) or 'price'}"]
         else:
@@ -1283,7 +1289,7 @@ async def get_flow(code: str, days: int = 20) -> str:
         return _append_result_meta(
             f"수급 표를 읽지 못했습니다 (데이터가 없는 것이 아니라 **파싱 실패**입니다).\n"
             f"원인: {e}\n"
-            f"네이버 증권 페이지 구조가 바뀌었을 수 있습니다. StockLens 업데이트를 확인해 주세요.",
+            f"네이버 증권 페이지 구조가 바뀌었을 수 있습니다. {_PARSE_FAIL_NEXT}",
             _kr_meta(kind="bars", code=code, data_completeness=rmeta.NONE,
                      warnings=[f"수급 표 파싱 실패(구조 변경 의심): {e}"]),
         )
@@ -1996,7 +2002,7 @@ async def get_financial(code: str) -> str:
             f"{data.get('name', code)}({code})의 재무 표를 읽지 못했습니다 "
             f"(재무 자료가 없는 것이 아니라 **파싱 실패**입니다).\n"
             f"네이버 증권 페이지 구조가 바뀌었을 수 있습니다. "
-            f"StockLens 업데이트를 확인해 주세요."
+            f"{_PARSE_FAIL_NEXT}"
         )
 
     periods = data.get("_periods") or {}

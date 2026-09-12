@@ -139,7 +139,7 @@ def _format_notice(latest: str, current: str, notes: str, test_mode: bool = Fals
             f"현재 설치: v{current} / PyPI 최신: v{latest}\n"
             f"개발 모드 강제 표시. 실제 릴리즈 시 아래와 같은 형태로 노출됩니다.\n\n"
             f"새 버전: v{latest}\n"
-            f"업데이트: `uv tool upgrade stocklens-mcp`\n"
+            f"업데이트: LeetKit Manager를 열고 StockLens 카드의 [업데이트]를 눌러주세요.\n"
             f"주요 변경:\n{notes_text}"
         )
 
@@ -150,7 +150,7 @@ def _format_notice(latest: str, current: str, notes: str, test_mode: bool = Fals
         f"\n\n---\n"
         f"ℹ️ StockLens 업데이트 정보\n"
         f"새 버전: v{latest} (현재 v{current})\n"
-        f"업데이트: LeetKit Manager를 열고 [지금 업데이트]를 눌러주세요.\n\n"
+        f"업데이트: LeetKit Manager를 열고 StockLens 카드의 [업데이트]를 눌러주세요.\n\n"
         f"주요 변경:\n{notes_text}"
     )
 
