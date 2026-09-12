@@ -19,8 +19,15 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-# 1.1 이전(1.0.0rc1) 공개 도구 66개. 이 숫자가 늘어나는 것을 계약으로 막는다.
-BASELINE_TOOL_COUNT = 66
+# 공개 도구 총수. 데스크탑 앱은 **도구 단위로** 승인을 받기 때문에, 도구가
+# 하나 늘 때마다 사용자가 누르는 승인 횟수가 하나 는다. 그래서 이 숫자는
+# 저절로 늘지 않게 막고, 늘릴 때는 여기를 같이 고치게 한다.
+#
+# 66  1.0.0rc1
+# 68  1.1 상세 수급 2종 (종류는 도구가 아니라 인자로 가른다)
+# 70  2026-09 개편 신규 자료 2종 (공모주 일정·투자자예탁금).
+#     리포트 갈래는 도구를 만들지 않고 get_reports 의 kind 인자로 넣었다.
+EXPECTED_TOOL_COUNT = 70
 NEW_TOOLS = {"get_detailed_investor_flow", "get_supply_pressure"}
 
 
@@ -38,7 +45,10 @@ class ToolSurfaceTests(unittest.TestCase):
     def test_exactly_two_evidence_tools_are_added(self):
         names = _tool_names()
         self.assertTrue(NEW_TOOLS <= names, NEW_TOOLS - names)
-        self.assertEqual(len(names), BASELINE_TOOL_COUNT + len(NEW_TOOLS))
+        self.assertEqual(
+            len(names), EXPECTED_TOOL_COUNT,
+            "공개 도구 수가 바뀌었습니다. 의도한 추가라면 EXPECTED_TOOL_COUNT 를 "
+            "이력과 함께 고치세요. 도구 하나가 승인 클릭 하나입니다.")
 
     def test_no_per_kind_tool_exists(self):
         # 종류마다 도구를 만들면 승인 클릭이 종류 수만큼 늘어난다.

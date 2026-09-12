@@ -49,6 +49,10 @@ from stock_mcp_server.naver import (
     get_report_detail as naver_get_report_detail,
     REPORT_PAGE_URL as naver_report_page_url,
     get_disclosure_list as naver_get_disclosure_list,
+    get_ipo_schedule as naver_get_ipo_schedule,
+    get_investor_deposit as naver_get_investor_deposit,
+    get_research_by_kind as naver_get_research_by_kind,
+    RESEARCH_KINDS as NAVER_RESEARCH_KINDS,
     _ttm_eps as _ttm_eps_for,
     _latest_confirmed_annual as _latest_fin,
 )
@@ -1032,6 +1036,11 @@ def _classify_us_security(q: dict) -> str:
 # 업종 밸류에이션에서 한 번에 재무를 긁을 최대 종목 수. KRX 업종은 대부분
 # 이 안에 들어온다(최대 반도체 172개). 넘으면 표본 집계임을 명시한다(SL-11).
 _SECTOR_AGG_CAP = 300
+
+# 줄바꿈 한 글자. 이 파일은 CRLF 로 저장돼 있어서, 소스에 직접 적은 줄바꿈
+# 이스케이프가 편집 과정에서 실제 개행으로 풀려 문법 오류가 나는 일이 있었다.
+# 상수 하나로 두면 그 사고가 반복되지 않는다.
+NEWLINE = chr(10)
 
 
 def _period_coverage_of(periods_by_entity: dict[str, str]) -> dict:
@@ -6350,16 +6359,30 @@ async def get_consensus(code: str) -> str:
 @mcp.tool()
 @safe_tool
 @track_metrics("get_reports")
-async def get_reports(code: str, count: int = 5) -> str:
-    """증권사리포트 — 종목의 최근 증권사 분석 리포트 (목표가, 투자의견, 본문 요약, PDF).
+async def get_reports(code: str = "", count: int = 5, kind: str = "") -> str:
+    """증권사리포트 — 종목·시황·산업·경제 등 증권사 분석 리포트.
 
     "리포트", "증권사 분석", "애널리스트 의견", "리서치" 같은 질문에 사용합니다.
 
+    종목 리포트는 `code` 로, 종목을 가리지 않는 갈래는 `kind` 로 부릅니다.
+    "오늘 증권가가 시장을 어떻게 보나" 같은 질문이 후자입니다.
+
     Args:
-        code: 종목코드 6자리 (예: "005930")
+        code: 종목코드 6자리 (예: "005930"). 종목 리포트를 볼 때만.
         count: 가져올 리포트 수 (기본 5, 최대 10)
+        kind: 종목 대신 갈래로 볼 때. market(시황) | invest(투자전략)
+            | economy(경제) | debenture(채권) | industry(산업) | company(종목)
     """
     import re
+    if kind:
+        if code:
+            return ("⚠️ code 와 kind 는 함께 쓸 수 없습니다. 종목 리포트는 code, "
+                    "시장 갈래는 kind 만 넘겨주세요.")
+        return await _render_reports_by_kind(kind=kind, count=count)
+    if not code:
+        usable = ", ".join(f"{k}({v})" for k, v in NAVER_RESEARCH_KINDS.items())
+        return (f"⚠️ code 또는 kind 중 하나는 필요합니다.{NEWLINE}"
+                f"종목 리포트는 code=\"005930\", 시장 갈래는 kind 로 고르세요: {usable}")
     if not re.match(r"^[A-Za-z0-9]{6}$", code):
         return f"⚠️ 종목코드 형식이 올바르지 않습니다: {code}"
 
@@ -9070,6 +9093,158 @@ async def get_supply_pressure(
             "reason": None if served == total else "source_limit",
         })
     return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+
+
+# ---------------------------------------------------------------------------
+# 2026-09 네이버 개편으로 새로 생긴 자료
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+@safe_tool
+@track_metrics("get_ipo_schedule")
+async def get_ipo_schedule() -> str:
+    """공모주일정 — 심사·수요예측·청약·상장 단계별 공모주 목록.
+
+    "이번 주 청약 뭐 있어", "공모주 일정", "상장 예정 종목" 같은 질문에 씁니다.
+
+    단계마다 확정된 것과 아직 아닌 것이 다릅니다. 희망공모가는 심사 단계부터
+    나오지만 **확정공모가와 수요예측 경쟁률은 그 단계를 지나야** 나옵니다.
+    아직 없는 값은 비워서 돌려주며 0 으로 채우지 않습니다.
+    """
+    data = await naver_get_ipo_schedule()
+    stages = data.get("stages") or {}
+    if not stages:
+        return "공모 진행 중인 종목이 없습니다."
+
+    lines = [f"## 공모주 일정 (총 {data.get('total', 0)}건)", ""]
+    for stage, items in stages.items():
+        lines.append(f"### {stage} ({len(items)}건)")
+        lines.append("")
+        lines.append("종목 | 시장 | 희망공모가 | 확정공모가 | 청약일 | 상장일 | 경쟁률 | 주관사")
+        lines.append("---|---|---|---|---|---|---|---")
+        for it in items:
+            hope = ("-" if it["hope_price_low"] is None
+                    else f"{it['hope_price_low']:,}~{it['hope_price_high']:,}원")
+            fixed = "-" if it["fixed_price"] is None else f"{it['fixed_price']:,}원"
+            sub = "-"
+            if it["subscribe_start"]:
+                sub = it["subscribe_start"]
+                if it["subscribe_end"] and it["subscribe_end"] != it["subscribe_start"]:
+                    sub += f"~{it['subscribe_end'][5:]}"
+            comp = ("-" if it["forecast_competition"] is None
+                    else f"{it['forecast_competition']:,.2f}배")
+            lines.append(
+                f"{it['name']} | {it['market']} | {hope} | {fixed} | {sub} | "
+                f"{it['listing_date'] or '-'} | {comp} | {it['underwriters'] or '-'}")
+        lines.append("")
+
+    lines.append("※ `-` 는 **그 단계에 아직 도달하지 않아 정해지지 않은 값**입니다. "
+                 "0 이나 '없음'이 아닙니다.")
+    lines.append("※ 희망공모가는 회사가 제시한 범위이고, 확정공모가는 수요예측 뒤 "
+                 "정해진 값입니다. 둘을 같은 수치로 쓰지 마세요.")
+    lines.append("※ 공모 일정은 정정신고로 바뀝니다. 청약 전 증권신고서를 확인하세요.")
+
+    return _append_result_meta(
+        NEWLINE.join(lines),
+        _kr_meta(kind="filing", data_completeness=rmeta.COMPLETE,
+                 coverage={"returned_count": data.get("total", 0),
+                           "coverage_complete": True, "reason": None}))
+
+
+@mcp.tool()
+@safe_tool
+@track_metrics("get_investor_deposit")
+async def get_investor_deposit(days: int = 20) -> str:
+    """투자자예탁금 — 시장에 대기 중인 돈의 추이 (고객예탁금·신용잔고·펀드).
+
+    종목 수급(`get_flow`)이 "누가 샀나"라면 이건 "살 돈이 얼마나 있나"입니다.
+    "예탁금 늘고 있어?", "신용잔고 추이" 같은 질문에 씁니다.
+
+    Args:
+        days: 조회할 거래일 수 (기본 20, 최대 100)
+    """
+    data = await naver_get_investor_deposit(days=days)
+    rows = data.get("rows") or []
+    if not rows:
+        return "투자자예탁금 자료가 없습니다."
+
+    labels = data.get("labels") or []
+    unit = data.get("unit", "")
+    lines = [f"## 투자자예탁금 ({len(rows)}거래일)", ""]
+    lines.append("날짜 | " + " | ".join(f"{lb}({unit})" for lb in labels))
+    lines.append("---|" + "|".join(["---:"] * len(labels)))
+    for row in rows:
+        cells = []
+        for lb in labels:
+            value = row.get(lb)
+            if value is None:
+                cells.append("데이터 없음")
+                continue
+            diff = row.get(f"{lb}_전일대비")
+            cells.append(f"{value:,}" + (f" ({diff:+,})" if diff is not None else ""))
+        lines.append(f"{row['date']} | " + " | ".join(cells))
+
+    lines.append("")
+    lines.append(f"※ 단위는 **{unit}**입니다. 괄호 안은 전일대비 증감입니다.")
+    lines.append("※ 고객예탁금은 증권계좌에 들어와 있는 현금이고, 신용잔고는 "
+                 "빌려서 산 금액입니다. 성격이 달라 더하거나 빼지 마세요.")
+
+    lines.append("※ 이 자료는 결제일 기준이라 **최근 거래일보다 며칠 뒤처집니다.** "
+                 "표의 날짜를 그대로 읽으세요.")
+
+    enough = len(rows) >= min(days, 100)
+    return _append_result_meta(
+        NEWLINE.join(lines),
+        _kr_meta(kind="snapshot", data_as_of=rows[0]["date"],
+                 data_completeness=rmeta.COMPLETE if enough else rmeta.PARTIAL,
+                 coverage={"returned_count": len(rows),
+                           "coverage_complete": enough,
+                           "reason": None if enough else "source_limit"}))
+
+
+async def _render_reports_by_kind(kind: str, count: int) -> str:
+    """갈래별 리포트 표. `get_reports(kind=...)` 가 쓴다.
+
+    도구를 따로 만들지 않는다 — 데스크탑 앱은 도구 단위로 승인을 받아서,
+    도구를 늘리면 사용자가 누르는 승인 횟수가 그만큼 늘어난다(1.1 대표 결정).
+    같은 '증권사 리포트'이므로 인자로 가른다.
+    """
+    if kind not in NAVER_RESEARCH_KINDS:
+        usable = ", ".join(f"{k}({v})" for k, v in NAVER_RESEARCH_KINDS.items())
+        return f"⚠️ 지원하지 않는 갈래입니다: {kind}{NEWLINE}사용 가능: {usable}"
+
+    data = await naver_get_research_by_kind(kind=kind, count=count)
+    reports = data.get("reports") or []
+    if not reports:
+        return f"{data.get('kind_label', kind)} 리포트가 없습니다."
+
+    has_industry = any(r.get("industry") for r in reports)
+    lines = [f"## {data['kind_label']} 리포트 ({len(reports)}건)", ""]
+    header = "날짜 | 제목 | 증권사"
+    if has_industry:
+        header += " | 업종"
+    lines.append(header + " | 조회수")
+    lines.append("---|---|---" + ("|---" if has_industry else "") + "|---:")
+    for r in reports:
+        row = f"{r['date']} | {r['title']} | {r['broker']}"
+        if has_industry:
+            row += f" | {r.get('industry', '-')}"
+        lines.append(row + f" | {r['views']:,}")
+
+    lines.append("")
+    lines.append('※ 본문은 `get_report_content(nid="...")` 로 읽습니다.')
+    lines.append("※ 리포트는 각 증권사의 의견이며 사실 확인이 끝난 자료가 아닙니다.")
+
+    return _append_result_meta(
+        NEWLINE.join(lines),
+        # 네이버는 갈래별 전체 건수를 알려주지 않는다. 받은 만큼이 전부가
+        # 아니므로 coverage_complete 를 세울 수 없고, 그러면 완전성도
+        # complete 일 수 없다 (메타 계약이 이 조합을 막는다).
+        _kr_meta(kind="filing", data_as_of=reports[0]["date"],
+                 data_completeness=rmeta.PARTIAL,
+                 coverage={"returned_count": len(reports),
+                           "coverage_complete": False, "reason": "source_limit"}))
 
 
 def main():

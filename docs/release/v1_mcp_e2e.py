@@ -57,6 +57,10 @@ CALLS = [
     ("get_intraday_indicators", {"symbol": "005930", "market": "KR",
                                  "interval": "60m", "bars": 60}),
     ("get_detailed_investor_flow", {"code": "005930", "days": 5}),
+    # 2026-09 개편 신규 자료
+    ("get_ipo_schedule", {}),
+    ("get_investor_deposit", {"days": 5}),
+    ("get_reports", {"kind": "market", "count": 3}),
     # 미국
     ("get_us_price", {"ticker": "AAPL"}),
     ("get_us_chart", {"ticker": "AAPL", "period": "1mo", "interval": "1d"}),

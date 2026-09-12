@@ -1918,3 +1918,206 @@ async def get_disclosure_list(code: str, page: int = 1) -> list[dict]:
         })
 
     return results
+
+
+# ---------------------------------------------------------------------------
+# 2026-09 개편으로 새로 생긴 자료
+#
+# 구 화면에는 없던 것들이다. 개편 대응을 하면서 새 화면이 쓰는 API 를 훑다가
+# 찾았고, 값을 직접 확인한 뒤 옮겼다. 단위·라벨은 추측하지 않고 네이버 화면이
+# 쓰는 말을 그대로 쓴다.
+# ---------------------------------------------------------------------------
+
+IPO_URL = f"{STOCK_API}/domestic/market/ipo/progress"
+DEPOSIT_URL = f"{STOCK_API}/domestic/market/trendDeposit"
+RESEARCH_LATEST_URL = f"{STOCK_API}/stockSecurity/researches/v2/latestResearch"
+
+# 공모 단계. 네이버가 목록을 단계별로 나눠 주고, 각 목록 안의 ipoStatus 가
+# 더 세분화된 상태를 말한다(예: 심사 단계 안에 '예비심사청구서제출',
+# '예비심사청구승인', '증권신고서제출'). 단계 이름은 우리가 짓지 않고
+# 화면이 쓰는 말을 따른다.
+IPO_STAGES: dict[str, str] = {
+    "examinationList": "심사",
+    "demandForecastingList": "수요예측",
+    "forecastingCompleteList": "수요예측완료",
+    "subscriptionList": "청약",
+    "subscriptionCompleteList": "청약완료",
+    "listingList": "상장예정",
+}
+
+# 예탁금 항목 → 네이버 화면 표기. 값의 단위는 **억원**이다
+# (차트 툴팁이 `값.toLocaleString() + "억원"` 으로 찍는다, 2026-09 실측).
+DEPOSIT_FIELDS: tuple[tuple[str, str], ...] = (
+    ("customerDeposit", "고객예탁금"),
+    ("creditLoan", "신용잔고"),
+    ("beneficiaryCertificateStock", "주식형펀드"),
+    ("beneficiaryCertificateBond", "채권형펀드"),
+    ("beneficiaryCertificateMixing", "혼합형펀드"),
+)
+DEPOSIT_UNIT = "억원"
+
+# 리포트 갈래 → 사람이 읽는 이름. 종목(company)만 쓰던 것을 여섯 갈래로 넓힌다.
+RESEARCH_KINDS: dict[str, str] = {
+    "company": "종목",
+    "industry": "산업",
+    "market": "시황",
+    "invest": "투자전략",
+    "economy": "경제",
+    "debenture": "채권",
+}
+
+
+def _ipo_date(value) -> str | None:
+    """'2026-09-15' 그대로. 빈 값은 None (0 이나 '-' 로 채우지 않는다)."""
+    text = str(value or "").strip()
+    return text or None
+
+
+@cached(ttl_market=1800, ttl_closed=7200)  # 공모 일정은 하루 단위로 움직인다
+async def get_ipo_schedule() -> dict:
+    """공모주 일정을 단계별로 가져옵니다.
+
+    Returns:
+        {"stages": {단계명: [{code, name, market, industry, status, ...}]},
+         "total": 건수}
+
+    희망가·확정가·경쟁률은 그 단계에 도달하지 않았으면 None 이다. 0 으로
+    채우지 않는다 - '아직 안 정해졌다'와 '0원'은 다른 말이다.
+    """
+    payload = await _api_json(IPO_URL, what="공모주 일정")
+    if not isinstance(payload, dict):
+        raise NaverParseError("공모주 일정: 응답이 dict 가 아닙니다 (구조 변경 가능성).")
+
+    stages: dict[str, list[dict]] = {}
+    total = 0
+    for key, stage_name in IPO_STAGES.items():
+        rows = payload.get(key)
+        if not isinstance(rows, list):
+            continue
+        items = []
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            items.append({
+                "ipo_code": row.get("ipoCode"),
+                "name": row.get("compName"),
+                "market": row.get("marketType"),
+                "industry": row.get("compUpjong"),
+                "status": row.get("ipoStatus"),
+                # 수요예측 → 청약 → 배정/환불 → 상장 순서로 날짜가 붙는다
+                "forecast_start": _ipo_date(row.get("dfStartDate")),
+                "forecast_end": _ipo_date(row.get("dfEndDate")),
+                "subscribe_start": _ipo_date(row.get("poStartDate")),
+                "subscribe_end": _ipo_date(row.get("poEndDate")),
+                "alloc_date": _ipo_date(row.get("allocDate")),
+                "refund_date": _ipo_date(row.get("refundDate")),
+                "listing_date": _ipo_date(row.get("lcalDate")),
+                # 가격은 원 단위. 희망가는 범위, 확정가는 단일값이다.
+                "hope_price_low": _num_int(row.get("hopePubStart")),
+                "hope_price_high": _num_int(row.get("hopePubEnd")),
+                "fixed_price": _num_int(row.get("fixPubPrice")),
+                "shares": _num_int(row.get("poExptShares")),
+                # 수요예측 경쟁률(배). 예측 전이면 None.
+                "forecast_competition": _num(row.get("fnlCmptRatio")),
+                "underwriters": row.get("orgNm"),
+            })
+        if items:
+            stages[stage_name] = items
+            total += len(items)
+    return {"stages": stages, "total": total}
+
+
+@cached(ttl_market=1800, ttl_closed=7200)  # 하루 한 번 갱신되는 자료다
+async def get_investor_deposit(days: int = 20) -> dict:
+    """투자자예탁금 추이를 가져옵니다.
+
+    시장 전체에 들어와 있는 돈이다. 종목 수급(누가 샀나)과 달리 "살 돈이
+    얼마나 대기 중인가"를 본다.
+
+    Args:
+        days: 조회할 거래일 수 (최대 100)
+
+    Returns:
+        {"unit": "억원", "rows": [{date, 항목별 값과 전일대비}], "labels": {...}}
+
+    값의 단위는 **억원**이다. 네이버 화면이 그렇게 찍는다(2026-09 실측).
+    단위를 떼고 숫자만 옮기지 말 것.
+    """
+    days = max(1, min(days, 100))
+    payload = await _api_json(
+        DEPOSIT_URL, params={"size": days}, what="투자자예탁금")
+    rows_raw = _api_list(payload, what="투자자예탁금", key="content")
+
+    rows = []
+    for row in rows_raw:
+        if not isinstance(row, dict):
+            continue
+        bizdate = str(row.get("bizdate") or "")
+        if len(bizdate) < 8 or not bizdate[:8].isdigit():
+            continue
+        item: dict = {
+            "date": f"{bizdate[:4]}-{bizdate[4:6]}-{bizdate[6:8]}"}
+        for field, label in DEPOSIT_FIELDS:
+            value = _num_int(row.get(field))
+            if value is None:
+                continue        # 결측은 0 으로 채우지 않는다
+            item[label] = value
+            # 전일대비는 부호가 실려 온다('-3287'). 절댓값 필드는 쓰지 않는다.
+            diff = _num_int(row.get(f"{field}Diff"))
+            if diff is not None:
+                item[f"{label}_전일대비"] = diff
+        rows.append(item)
+
+    return {
+        "unit": DEPOSIT_UNIT,
+        "labels": [label for _, label in DEPOSIT_FIELDS],
+        "rows": rows[:days],
+    }
+
+
+@cached(ttl_market=600, ttl_closed=3600)
+async def get_research_by_kind(kind: str = "company", count: int = 5) -> dict:
+    """갈래별 최신 증권사 리포트.
+
+    기존 `get_reports` 는 **종목** 리포트만 본다. 이 함수는 시황·투자전략·
+    경제·채권·산업까지 여섯 갈래를 다룬다. 종목을 안 가리는 질문
+    ("오늘 증권가가 시장을 어떻게 보나")에 답하려면 이쪽이 필요하다.
+
+    Args:
+        kind: RESEARCH_KINDS 의 키 (company/industry/market/invest/economy/debenture)
+        count: 갈래당 건수 (1~20)
+
+    Returns:
+        {"kind": 키, "kind_label": 한글 이름, "reports": [...]}
+    """
+    if kind not in RESEARCH_KINDS:
+        raise ValueError(
+            f"지원하지 않는 리포트 갈래: {kind!r} "
+            f"(지원: {', '.join(RESEARCH_KINDS)})")
+    count = max(1, min(count, 20))
+    payload = await _api_json(
+        RESEARCH_LATEST_URL, params={"size": count},
+        what=f"{RESEARCH_KINDS[kind]} 리포트")
+    if not isinstance(payload, dict):
+        raise NaverParseError("리포트 갈래: 응답이 dict 가 아닙니다 (구조 변경 가능성).")
+    rows = payload.get(kind)
+    if not isinstance(rows, list):
+        raise NaverParseError(
+            f"리포트 갈래: 응답에 '{kind}' 가 없습니다 (네이버 구조 변경 가능성).")
+
+    reports = []
+    for row in rows[:count]:
+        if not isinstance(row, dict):
+            continue
+        reports.append({
+            "nid": str(row.get("nid") or ""),
+            "title": row.get("title") or "",
+            "broker": row.get("brokerName") or "",
+            "date": row.get("writeDate") or "",
+            "views": _num_int(row.get("readCount"), default=0),
+            # 산업 리포트에만 붙는다. 없으면 키 자체를 만들지 않는다.
+            **({"industry": row["industryKoreanName"]}
+               if row.get("industryKoreanName") else {}),
+            **({"analyst": row["analystName"]} if row.get("analystName") else {}),
+        })
+    return {"kind": kind, "kind_label": RESEARCH_KINDS[kind], "reports": reports}

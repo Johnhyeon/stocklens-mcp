@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""1.0 전 기능 점검 — MCP 도구 68개를 하나씩 실제로 호출한다.
+"""출시 전 기능 점검 — MCP 도구를 하나씩 실제로 호출한다.
 
 단위 테스트는 응답을 흉내 내므로 원천이 사라진 것을 못 잡는다. 2026-09 네이버
 개편 때 테스트가 전부 초록인 채로 국내 도구가 전멸했던 이유가 그것이다.
@@ -101,6 +101,11 @@ def build_calls(ctx: dict) -> list[tuple[str, dict]]:
         ("get_etf_info", {"code": "069500"}),
         ("watchlist", {"action": "list"}),
         ("get_metrics_summary", {"days": 7}),
+        # ── 2026-09 개편 신규 자료 ──────────────────────
+        ("get_ipo_schedule", {}),
+        ("get_investor_deposit", {"days": 5}),
+        ("get_reports", {"kind": "market", "count": 3}),
+        ("get_reports", {"kind": "industry", "count": 3}),
         # ── 1.0 분봉 (증권사 연결 구간) ─────────────────
         ("get_intraday_chart", {"symbol": kr, "market": "KR", "interval": "5m",
                                 "row_limit": 20}),
