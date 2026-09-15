@@ -10,6 +10,7 @@ from datetime import datetime, time
 from decimal import Decimal, InvalidOperation
 from zoneinfo import ZoneInfo
 
+from stock_mcp_server.market_clock import KRX_AFTER_MARKET_START
 from stock_mcp_server.naver import get_ohlcv
 from stock_mcp_server.market_data._bars import sort_and_dedupe
 from stock_mcp_server.market_data.models import (
@@ -105,6 +106,13 @@ class NaverBarProvider:
             bars.append(bar)
         if dropped:
             warnings.append(f"해석할 수 없는 행 {dropped}개를 제외했습니다.")
+        # 2026-09-14 부터 네이버 일봉 종가는 20:00 애프터마켓 마지막 체결가다. 봉 모델의
+        # session 은 regular/pre/after 중 하나만 받으므로 값은 그대로 두고 경고로 알린다.
+        mixed = [b for b in bars if b.start_at.date() >= KRX_AFTER_MARKET_START]
+        if mixed:
+            warnings.append(
+                f"{KRX_AFTER_MARKET_START.isoformat()} 이후 봉 {len(mixed)}개는 애프터마켓"
+                "(16:00~20:00) 체결을 합친 값입니다. 종가는 정규장 종가가 아닙니다.")
 
         ordered, dedupe_warnings = sort_and_dedupe(bars)
         warnings.extend(dedupe_warnings)

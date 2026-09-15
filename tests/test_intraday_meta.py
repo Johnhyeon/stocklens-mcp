@@ -85,8 +85,8 @@ class ExistingContractGuardTests(unittest.TestCase):
                 coverage={"truncated": True, "coverage_complete": False,
                           "reason": "kis_broke_lol"})
 
-    def test_meta_v_is_3(self):
-        self.assertEqual(self._meta()["meta_v"], 3)
+    def test_meta_v_is_4(self):
+        self.assertEqual(self._meta()["meta_v"], 4)
 
 
 class ServerExtensionUsesContractTests(unittest.TestCase):

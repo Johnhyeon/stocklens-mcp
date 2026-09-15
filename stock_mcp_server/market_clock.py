@@ -92,10 +92,24 @@ class SessionHours:
     regular_open: time
     regular_close: time
     after_close: time | None
+    # 세션 사이에 틈이 있는 시장용. KRX 는 정규장이 15:30 에 끝나고 애프터마켓이
+    # 16:00 에 열린다. None 이면 틈이 없다(미국은 프리 → 정규 → 포스트가 이어진다).
+    pre_close: time | None = None
+    after_open: time | None = None
 
 
+# KRX 애프터마켓(16:00~20:00, 실시간 체결)은 2026-09-14 에 열렸고, 같은 날 시간외
+# 단일가(16:00~18:00)가 없어졌다. 그 전 날짜에는 16:00 이후를 세션으로 보지 않는다.
+KRX_AFTER_MARKET_START = date(2026, 9, 14)
+# KRX 프리마켓(07:00~07:50)은 거래소가 시행을 미뤘다. 시행일이 공지되면 날짜를
+# 넣는다. None 인 동안 한국장에는 프리마켓 상태가 생기지 않는다.
+KRX_PRE_MARKET_START: date | None = None
+
+# 예전에는 08:30 부터를 '장전'으로 불렀다. 그 30분은 동시호가 접수 시간이라 체결이
+# 없다(2026-09-14 네이버 분봉, 80종목 모두 09:00 전 체결 0건). 프리마켓과 이름이
+# 겹치면 없는 세션이 열린 것처럼 읽히므로 세션으로 두지 않는다.
 KRX_HOURS = SessionHours(
-    pre_open=time(8, 30),
+    pre_open=None,
     regular_open=time(9, 0),
     regular_close=time(15, 30),
     after_close=None,
@@ -106,6 +120,31 @@ US_HOURS = SessionHours(
     regular_close=time(16, 0),
     after_close=time(20, 0),
 )
+
+# 세션 이름. status(장 상태 열거값)와 따로 둔다 - status 는 예전 소비자가 읽는 값이라
+# 이름을 바꾸지 않고, 체결이 일어나는 세션은 이 이름으로만 말한다.
+SESSION_PRE_MARKET = "pre_market"
+SESSION_REGULAR = "regular"
+SESSION_AFTER_MARKET = "after_market"
+SESSION_LABELS = {
+    SESSION_PRE_MARKET: "프리마켓",
+    SESSION_REGULAR: "정규장",
+    SESSION_AFTER_MARKET: "애프터마켓",
+}
+
+
+def krx_hours(day: date) -> SessionHours:
+    """그 날짜의 KRX 세션 시각. 애프터마켓·프리마켓은 시행일부터만 붙는다."""
+    has_after = day >= KRX_AFTER_MARKET_START
+    has_pre = KRX_PRE_MARKET_START is not None and day >= KRX_PRE_MARKET_START
+    return SessionHours(
+        pre_open=time(7, 0) if has_pre else None,
+        regular_open=KRX_HOURS.regular_open,
+        regular_close=KRX_HOURS.regular_close,
+        after_close=time(20, 0) if has_after else None,
+        pre_close=time(7, 50) if has_pre else None,
+        after_open=time(16, 0) if has_after else None,
+    )
 
 
 KRX_YEAR_SPECIFIC_HOLIDAYS = {
@@ -223,9 +262,63 @@ class MarketCalendar:
         return now.astimezone(self.tz) >= self.close_datetime(last)
 
 
-def krx_calendar() -> MarketCalendar:
-    """KRX 거래일 캘린더. 봉 마감 판정에 쓴다."""
-    return MarketCalendar(tz=KST, hours=KRX_HOURS, holiday_name_func=_krx_holiday_name)
+def krx_calendar(include_extended: bool = False) -> MarketCalendar:
+    """KRX 거래일 캘린더. 봉 마감 판정에 쓴다.
+
+    include_extended 는 애프터마켓 체결까지 담는 데이터용이다. 네이버 일봉은
+    2026-09-14 부터 20:00 애프터마켓 마지막 체결가를 종가로 싣는다(그 날 80종목
+    전부 일봉 종가 = 19:59 분봉 가격). 그런 봉은 15:30 이 아니라 20:00 에 끝난다.
+    """
+    return MarketCalendar(
+        tz=KST,
+        hours=KRX_HOURS,
+        holiday_name_func=_krx_holiday_name,
+        hours_func=krx_hours,
+        use_extended_close=include_extended,
+    )
+
+
+# 정규장 마감 뒤 종가 단일가 결과가 시세에 반영되기까지의 여유. 이 사이에 받은 값을
+# '장마감' TTL 로 오래 붙잡으면 마감 직전 가격이 종가 자리에 남는다.
+KRX_CLOSE_SETTLE = timedelta(minutes=10)
+
+
+def krx_quotes_live(now: datetime | None = None) -> bool:
+    """KRX 시세가 지금 바뀌는 중인가. 세션 중이거나 정규장 마감 직후 정리 시간이면 True."""
+    local = _coerce_datetime(now).astimezone(KST)
+    day = local.date()
+    if day.weekday() >= 5 or _krx_holiday_name(day) is not None:
+        return False
+    hours = krx_hours(day)
+    if _current_session(local.time(), hours) is not None:
+        return True
+    close = datetime.combine(day, hours.regular_close, tzinfo=KST)
+    return close <= local < close + KRX_CLOSE_SETTLE
+
+
+def krx_seconds_to_next_session(now: datetime | None = None) -> float | None:
+    """오늘 안에 다음 KRX 세션이 열리기까지 남은 초. 오늘 더 열릴 세션이 없으면 None."""
+    local = _coerce_datetime(now).astimezone(KST)
+    day = local.date()
+    if day.weekday() >= 5 or _krx_holiday_name(day) is not None:
+        return None
+    nxt = _next_session_today(local, _session_list(krx_hours(day)))
+    if nxt is None:
+        return None
+    return (datetime.fromisoformat(nxt["opens_at_local"]) - local).total_seconds()
+
+
+def krx_session_now(now: datetime | None = None) -> str | None:
+    """지금 KRX 에서 체결이 일어나는 세션 이름. 휴장이거나 세션 밖이면 None.
+
+    get_market_clock 은 서머타임 예보까지 계산해서 무겁다. 캐시 TTL 처럼 호출마다
+    묻는 자리는 이걸 쓴다.
+    """
+    local = _coerce_datetime(now).astimezone(KST)
+    day = local.date()
+    if day.weekday() >= 5 or _krx_holiday_name(day) is not None:
+        return None
+    return _current_session(local.time(), krx_hours(day))
 
 
 def us_calendar(include_extended: bool = False) -> MarketCalendar:
@@ -253,7 +346,7 @@ def get_market_clock(now: datetime | None = None) -> dict:
         market="KRX",
         timezone="Asia/Seoul",
         now_local=now_kst,
-        hours=KRX_HOURS,
+        hours=krx_hours(now_kst.date()),
         holiday_name_func=_krx_holiday_name,
     )
     us = _build_market_state(
@@ -359,12 +452,27 @@ def dst_warnings(clock: dict) -> list[str]:
     return msgs
 
 
-def _market_lines(label: str, state: dict, viewer: dict) -> list[str]:
-    out = [f"- {label}: {_status_label(state['status'])} ({state['reason']})"]
+def _market_lines(label: str, key: str, state: dict, viewer: dict) -> list[str]:
+    out = [f"- {label}: {_status_label(state['status'], key)} ({state['reason']})"]
+    sessions = state.get("sessions") or []
+    if sessions:
+        parts = [f"{SESSION_LABELS[s['name']]} {s['open']}~{s['close']}" for s in sessions]
+        if key == "krx" and not any(s["name"] == SESSION_PRE_MARKET for s in sessions):
+            parts.append("프리마켓 미시행")
+        out.append(f"  세션(현지 시장시각): {' · '.join(parts)}")
+    current = state.get("current_session")
     if state["is_open"] and state.get("closes_in"):
-        out.append(f"  마감까지 {state['closes_in']} 남음")
-    elif state.get("opens_in"):
-        out.append(f"  개장까지 {state['opens_in']} 남음")
+        out.append(f"  정규장 마감까지 {state['closes_in']} 남음")
+    elif current and state.get("session_closes_in"):
+        out.append(
+            f"  {SESSION_LABELS[current]} 진행 중 - 종료까지 {state['session_closes_in']} 남음"
+            f" (정규장은 {state['regular_close']}에 마감, 정규장 수치와 섞지 마세요)"
+        )
+    nxt = state.get("next_session")
+    if not state["is_open"] and nxt and nxt["name"] != SESSION_REGULAR:
+        out.append(f"  {SESSION_LABELS[nxt['name']]} 개장까지 {nxt['opens_in']} 남음")
+    if not state["is_open"] and state.get("opens_in"):
+        out.append(f"  정규장 개장까지 {state['opens_in']} 남음")
     line = f"  최근 거래일: {state['last_trading_day']} / 다음 개장: {state['next_open_local']} (현지 시장시각)"
     out.append(line)
     # 사용자 타임존이 시장과 다를 때만 환산을 덧붙인다. 같은 값을 두 번 쓰면 노이즈다.
@@ -385,8 +493,8 @@ def format_market_clock(clock: dict) -> str:
             f"- 사용자 현지: {viewer['now']} ({viewer['tz'] or viewer['utc_offset']})"
             " — 아래 '개장까지 남은 시간'은 어디서 보든 동일합니다"
         )
-    lines += _market_lines("한국장", krx, viewer)
-    lines += _market_lines("미국장", us, viewer)
+    lines += _market_lines("한국장", "krx", krx, viewer)
+    lines += _market_lines("미국장", "us", us, viewer)
     for msg in dst_warnings(clock):
         lines.append(f"- ⏰ {msg}")
     lines += [
@@ -420,12 +528,27 @@ def _build_market_state(
     else:
         next_trading_day = _shift_trading_day(current_date, 1, holiday_name_func)
 
+    # is_open 은 **정규장**만 뜻한다. 시세 도구가 이 값으로 '장중 스냅샷/확정 종가'를
+    # 가르므로 애프터마켓까지 넓히면 정규장 판정이 흔들린다. 시간외는 아래 세션 필드로.
     is_open = status in {"regular"}
     tz = now_local.tzinfo
     next_open_dt = datetime.combine(next_trading_day, hours.regular_open, tzinfo=tz)
     close_dt = datetime.combine(current_date, hours.regular_close, tzinfo=tz)
     seconds_to_open = None if is_open else max(0.0, (next_open_dt - now_local).total_seconds())
     seconds_to_close = max(0.0, (close_dt - now_local).total_seconds()) if is_open else None
+
+    sessions = _session_list(hours)
+    current = _current_session(now_local.time(), hours) if is_trading_day else None
+    session_end = None
+    if current == SESSION_PRE_MARKET:
+        session_end = hours.pre_close or hours.regular_open
+    elif current == SESSION_AFTER_MARKET:
+        session_end = hours.after_close
+    seconds_to_session_end = (
+        max(0.0, (datetime.combine(current_date, session_end, tzinfo=tz) - now_local).total_seconds())
+        if session_end else None
+    )
+    next_session = _next_session_today(now_local, sessions) if is_trading_day else None
 
     # 사용자 현지 시각으로 환산한 개장 시점. 날짜가 하루 밀리는 경우가 흔하다.
     viewer = viewer_now()
@@ -449,7 +572,56 @@ def _build_market_state(
         "next_open_viewer": next_open_viewer.isoformat(timespec="minutes"),
         "opens_in": _fmt_duration(seconds_to_open),
         "closes_in": _fmt_duration(seconds_to_close),
+        # 세션 단위 정보. 그 날 체결이 일어나는 세션 목록과, 지금 어느 세션인지.
+        "sessions": sessions,
+        "current_session": current,
+        "extended_session_open": current in (SESSION_PRE_MARKET, SESSION_AFTER_MARKET),
+        "session_closes_in": _fmt_duration(seconds_to_session_end),
+        "next_session": next_session,
     }
+
+
+def _hhmm(value: time) -> str:
+    return value.strftime("%H:%M")
+
+
+def _session_list(hours: SessionHours) -> list[dict]:
+    out = []
+    if hours.pre_open:
+        out.append({"name": SESSION_PRE_MARKET, "open": _hhmm(hours.pre_open),
+                    "close": _hhmm(hours.pre_close or hours.regular_open)})
+    out.append({"name": SESSION_REGULAR, "open": _hhmm(hours.regular_open),
+                "close": _hhmm(hours.regular_close)})
+    if hours.after_close:
+        out.append({"name": SESSION_AFTER_MARKET,
+                    "open": _hhmm(hours.after_open or hours.regular_close),
+                    "close": _hhmm(hours.after_close)})
+    return out
+
+
+def _current_session(local_time: time, hours: SessionHours) -> str | None:
+    """거래일의 그 시각에 체결이 일어나는 세션. 세션 사이 틈이면 None."""
+    if hours.pre_open and hours.pre_open <= local_time < (hours.pre_close or hours.regular_open):
+        return SESSION_PRE_MARKET
+    if hours.regular_open <= local_time < hours.regular_close:
+        return SESSION_REGULAR
+    if hours.after_close and (hours.after_open or hours.regular_close) <= local_time < hours.after_close:
+        return SESSION_AFTER_MARKET
+    return None
+
+
+def _next_session_today(now_local: datetime, sessions: list[dict]) -> dict | None:
+    """오늘 아직 열리지 않은 첫 세션. 15:40 에 조회하면 16:00 애프터마켓이 나온다."""
+    for s in sessions:
+        open_dt = datetime.combine(now_local.date(), time.fromisoformat(s["open"]),
+                                   tzinfo=now_local.tzinfo)
+        if open_dt > now_local:
+            return {
+                "name": s["name"],
+                "opens_at_local": open_dt.isoformat(timespec="minutes"),
+                "opens_in": _fmt_duration((open_dt - now_local).total_seconds()),
+            }
+    return None
 
 
 def _session_status(local_time: time, hours: SessionHours, is_weekend: bool, holiday_name: str | None) -> tuple[str, str]:
@@ -457,14 +629,23 @@ def _session_status(local_time: time, hours: SessionHours, is_weekend: bool, hol
         return "closed_weekend", "Weekend"
     if holiday_name:
         return "closed_holiday", holiday_name
-    if hours.pre_open and hours.pre_open <= local_time < hours.regular_open:
+    session = _current_session(local_time, hours)
+    if session == SESSION_PRE_MARKET:
         return "pre_market", "Before regular session"
-    if local_time < hours.regular_open:
-        return "closed_before_open", "Before pre-market or opening session"
-    if hours.regular_open <= local_time < hours.regular_close:
+    if session == SESSION_REGULAR:
         return "regular", "Regular session"
-    if hours.after_close and hours.regular_close <= local_time < hours.after_close:
+    if session == SESSION_AFTER_MARKET:
         return "after_hours", "After-hours session"
+    if local_time < hours.regular_open:
+        if hours.pre_open and local_time >= hours.pre_open:
+            return "closed_before_open", "Pre-market ended, before regular session"
+        if hours.pre_open:
+            return "closed_before_open", "Before pre-market or opening session"
+        return "closed_before_open", "Before regular session"
+    if hours.after_close and local_time < (hours.after_open or hours.regular_close):
+        return "closed_after_hours", "Regular session ended, after-hours session opens later"
+    if hours.after_close:
+        return "closed_after_hours", "Regular and after-hours sessions ended"
     return "closed_after_hours", "Regular session ended"
 
 
@@ -582,7 +763,9 @@ def _good_friday(year: int) -> date:
     return date(year, month, day) - timedelta(days=2)
 
 
-def _status_label(status: str) -> str:
+def _status_label(status: str, market: str | None = None) -> str:
+    if market == "krx" and status in ("pre_market", "after_hours"):
+        return SESSION_LABELS[SESSION_PRE_MARKET if status == "pre_market" else SESSION_AFTER_MARKET]
     return {
         "closed_weekend": "주말 휴장",
         "closed_holiday": "휴장",

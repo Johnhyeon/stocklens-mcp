@@ -212,6 +212,40 @@ async def get_ohlcv(
     return rows
 
 
+# 네이버 분봉 API. fchart 일봉과 달리 세션 경계를 분 단위로 볼 수 있다. 약 1주치만
+# 남는다(2026-09-15 실측: 한 달 범위를 요청해도 2026-09-07 부터만 온다).
+MINUTE_CHART_URL = "https://api.stock.naver.com/chart/domestic/item/{code}/minute"
+REGULAR_CLOSE_UNAVAILABLE = "no_1530_bar"
+
+
+@cached(ttl_market=300, ttl_closed=3600)
+async def get_regular_session_close(code: str, day: str) -> int | None:
+    """그 거래일의 **정규장 종가**(15:30 종가 단일가 체결가). 확인할 수 없으면 None.
+
+    2026-09-14 부터 네이버 일봉 종가는 20:00 애프터마켓 마지막 체결가다. 정규장
+    종가는 분봉의 15:30 봉에서만 읽힌다. 그 날 80종목을 대조하니 15:30 봉 가격이
+    다음 날 기준가와 79개 같았고, 나머지 1개는 15:30 봉 자체가 없었다(종가 단일가
+    무체결). 봉이 없으면 직전 체결가로 메우지 않고 None 을 돌려준다.
+
+    Args:
+        code: 종목코드 6자리
+        day: "YYYY-MM-DD" 또는 "YYYYMMDD"
+    """
+    digits = "".join(ch for ch in str(day) if ch.isdigit())[:8]
+    if len(digits) != 8:
+        return None
+    what = f"분봉({code} {digits})"
+    payload = await _api_json(
+        MINUTE_CHART_URL.format(code=code),
+        params={"startDateTime": f"{digits}1520", "endDateTime": f"{digits}1530"},
+        what=what,
+    )
+    for row in _api_list(payload, what=what):
+        if isinstance(row, dict) and str(row.get("localDateTime") or "") == f"{digits}153000":
+            return _num_int(row.get("currentPrice"))
+    return None
+
+
 # 파싱 결과에 '무엇을 못 읽었나'를 실어 보내는 키. 소비자는 무시해도 되고,
 # 메타 봉투를 만드는 쪽이 읽어서 data_completeness / warnings 로 바꾼다.
 PARSE_MISS_KEY = "_parse_miss"

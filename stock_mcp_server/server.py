@@ -26,6 +26,7 @@ from stock_mcp_server.naver import (
     NaverParseError,
     PARSE_MISS_KEY,
     get_ohlcv,
+    get_regular_session_close,
     get_current_price,
     get_investor_flow,
     get_financials,
@@ -82,6 +83,8 @@ from stock_mcp_server._indicators import (
 )
 from stock_mcp_server._chart_html import render_chart_html, render_multi_chart_html
 from stock_mcp_server.market_clock import (  # noqa: E402
+    KRX_AFTER_MARKET_START,
+    SESSION_AFTER_MARKET,
     format_market_clock,
     get_market_clock as build_market_clock,
     krx_calendar,
@@ -108,6 +111,7 @@ from stock_mcp_server._update_check import get_update_notice
 import asyncio
 import json
 import datetime as _dt
+import calendar as _calendar
 import pandas as pd
 
 
@@ -288,6 +292,14 @@ payload 안 `_meta` 키로) 붙인다. **날짜를 말하기 전에 반드시 �
     신고가 판정은 **마감 시 달라질 수 있다.** 확정 신호로 단정하지 말고 "장중 기준
     잠정"임을 반드시 함께 말하라
   - `filing` 공시 기반 / `aggregate` 수집 구간 집계
+- `price_session`은 **숫자가 만들어진 거래 세션**이다(`session`은 조회 시점의 장 상태).
+  KRX는 2026-09-14부터 16:00~20:00 애프터마켓이 열리고, 네이버 일봉 종가는 그 날부터
+  20:00 애프터마켓 마지막 체결가다.
+  - `regular` 정규장 체결만 — "종가"라 해도 된다
+  - `after_market` / `regular_and_after` — **정규장 종가·정규장 등락률이라 부르지 마라.**
+    "20시 마감가(애프터마켓 포함)"처럼 세션을 붙여 말한다. `regular_close_check`가 있으면
+    정규장 종가는 그 값이다
+  - 16:00~20:00 조회에서 세션을 말하지 않고 "오늘 종가"라고 하지 마라
 - `data_completeness`가 `partial`/`none`이면 없는 부분을 추정으로 메우지 마라.
 - `warnings`는 요약에 반영하라. 비어 있지 않은데 무시하면 안 된다.
 - `entity`의 `stock_code`·`corp_code`·`name`은 **다음 도구 호출에 그대로 재사용**하라
@@ -449,6 +461,9 @@ async def get_market_clock() -> str:
 
     종목 분석 전 데이터 기준시각을 확인할 때 사용합니다. KRX와 NYSE/NASDAQ의
     주말, 정규 휴장일, 장전/정규장/시간외/장마감 상태를 함께 반환합니다.
+    한국장은 2026-09-14부터 애프터마켓(16:00~20:00)이 세션으로 잡히고, 프리마켓은
+    시행 전이라 나오지 않습니다. `current_session`·`sessions`·`next_session`이
+    지금 체결되는 세션과 오늘 남은 세션을 알려줍니다(`is_open`은 정규장만 뜻함).
     """
     return format_market_clock(build_market_clock())
 
@@ -680,20 +695,50 @@ async def get_chart(
             f"※ 거래정지 placeholder 등 비정상 봉 {exclusion_info['count']}개 제외"
             f" ({', '.join(b['date'] for b in exclusion_info['bars'][:5])})."
         )
+    extended = _extended_bar_info(data, timeframe)
+    regular_checks: list[dict] = []
+    if extended:
+        if timeframe == "day":
+            regular_checks = await _regular_close_checks(code, data)
+        if regular_checks:
+            lines.append("")
+            lines.append("정규장 종가 대조 (네이버 분봉 15:30 체결가, 최근 약 1주만 제공)")
+            lines.append("날짜|일봉 종가(20:00)|정규장 종가(15:30)|차이")
+            lines.append("---|---|---|---")
+            for chk in regular_checks:
+                regular = chk["regular_close"]
+                if regular is None:
+                    lines.append(f"{chk['date']}|{chk['bar_close']}|확인 불가|-")
+                else:
+                    lines.append(f"{chk['date']}|{chk['bar_close']}|{regular}|"
+                                 f"{chk['bar_close'] - regular:+d}")
+        lines.append("")
+        lines.append(_extended_bar_note(extended, tf_name))
+
     warnings = list(exclusion_warns)
     completeness = rmeta.COMPLETE
     if len(data) < count:
         completeness = rmeta.PARTIAL
         warnings.append(f"요청한 {count}개 중 {len(data)}개만 조회됨(상장일 등으로 이력이 짧을 수 있음).")
+    extra: dict = {}
+    if exclusion_info:
+        extra["bar_exclusions"] = exclusion_info
+    if extended:
+        extra["session_mix"] = extended
+    if regular_checks:
+        extra["regular_close_check"] = regular_checks
     # 기준일은 시장 캘린더 역산이 아니라 **실제 마지막 봉**에서 뽑는다.
+    # 애프터마켓이 섞인 봉은 20:00 에 끝나므로 확장 달력으로 마감을 판정한다.
     meta = _kr_meta(
         kind="bars", code=code, data_as_of=data[-1].get("date"),
         data_completeness=completeness, warnings=warnings,
         bar_state=_bar_state(
-            timeframe=timeframe, rows=data, market_calendar=krx_calendar()
+            timeframe=timeframe, rows=data,
+            market_calendar=krx_calendar(include_extended=True),
         ),
         price_adjustment=price_adjustment_meta(),
-        extra={"bar_exclusions": exclusion_info} if exclusion_info else None,
+        price_session=_price_session_for_bars(extended),
+        extra=extra or None,
     )
     return _append_result_meta("\n".join(lines), meta)
 
@@ -849,15 +894,36 @@ def _deliver_notices(result, notices: list[str]) -> str:
     return out
 
 
-def _kr_market_note(krx: dict | None = None) -> list[str]:
-    """KRX가 지금 닫혀 있으면, 보여주는 값이 실시간이 아니라 최근 종가 기준임을 명시.
+_EXTENDED_PRICE_SESSIONS = (
+    rmeta.PRICE_SESSION_PRE_MARKET,
+    rmeta.PRICE_SESSION_AFTER_MARKET,
+    rmeta.PRICE_SESSION_REGULAR_AND_AFTER,
+)
+
+
+def _kr_market_note(krx: dict | None = None, price_session: str | None = None) -> list[str]:
+    """KRX 정규장이 닫혀 있으면, 보여주는 값이 어느 세션 기준인지 명시.
 
     Naver 소스는 공식적으로 지연을 공지하지 않으므로(US Yahoo와 달리) is_delayed는
-    건드리지 않고, '휴장 중 최근 종가' 사실만 warning으로 남긴다.
+    건드리지 않는다. 2026-09-14 부터는 정규장이 닫혀도 애프터마켓(16:00~20:00)에서
+    체결이 이어지므로 '장마감 = 값이 멈췄다'가 아니다. 세션을 나눠 적는다.
     """
     krx = krx or build_market_clock()["krx"]
     if krx["is_open"]:
         return []
+    close = krx.get("regular_close") or "15:30"
+    if krx.get("current_session") == SESSION_AFTER_MARKET:
+        head = f"KRX 정규장은 {close}에 마감됐고 지금은 애프터마켓(20:00까지)입니다"
+        if price_session in _EXTENDED_PRICE_SESSIONS:
+            return [f"{head} — 애프터마켓 체결이 반영되는 값이라 20:00 전까지 바뀝니다."]
+        if price_session == rmeta.PRICE_SESSION_REGULAR:
+            return [f"{head} — 표시된 값은 정규장 기준이며 애프터마켓 체결은 들어 있지 않습니다."]
+        return [f"{head}."]
+    nxt = krx.get("next_session") or {}
+    if nxt.get("name") == SESSION_AFTER_MARKET:
+        opens = str(nxt.get("opens_at_local") or "")[11:16] or "16:00"
+        return [f"KRX 정규장 마감 — 표시된 값은 최근 거래일({krx['last_trading_day']}) 기준입니다. "
+                f"{opens}에 애프터마켓이 열리면 네이버 시세·일봉이 다시 움직입니다."]
     return [f"KRX 장마감 상태 — 표시된 값은 최근 거래일({krx['last_trading_day']}) 기준입니다."]
 
 
@@ -1108,6 +1174,93 @@ def _bar_state_effects(
     return data_completeness, coverage, warns
 
 
+def _extended_bar_info(rows: list[dict] | None, timeframe: str = "day") -> dict | None:
+    """네이버 일·주·월봉 중 애프터마켓 체결이 합쳐진 봉을 센다. 없으면 None.
+
+    2026-09-14(KRX 애프터마켓 첫날) 네이버 일봉을 같은 날 분봉과 80종목 대조했다.
+    - 종가 = 19:59 애프터마켓 마지막 체결가 80/80 (정규장 15:30 종가와는 다르다)
+    - 시가 = 정규장 시가 80/80, 저가가 애프터마켓에서 찍힌 종목 25, 고가 3
+    - 거래량 = 정규장 + 장후 시간외 + 애프터마켓 합계 70/80
+    그래서 이 봉들의 '종가'는 정규장 종가가 아니다. 원천 값은 그대로 두고 이름표를 단다.
+    """
+    affected: list[str] = []
+    for r in rows or []:
+        day = rmeta.normalize_day(r.get("date")) if isinstance(r, dict) else None
+        if not day:
+            continue
+        # 달력 없이 구간 끝만 센다. 달력을 못 구하는 상황(판정 불가)에서도 이름표는 붙어야 한다.
+        start = _dt.date.fromisoformat(day)
+        if timeframe == "week":
+            end = start + _dt.timedelta(days=6 - start.weekday())
+        elif timeframe == "month":
+            end = start.replace(day=_calendar.monthrange(start.year, start.month)[1])
+        else:
+            end = start
+        if end >= KRX_AFTER_MARKET_START:
+            affected.append(day)
+    if not affected:
+        return None
+    return {
+        "source": "naver_daily_bars",
+        "since": KRX_AFTER_MARKET_START.isoformat(),
+        "bars": len(affected),
+        "first_bar": min(affected),
+        "last_bar": max(affected),
+        "close": "after_market_last_trade",
+        "high_low_volume": "regular_and_after_market",
+    }
+
+
+def _extended_bar_note(info: dict, what: str = "일봉") -> str:
+    return (
+        f"※ {info['since']}부터 네이버 {what}은 애프터마켓(16:00~20:00) 체결을 합친 값입니다"
+        f" (이 표에서 {info['bars']}개, {info['first_bar']}~). 종가 = 20:00 애프터마켓 마지막"
+        " 체결가, 고가·저가·거래량도 애프터마켓 포함. **정규장 종가(15:30)가 아니므로"
+        " '정규장 종가'로 부르지 마세요.**"
+    )
+
+
+def _price_session_for_bars(info) -> str:
+    """네이버 일봉 계열의 price_session. 애프터마켓이 섞인 봉이 하나라도 있으면 합산."""
+    return rmeta.PRICE_SESSION_REGULAR_AND_AFTER if info else rmeta.PRICE_SESSION_REGULAR
+
+
+async def _regular_close_checks(code: str, rows: list[dict], limit: int = 5) -> list[dict]:
+    """애프터마켓이 섞인 최근 일봉 옆에 그 날 정규장 종가(분봉 15:30)를 나란히 둔다.
+
+    값을 바꿔 끼우지 않는다. 시계열 안에서 몇 개만 정규장 종가로 바꾸면 한 표에
+    정의가 다른 종가가 섞이고, 이평·RSI 가 그 경계에서 조용히 틀어진다.
+    네이버 분봉은 약 1주치만 남아 그보다 오래된 날은 '확인 불가'로 둔다.
+    """
+    now = _now_kst()
+    picked: list[tuple[str, int]] = []
+    for r in reversed(rows):
+        day = rmeta.normalize_day(r.get("date"))
+        if not day or _dt.date.fromisoformat(day) < KRX_AFTER_MARKET_START:
+            break
+        # 오늘 봉은 종가 단일가(15:30) 체결이 나온 뒤에만 대조한다.
+        if day == now.date().isoformat() and now.time() < _dt.time(15, 31):
+            continue
+        try:
+            picked.append((day, int(r["close"])))
+        except (KeyError, TypeError, ValueError):
+            continue
+        if len(picked) >= limit:
+            break
+
+    async def one(day: str, bar_close: int) -> dict:
+        try:
+            regular = await get_regular_session_close(code, day)
+            status = "ok" if regular is not None else "no_1530_bar"
+        except Exception:
+            regular, status = None, "lookup_failed"
+        return {"date": day, "bar_close": bar_close, "regular_close": regular,
+                "status": status, "source": "naver_minute_1530"}
+
+    results = await asyncio.gather(*(one(d, c) for d, c in picked))
+    return sorted(results, key=lambda x: x["date"])
+
+
 def _kr_meta(
     *,
     kind: str,
@@ -1121,8 +1274,12 @@ def _kr_meta(
     price_adjustment: dict | None = None,
     extra: dict | None = None,
     warnings: list[str] | None = None,
+    price_session: str | None = None,
 ) -> dict:
     """KRX 도구용 메타. 세션 상태에서 data_basis를 자동 판정한다.
+
+    price_session 은 숫자가 속한 세션이다(regular / after_market / regular_and_after).
+    애프터마켓 중에도 값이 움직이는 원천이면 확정치(last_close)로 적지 않는다.
 
     kind:
       "snapshot"    현재가·랭킹·ETF 시세 — 장중이면 realtime, 아니면 last_close
@@ -1133,16 +1290,20 @@ def _kr_meta(
     공시 발표일), 없을 때만 시장 캘린더의 최근 거래일로 대체한다.
     """
     krx = build_market_clock()["krx"]
+    extended_live = (
+        krx.get("current_session") == SESSION_AFTER_MARKET
+        and price_session in _EXTENDED_PRICE_SESSIONS
+    )
     if kind == "filing":
         basis = rmeta.BASIS_FILING
-    elif krx.get("is_open"):
+    elif krx.get("is_open") or extended_live:
         basis = rmeta.BASIS_IN_PROGRESS_BAR if kind == "bars" else rmeta.BASIS_REALTIME
     else:
         basis = rmeta.BASIS_LAST_CLOSE
 
     warns = list(warnings or [])
     if kind != "filing":
-        warns = _kr_market_note(krx) + warns
+        warns = _kr_market_note(krx, price_session) + warns
 
     data_completeness, coverage, warns = _bar_state_effects(
         bar_state, data_completeness, coverage, warns
@@ -1155,6 +1316,7 @@ def _kr_meta(
         data_period=data_period,
         market="KR",
         session=krx.get("status"),
+        price_session=price_session,
         data_completeness=data_completeness,
         coverage=coverage,
         entity_info=rmeta.entity(stock_code=code, name=name),
@@ -1330,12 +1492,21 @@ async def get_flow(code: str, days: int = 20) -> str:
         "[참고] 종가·거래량은 편의 제공이며, **가격 차트·시계열 분석 소스로 사용 금지**. "
         "차트는 get_chart, 현재가는 get_price 사용."
     )
+    flow_extended = _extended_bar_info(data, "day")
+    if flow_extended:
+        lines.append(
+            f"※ [참고] 종가: {flow_extended['since']}부터는 20:00 애프터마켓 마지막 체결가입니다"
+            f" (이 표에서 {flow_extended['bars']}개 행). 정규장 종가(15:30)가 아닙니다."
+            " 순매매 수량에 애프터마켓 체결이 들어가는지는 네이버가 밝히지 않습니다."
+        )
 
     # 기준일은 표의 최신 행에서 — 캘린더 역산보다 정확하다(거래정지 등).
     return _append_result_meta(
         "\n".join(lines),
         _kr_meta(kind="bars", code=code, data_as_of=data[0].get("date"),
-                 data_completeness=rmeta.COMPLETE if len(data) >= min(days, 5) else rmeta.PARTIAL),
+                 data_completeness=rmeta.COMPLETE if len(data) >= min(days, 5) else rmeta.PARTIAL,
+                 price_session=_price_session_for_bars(flow_extended),
+                 extra={"session_mix": flow_extended} if flow_extended else None),
     )
 
 
@@ -1404,8 +1575,18 @@ async def get_event_reaction(
     )
     # 본문의 검증 상태를 같은 근거로 meta v3 봉투에 싣는다(SL-08).
     fields = reaction_meta_fields(reaction)
+    reaction_extended = _extended_bar_info(
+        [{"date": p.get("date")} for p in (reaction.get("points") or {}).values()
+         if isinstance(p, dict) and p.get("status") == "available"]
+    )
+    text = format_event_reaction(reaction)
+    extra = {"event_window": fields["event_window"], "flow_window": fields["flow_window"]}
+    if reaction_extended:
+        text += "\n\n" + _extended_bar_note(reaction_extended, "일봉").replace(
+            "이 표에서", "반응 계산에 쓴 봉 중")
+        extra["session_mix"] = reaction_extended
     return _append_result_meta(
-        format_event_reaction(reaction),
+        text,
         _kr_meta(
             kind="bars",
             code=code,
@@ -1413,8 +1594,8 @@ async def get_event_reaction(
             data_completeness=fields["data_completeness"],
             coverage=fields["coverage"],
             price_adjustment=reaction.get("price_adjustment"),
-            extra={"event_window": fields["event_window"],
-                   "flow_window": fields["flow_window"]},
+            price_session=_price_session_for_bars(reaction_extended),
+            extra=extra,
             warnings=fields["warnings"] or None,
         ),
     )
@@ -1612,6 +1793,15 @@ async def get_event_reactions(
     lines.append("※ 과거 반응이지 예측이 아닙니다. 같은 공시라도 시장 상황에 따라 다르게 움직입니다.")
     lines.append(f"※ {CORPORATE_ACTION_NOTE}")
     lines.append("※ 시장 전체가 크게 움직인 날은 개별 반응과 섞입니다 — get_index 로 그날 지수를 함께 보세요.")
+    reactions_extended = _extended_bar_info([
+        {"date": p.get("date")}
+        for _, _, _, r in rows
+        for p in (r.get("points") or {}).values()
+        if isinstance(p, dict) and p.get("status") == "available"
+    ])
+    if reactions_extended:
+        lines.append(_extended_bar_note(reactions_extended, "일봉").replace(
+            "이 표에서", "반응 계산에 쓴 봉 중"))
     if flow_error:
         lines.append(f"※ 수급 조회 실패({flow_error}) — 주가 반응만 계산했습니다.")
 
@@ -1642,7 +1832,9 @@ async def get_event_reactions(
             data_completeness=rmeta.PARTIAL if incomplete else rmeta.COMPLETE,
             coverage=ev_cov,
             price_adjustment=price_adjustment_meta(),
+            price_session=_price_session_for_bars(reactions_extended),
             extra={
+                **({"session_mix": reactions_extended} if reactions_extended else {}),
                 "event_coverage": event_coverage,
                 "event_type_filter": {
                     "include_types": inc or None,
@@ -2818,7 +3010,7 @@ async def get_multi_chart_stats(codes: list[str], days: int = 260) -> str:
     stats = await naver_get_multi_chart_stats(codes, days=days)
     if not stats:
         return "차트 통계를 가져올 수 없습니다."
-    _cal_stats = krx_calendar()
+    _cal_stats = krx_calendar(include_extended=True)
 
     # 요청한 기간만큼 데이터가 실제로 있는지는 종목마다 다르다. 신규 상장·거래정지
     # 종목은 260일을 요청해도 몇 봉밖에 없는데, 헤더에 "최근 260일 집계"라고만 쓰면
@@ -2852,6 +3044,13 @@ async def get_multi_chart_stats(codes: list[str], days: int = 260) -> str:
         "'52주 고점' 같은 표현을 쓰면 안 됩니다."
     )
     lines.append(f"※ {CORPORATE_ACTION_NOTE}")
+    stats_extended = _extended_bar_info([{"date": s.get("current_date")} for s in stats])
+    if stats_extended:
+        lines.append(
+            f"※ {stats_extended['since']}부터 네이버 일봉은 애프터마켓(16:00~20:00) 체결을 합친 값입니다."
+            " 현재가(마지막 봉 종가)는 20:00 애프터마켓 마지막 체결가이고, 최고가·최저가·기간수익률에도"
+            " 애프터마켓 체결이 들어갑니다. 정규장 종가 기준 수치가 아닙니다."
+        )
     total_excluded = sum(s.get("excluded_bars", 0) or 0 for s in stats)
     warns = []
     if total_excluded:
@@ -2882,7 +3081,9 @@ async def get_multi_chart_stats(codes: list[str], days: int = 260) -> str:
                      for s in stats if s.get("current_date")
                  ]),
                  price_adjustment=price_adjustment_meta(),
-                 extra={"per_entity_data_as_of": per_entity_as_of}),
+                 price_session=_price_session_for_bars(stats_extended),
+                 extra={"per_entity_data_as_of": per_entity_as_of,
+                        **({"session_mix": stats_extended} if stats_extended else {})}),
     )
 
 
@@ -2948,6 +3149,7 @@ async def get_indicators(
         include=include, available_bars=len(ohlcv), params=params,
         timeframe=timeframe,
     )
+    extended = _extended_bar_info(ohlcv, timeframe)
     payload = {
         "code": code,
         "timeframe": timeframe,
@@ -2958,9 +3160,11 @@ async def get_indicators(
         "_meta": _kr_meta(
             kind="bars", code=code, data_as_of=ohlcv[-1].get("date"),
             bar_state=_bar_state(
-                timeframe=timeframe, rows=ohlcv, market_calendar=krx_calendar()
+                timeframe=timeframe, rows=ohlcv,
+                market_calendar=krx_calendar(include_extended=True),
             ),
             price_adjustment=price_adjustment_meta(),
+            price_session=_price_session_for_bars(extended),
             data_completeness=(rmeta.PARTIAL
                                if ind_cov["insufficient"] or ind_errors
                                else rmeta.COMPLETE),
@@ -2979,7 +3183,8 @@ async def get_indicators(
             + exclusion_warns or None,
             extra={"indicator_coverage": ind_cov,
                    **({"indicator_errors": ind_errors} if ind_errors else {}),
-                   **({"bar_exclusions": exclusion_info} if exclusion_info else {})},
+                   **({"bar_exclusions": exclusion_info} if exclusion_info else {}),
+                   **({"session_mix": extended} if extended else {})},
         ),
     }
     _mark_intraday_volume(result, payload["_meta"])
@@ -3270,7 +3475,8 @@ async def get_indicators_bulk(
     days = max(30, min(days, 500))
 
     bars_seen: list[int] = []
-    cal = krx_calendar()
+    cal = krx_calendar(include_extended=True)
+    extended_by_code: dict[str, dict] = {}
 
     excluded_by_code: dict[str, list[dict]] = {}
 
@@ -3286,6 +3492,9 @@ async def get_indicators_bulk(
                 return code, {"error": f"봉 {len(_exc)}개 전체가 비정상 "
                                        "(거래정지 placeholder 등 입력 데이터 이상)"}, None
             bars_seen.append(len(ohlcv))
+            ext = _extended_bar_info(ohlcv, timeframe)
+            if ext:
+                extended_by_code[code] = ext
             # 봉 상태는 **그 종목의 시계열로** 계산해야 한다. 종목별 마지막
             # 날짜만 모아 한 시계열인 척 넘기면, 두 종목이 같은 미완성 봉을
             # 가질 때 확정 봉이 자기 자신으로 나온다.
@@ -3354,8 +3563,16 @@ async def get_indicators_bulk(
                      ] if bulk_exclusions else []) or None,
             bar_state=batch_bar_state,
             price_adjustment=price_adjustment_meta(),
+            price_session=_price_session_for_bars(extended_by_code),
             extra={"indicator_coverage": ind_cov,
                    "per_entity_data_as_of": per_entity_as_of,
+                   **({"session_mix": {
+                       "source": "naver_daily_bars",
+                       "since": KRX_AFTER_MARKET_START.isoformat(),
+                       "codes_with_after_market_bars": len(extended_by_code),
+                       "close": "after_market_last_trade",
+                       "high_low_volume": "regular_and_after_market",
+                   }} if extended_by_code else {}),
                    **({"indicator_errors": ind_errors} if ind_errors else {}),
                    **({"bar_exclusions": bulk_exclusions} if bulk_exclusions else {})},
         ),
@@ -3432,11 +3649,20 @@ async def export_to_excel(
     file_path = get_snapshot_dir() / fname
     saved = save_dataframe_to_excel(df, file_path, sheet_name=sheet)
 
+    session_line = ""
+    if data_type in ("chart", "flow"):
+        mixed = _extended_bar_info(data, "day")
+        if mixed:
+            session_line = (
+                f"⚠️ {mixed['since']} 이후 {mixed['bars']}개 행의 close(종가)는 20:00 애프터마켓"
+                " 마지막 체결가입니다. 정규장 종가(15:30)가 아니니 파일을 넘길 때 함께 알려주세요.\n\n"
+            )
     return (
         f"✓ Excel 파일 저장 완료\n"
         f"경로: {saved}\n"
         f"행 수: {len(df)}\n"
         f"컬럼: {', '.join(df.columns)}\n\n"
+        f"{session_line}"
         f"💡 이 파일을 Gemini/ChatGPT에 업로드하면 다른 AI에서도 분석할 수 있어요."
     )
 
@@ -3725,6 +3951,8 @@ async def save_analysis_to_excel(
         )
     except Exception:
         pass
+    auto_notes.append("2026-09-14 이후 네이버 일봉·수급표의 종가는 20:00 애프터마켓 마지막 "
+                      "체결가입니다. 정규장 종가(15:30)와 다를 수 있습니다.")
     auto_notes.append("수급 열은 기관·외국인 순매매입니다. 개인 순매매는 get_flow 에서 "
                       "볼 수 있고, 이 파일에는 넣지 않았습니다.")
     auto_notes.append("PER 은 현재가 ÷ 최근 4분기 EPS(TTM) 기준입니다. "

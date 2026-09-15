@@ -208,9 +208,9 @@ class ContractV3Tests(unittest.TestCase):
 
     LENS = "stocklens"
 
-    def test_meta_version_is_three(self):
+    def test_meta_version_is_four(self):
         """세 Lens가 같은 규약을 쓰는지 확인하는 유일한 표식. 올릴 땐 셋 다 함께."""
-        self.assertEqual(rmeta.META_VERSION, 3)
+        self.assertEqual(rmeta.META_VERSION, 4)
 
     def test_coverage_is_optional_and_preserved(self):
         coverage = {

@@ -723,7 +723,7 @@ class FalseCompleteRegressionTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(server, "get_ohlcv",
                           AsyncMock(return_value=[_bar("20260825"), _bar("20260826")])), \
              patch.object(server, "build_market_clock", return_value=_CLOSED), \
-             patch.object(server, "krx_calendar", lambda: None), \
+             patch.object(server, "krx_calendar", lambda **_: None), \
              patch.object(server, "_now_kst", return_value=_WED_EVENING):
             text = await server.get_chart(code="005930", timeframe="week", count=2)
         meta = extract_meta(text)
