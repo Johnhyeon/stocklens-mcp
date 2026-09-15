@@ -116,6 +116,15 @@ class GetPriceAfterMarketTests(unittest.IsolatedAsyncioTestCase):
         lookup.assert_not_awaited()
 
 
+class GetPriceQuoteDateTests(GetPriceAfterMarketTests):
+    async def test_no_quote_date_skips_lookup(self) -> None:
+        text, meta, lookup = await self._run(dict(self.DATA, quote_date=None), (17, 0))
+
+        self.assertIn("정규장 종가 (15:30): 확인 불가", text)
+        self.assertEqual(meta["regular_close_check"][0]["status"], "no_quote_date")
+        lookup.assert_not_awaited()
+
+
 class ListSessionTests(unittest.IsolatedAsyncioTestCase):
     async def test_multi_stocks_marks_each_row(self) -> None:
         rows = [

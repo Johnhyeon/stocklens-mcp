@@ -1455,9 +1455,11 @@ async def get_price(code: str) -> str:
     # 16:00 부터 KRX 상세의 현재가는 애프터마켓 체결이다. 정규장 종가는 분봉 15:30 봉에서만
     # 읽힌다(2026-09-15 036930: 애프터마켓 194,000 / 정규장 종가 192,800).
     regular_close = regular_status = None
-    if after:
+    if after and not data.get("quote_date"):
+        regular_status = "no_quote_date"   # 체결일을 못 읽었으면 어느 날 15:30 인지 모른다
+    elif after:
         try:
-            regular_close = await get_regular_session_close(code, data.get("quote_date") or "")
+            regular_close = await get_regular_session_close(code, data["quote_date"])
             regular_status = "ok" if regular_close is not None else "no_1530_bar"
         except Exception:
             regular_status = "lookup_failed"

@@ -19,10 +19,6 @@ from functools import wraps
 from typing import Any, Callable, Awaitable
 from zoneinfo import ZoneInfo
 
-_KST = ZoneInfo("Asia/Seoul")
-_MARKET_OPEN = dtime(9, 0)
-_MARKET_CLOSE = dtime(15, 30)
-
 _NY = ZoneInfo("America/New_York")
 _US_MARKET_OPEN = dtime(9, 30)
 _US_MARKET_CLOSE = dtime(16, 0)
