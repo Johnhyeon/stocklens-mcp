@@ -307,6 +307,24 @@ def _quote_date(trade_time) -> str | None:
     return None
 
 
+# 네이버가 시세에 붙이는 거래 세션 표기 → 결과 메타 price_session. 2026-09-15 실측으로 본
+# 값만 둔다. 종목 상세·시장 목록은 REGULAR_MARKET 식, 벌크 시세(polling)는 regularMarket 식.
+# 16:00 에 KRX 가 애프터마켓으로 넘어가면 같은 필드가 AFTER_MARKET 으로 바뀌고 가격도 움직인다.
+_SESSION_VALUES = {
+    "REGULAR_MARKET": "regular",
+    "AFTER_MARKET": "after_market",
+    "regularMarket": "regular",
+    "afterMarket": "after_market",
+}
+
+
+def _price_session(value) -> str | None:
+    """원천 세션 표기 → regular / after_market. 값이 없으면 None, 처음 보는 값이면 unknown."""
+    if value in (None, ""):
+        return None
+    return _SESSION_VALUES.get(str(value), "unknown")
+
+
 async def _stock_detail(code: str, code_type: str = "KRX") -> dict:
     """종목 상세(시세·재무비율·업종·상태) 한 방. stock.naver.com 종목 화면의 소스다."""
     return await _api_json(
@@ -342,6 +360,12 @@ async def get_current_price(code: str) -> dict:
         result["name"] = detail["itemname"]
     result["quote_date"] = _quote_date(detail.get("tradeTime"))
     result["status_flags"] = _status_flags(detail)
+    # 가격이 어느 세션 체결인지와 전일대비의 기준(기준가). 기준가는 전일 정규장 종가라
+    # 애프터마켓 중에도 바뀌지 않는다(prevClosePrice 는 20:00 마지막가라 쓰지 않는다).
+    result["price_session"] = _price_session(detail.get("tradingSessionType"))
+    base = _num_int(detail.get("stdPrice"))
+    if base is not None:
+        result["base_price"] = base
 
     krx_info, krx_missing = _rate_info(detail)
     result.update(krx_info)
@@ -356,6 +380,8 @@ async def get_current_price(code: str) -> dict:
             nxt_info, _ = _rate_info(nxt)
             for key, value in nxt_info.items():
                 result[f"nxt_{key}"] = value
+            if nxt_info:
+                result["nxt_price_session"] = _price_session(nxt.get("tradingSessionType"))
 
     # 호출부가 '값이 없다'와 '우리가 못 읽었다'를 구분할 수 있게 실어 보낸다.
     result[PARSE_MISS_KEY] = krx_missing
@@ -1000,6 +1026,7 @@ async def get_multi_stocks(codes: list[str]) -> list[dict]:
                 row.get("accumulatedTradingVolumeRaw") or row.get("accumulatedTradingVolume"),
                 default=0,
             ),
+            "price_session": _price_session(row.get("marketSessionType")),
         }
 
     # 요청한 순서를 지킨다 — 호출부가 입력 리스트와 짝지어 읽는 경우가 있다.
@@ -1381,6 +1408,7 @@ def _rank_rows(rows: list, count: int) -> list[dict]:
             "volume": volume,
             # 현재가 × 거래량 추산. 실제 거래대금은 체결가 가중이라 살짝 다르다.
             "trade_value_est_krw": price * volume,
+            "price_session": _price_session(row.get("tradingSessionType")),
         })
         if len(results) >= count:
             break

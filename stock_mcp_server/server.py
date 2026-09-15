@@ -901,6 +901,75 @@ _EXTENDED_PRICE_SESSIONS = (
 )
 
 
+_KR_SESSION_LABEL = {
+    rmeta.PRICE_SESSION_REGULAR: "KRX 정규장",
+    rmeta.PRICE_SESSION_AFTER_MARKET: "KRX 애프터마켓",
+    rmeta.PRICE_SESSION_UNKNOWN: "KRX, 세션 미확인",
+}
+_SESSION_SHORT = {
+    rmeta.PRICE_SESSION_REGULAR: "정규장",
+    rmeta.PRICE_SESSION_AFTER_MARKET: "애프터마켓",
+    rmeta.PRICE_SESSION_UNKNOWN: "미확인",
+}
+
+
+def _rows_price_session(rows: list[dict]) -> tuple[str | None, dict[str, int]]:
+    """목록 행의 세션을 모은다. (메타용 price_session, {세션: 행 수}).
+
+    애프터마켓 행이 하나라도 있으면 표 전체를 after_market 으로 적는다. ETF·ETN 은
+    애프터마켓이 없어(2026-09-15 실측 069500 = REGULAR_MARKET/CLOSE) 정규장으로 남는다.
+    """
+    counts: dict[str, int] = {}
+    for r in rows:
+        s = r.get("price_session")
+        if s:
+            counts[s] = counts.get(s, 0) + 1
+    if not counts:
+        return None, counts
+    if rmeta.PRICE_SESSION_AFTER_MARKET in counts:
+        return rmeta.PRICE_SESSION_AFTER_MARKET, counts
+    if set(counts) == {rmeta.PRICE_SESSION_REGULAR}:
+        return rmeta.PRICE_SESSION_REGULAR, counts
+    return rmeta.PRICE_SESSION_UNKNOWN, counts
+
+
+def _rows_session_note(counts: dict[str, int]) -> str | None:
+    after = counts.get(rmeta.PRICE_SESSION_AFTER_MARKET, 0)
+    if not after:
+        return None
+    regular = counts.get(rmeta.PRICE_SESSION_REGULAR, 0)
+    return (
+        f"※ 세션: 애프터마켓 {after}종목" + (f" · 정규장 {regular}종목" if regular else "")
+        + " — 애프터마켓 종목의 현재가·등락률은 애프터마켓 체결 기준(기준가 대비)이고 거래량에도"
+        " 애프터마켓이 들어갑니다. 정규장 종가·정규장 등락률이 아닙니다."
+        " ETF·ETN은 애프터마켓이 없어 정규장 값 그대로입니다."
+    )
+
+
+def _after_market_values_possible(krx: dict) -> bool:
+    """세션 표시가 없는 원천에서, 마지막 체결이 애프터마켓일 수 있는 시각인가.
+
+    정규장 중이거나 15:30~16:00 틈(애프터마켓 개장 전)이면 False. 16:00 이후, 20:00 이후,
+    다음 거래일 개장 전·휴장일에는 네이버 시세가 애프터마켓 마지막 체결일 수 있다.
+    """
+    if krx.get("is_open"):
+        return False
+    try:
+        last = _dt.date.fromisoformat(str(krx.get("last_trading_day")))
+    except ValueError:
+        return False
+    if last < KRX_AFTER_MARKET_START:
+        return False
+    return (krx.get("next_session") or {}).get("name") != SESSION_AFTER_MARKET
+
+
+_UNLABELED_SESSION_NOTE = (
+    "※ 정규장 마감 뒤 조회입니다. 네이버 {what} 목록은 시세가 어느 세션 체결인지 표시하지"
+    " 않습니다. 2026-09-14부터 16:00~20:00 애프터마켓 체결로 현재가·등락률·거래량이 바뀌므로"
+    " 이 표의 값을 정규장 종가 기준이라고 단정하지 마세요."
+)
+
+
 def _kr_market_note(krx: dict | None = None, price_session: str | None = None) -> list[str]:
     """KRX 정규장이 닫혀 있으면, 보여주는 값이 어느 세션 기준인지 명시.
 
@@ -1377,7 +1446,21 @@ async def get_price(code: str) -> str:
         return _append_result_meta(text, meta)
 
     has_nxt = "nxt_price" in data
-    price_label = "현재가 (KRX 정규장)" if has_nxt else "현재가"
+    session = data.get("price_session")
+    after = session == rmeta.PRICE_SESSION_AFTER_MARKET
+    if session:
+        price_label = f"현재가 ({_KR_SESSION_LABEL.get(session, 'KRX, 세션 미확인')})"
+    else:
+        price_label = "현재가 (KRX 정규장)" if has_nxt else "현재가"
+    # 16:00 부터 KRX 상세의 현재가는 애프터마켓 체결이다. 정규장 종가는 분봉 15:30 봉에서만
+    # 읽힌다(2026-09-15 036930: 애프터마켓 194,000 / 정규장 종가 192,800).
+    regular_close = regular_status = None
+    if after:
+        try:
+            regular_close = await get_regular_session_close(code, data.get("quote_date") or "")
+            regular_status = "ok" if regular_close is not None else "no_1530_bar"
+        except Exception:
+            regular_status = "lookup_failed"
 
     # 관심종목이면 조회할 때마다 눈에 띄게. 안 보이면 등록해둔 걸 잊는다.
     star = "⭐ " if code in wl.codes() else ""
@@ -1388,17 +1471,33 @@ async def get_price(code: str) -> str:
     if flags:
         lines.append(f"⚠️ **시장경보/지정: {' · '.join(flags)}** — 일반 종목과 매매 조건·위험이 다릅니다")
     lines.append(f"{price_label}: {data['price']:,}원")
+    change_label = "기준가 대비" if after else "전일대비"
     if "change" in data:
         sign = "+" if data["change"] > 0 else ""
-        lines.append(f"전일대비: {sign}{data['change']:,}원")
+        base_txt = f" (기준가 {data['base_price']:,}원)" if after and data.get("base_price") else ""
+        lines.append(f"{change_label}: {sign}{data['change']:,}원{base_txt}")
     else:
-        lines.append("전일대비: 데이터 없음")
+        lines.append(f"{change_label}: 데이터 없음")
+    if after:
+        if regular_close is not None:
+            regular_line = f"정규장 종가 (15:30): {regular_close:,}원"
+            base = data.get("base_price")
+            if base:
+                diff = regular_close - base
+                regular_line += (f" (기준가 대비 {'+' if diff > 0 else ''}{diff:,}원, "
+                                 f"{diff / base * 100:+.2f}%)")
+            lines.append(regular_line)
+        else:
+            lines.append("정규장 종가 (15:30): 확인 불가 (네이버 분봉에 15:30 체결이 없거나 조회 실패)")
     # 못 읽은 항목은 줄을 빼지 않고 '데이터 없음'으로 남긴다. 조용히 빠지면
     # 사용자는 그 항목이 원래 없는 건지 우리가 못 읽은 건지 알 수 없다.
     for key, label, unit in (
         ("open", "시가", "원"), ("high", "고가", "원"),
         ("low", "저가", "원"), ("volume", "거래량", ""),
     ):
+        # 시가는 정규장 값 그대로다. 고가·저가·거래량은 애프터마켓 체결이 더해진다.
+        if after and key != "open":
+            label = f"{label} (애프터마켓 포함)"
         if key in data:
             lines.append(f"{label}: {data[key]:,}{unit}")
         else:
@@ -1406,14 +1505,19 @@ async def get_price(code: str) -> str:
 
     if has_nxt:
         lines.append("")
-        lines.append("─ NXT(대체거래소) ─")
+        nxt_session = _SESSION_SHORT.get(data.get("nxt_price_session"))
+        lines.append(f"─ NXT(대체거래소{', ' + nxt_session if nxt_session else ''}) ─")
         lines.append(f"현재가: {data['nxt_price']:,}원")
         if "nxt_change" in data:
             sign = "+" if data["nxt_change"] > 0 else ""
             lines.append(f"전일대비: {sign}{data['nxt_change']:,}원")
         if "nxt_volume" in data:
             lines.append(f"거래량: {data['nxt_volume']:,}")
-        lines.append("※ NXT는 KRX와 별도 체결 시장으로, 위 정규장 수치에 포함되지 않습니다")
+        lines.append(
+            "※ NXT는 KRX와 별도 체결 시장으로, 위 "
+            + ("KRX" if session and session != rmeta.PRICE_SESSION_REGULAR else "정규장")
+            + " 수치에 포함되지 않습니다"
+        )
 
     completeness = rmeta.COMPLETE if not missing else rmeta.PARTIAL
     warns = [f"시장경보/지정 종목: {' · '.join(flags)}"] if flags else []
@@ -1422,10 +1526,20 @@ async def get_price(code: str) -> str:
         warns.append(
             f"읽지 못한 항목: {', '.join(missing)} — 값이 0인 것이 아니라 결측입니다."
         )
+    extra: dict = {}
+    if data.get("base_price") is not None:
+        extra["base_price"] = data["base_price"]
+    if after:
+        extra["regular_close_check"] = [{
+            "date": data.get("quote_date"), "regular_close": regular_close,
+            "status": regular_status, "source": "naver_minute_1530",
+        }]
     meta = _kr_meta(
         kind="snapshot", code=code, name=data.get("name"),
         data_as_of=data.get("quote_date"), data_completeness=completeness,
         warnings=warns or None,
+        price_session=session,
+        extra=extra or None,
     )
     return _append_result_meta("\n".join(lines), meta)
 
@@ -2169,6 +2283,10 @@ async def screen_by_flow(
             )
         lines.append("")
 
+    # 후보는 거래량 순위 행이라 세션 표시가 있다. 16시 이후면 현재가가 애프터마켓 체결이다.
+    note = _rows_session_note(_rows_price_session([item for item, _ in matched])[1])
+    if note:
+        lines.append(note)
     meta = _kr_meta(kind="bars", data_completeness=completeness, warnings=warnings)
     return _append_result_meta("\n".join(lines), meta)
 
@@ -2415,9 +2533,12 @@ async def get_index() -> str:
     if warns and all(item.get(PARSE_MISS_KEY) for item in data):
         completeness = rmeta.NONE
         warns.append("모든 지수를 읽지 못했습니다 — 네이버 페이지 구조 변경 가능성.")
+    # 지수는 정규장 체결로만 움직인다. 2026-09-15 15:33~16:04 KOSPI·KOSDAQ 는 CLOSE 상태로
+    # 15:30 값에 멈춰 있었고, 그 사이 애프터마켓 종목 시세는 움직였다.
     return _append_result_meta(
         "\n".join(lines),
-        _kr_meta(kind="snapshot", data_completeness=completeness, warnings=warns or None),
+        _kr_meta(kind="snapshot", data_completeness=completeness, warnings=warns or None,
+                 price_session=rmeta.PRICE_SESSION_REGULAR),
     )
 
 
@@ -2506,7 +2627,15 @@ async def get_theme_stocks(
                 f"{s['code']} | {s['name']} | {s['price']:,} | {s['change_rate']} | {s['volume']:,}"
             )
 
-    return _append_result_meta("\n".join(lines), _kr_meta(kind="snapshot"))
+    unlabeled = _after_market_values_possible(build_market_clock()["krx"])
+    if unlabeled:
+        lines += ["", _UNLABELED_SESSION_NOTE.format(what="테마")]
+    return _append_result_meta("\n".join(lines), _kr_meta(
+        kind="snapshot",
+        price_session=rmeta.PRICE_SESSION_UNKNOWN if unlabeled else None,
+        warnings=["테마 목록 시세의 세션이 표시되지 않아 애프터마켓 반영 여부를 확인할 수 없습니다."]
+        if unlabeled else None,
+    ))
 
 
 @mcp.tool()
@@ -2564,7 +2693,15 @@ async def get_sector_stocks(sector_name: str, count: int = 30) -> str:
         lines.append(
             f"{s['code']} | {s['name']} | {s['price']:,} | {s['change_rate']} | {s['volume']:,}"
         )
-    return _append_result_meta("\n".join(lines), _kr_meta(kind="snapshot"))
+    unlabeled = _after_market_values_possible(build_market_clock()["krx"])
+    if unlabeled:
+        lines += ["", _UNLABELED_SESSION_NOTE.format(what="업종")]
+    return _append_result_meta("\n".join(lines), _kr_meta(
+        kind="snapshot",
+        price_session=rmeta.PRICE_SESSION_UNKNOWN if unlabeled else None,
+        warnings=["업종 목록 시세의 세션이 표시되지 않아 애프터마켓 반영 여부를 확인할 수 없습니다."]
+        if unlabeled else None,
+    ))
 
 
 @mcp.tool()
@@ -2863,7 +3000,11 @@ async def get_volume_ranking(
             f"{r['rank']} | {r['code']} | {r['name']} | {r['price']:,} | "
             f"{r['change_rate']} | {r['volume']:,} | {tv_cell}"
         )
-    return _append_result_meta("\n".join(lines), _kr_meta(kind="snapshot"))
+    session, counts = _rows_price_session(ranks)
+    note = _rows_session_note(counts)
+    if note:
+        lines += ["", note]
+    return _append_result_meta("\n".join(lines), _kr_meta(kind="snapshot", price_session=session))
 
 
 @mcp.tool()
@@ -2919,11 +3060,16 @@ async def get_change_ranking(
             f"※ {flagged}개 종목이 시장경보(투자주의/경고/위험) 지정 상태입니다. "
             "일반 종목과 매매 조건·위험이 다르니 급등 사유를 함께 확인하세요."
         )
+    session, counts = _rows_price_session(ranks)
+    note = _rows_session_note(counts)
+    if note:
+        lines += ["", note]
     return _append_result_meta(
         "\n".join(lines),
         _kr_meta(
             kind="snapshot",
             warnings=[f"시장경보 지정 {flagged}건 포함 — 표의 '시장경보' 열 확인"] if flagged else None,
+            price_session=session,
         ),
     )
 
@@ -2952,7 +3098,11 @@ async def get_market_cap_ranking(market: str = "KOSPI", count: int = 50) -> str:
             f"{r['rank']} | {r['code']} | {r['name']} | {r['price']:,} | "
             f"{r['change_rate']} | {r['market_cap_billion']:,}"
         )
-    return _append_result_meta("\n".join(lines), _kr_meta(kind="snapshot"))
+    session, counts = _rows_price_session(ranks)
+    note = _rows_session_note(counts)
+    if note:
+        lines += ["", note]
+    return _append_result_meta("\n".join(lines), _kr_meta(kind="snapshot", price_session=session))
 
 
 @mcp.tool()
@@ -2974,17 +3124,29 @@ async def get_multi_stocks(codes: list[str]) -> str:
     if not stocks:
         return "종목 정보를 가져올 수 없습니다."
 
+    session, counts = _rows_price_session(stocks)
+    with_session = rmeta.PRICE_SESSION_AFTER_MARKET in counts
     lines = [f"종목 정보 ({len(stocks)}개):", ""]
-    lines.append("코드 | 종목명 | 현재가 | 전일대비 | 등락률 | 거래량")
-    lines.append("---|---|---|---|---|---")
+    if with_session:
+        lines.append("코드 | 종목명 | 현재가 | 전일대비 | 등락률 | 거래량 | 세션")
+        lines.append("---|---|---|---|---|---|---")
+    else:
+        lines.append("코드 | 종목명 | 현재가 | 전일대비 | 등락률 | 거래량")
+        lines.append("---|---|---|---|---|---")
     for s in stocks:
         change = s["change"]
         change_str = f"{change:+,}" if change != 0 else "0"
-        lines.append(
+        row = (
             f"{s['code']} | {s['name']} | {s['price']:,} | "
             f"{change_str} | {s['change_rate']} | {s['volume']:,}"
         )
-    return _append_result_meta("\n".join(lines), _kr_meta(kind="snapshot"))
+        if with_session:
+            row += f" | {_SESSION_SHORT.get(s.get('price_session'), '-')}"
+        lines.append(row)
+    note = _rows_session_note(counts)
+    if note:
+        lines += ["", note]
+    return _append_result_meta("\n".join(lines), _kr_meta(kind="snapshot", price_session=session))
 
 
 @mcp.tool()
@@ -4580,7 +4742,9 @@ async def get_etf_list(
     lines.append("")
     lines.append("카테고리: " + ", ".join(data["categories"].values()))
 
-    return _append_result_meta("\n".join(lines), _kr_meta(kind="snapshot"))
+    # ETF·ETN 은 KRX 애프터마켓 대상이 아니다(2026-09-15 16:03 069500 = REGULAR_MARKET/CLOSE).
+    return _append_result_meta("\n".join(lines), _kr_meta(
+        kind="snapshot", price_session=rmeta.PRICE_SESSION_REGULAR))
 
 
 @mcp.tool()
