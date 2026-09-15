@@ -104,6 +104,14 @@ class GetPriceAfterMarketTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("정규장 종가 (15:30): 확인 불가", text)
         self.assertEqual(meta["regular_close_check"][0]["status"], "no_1530_bar")
 
+    async def test_no_quote_date_skips_lookup(self) -> None:
+        text, meta, lookup = await self._run(dict(self.DATA, quote_date=None), (17, 0))
+
+        self.assertIn("정규장 종가 (15:30): 확인 불가", text)
+        self.assertEqual(meta["regular_close_check"][0]["status"], "no_quote_date")
+        lookup.assert_not_awaited()
+
+
     async def test_regular_session_output_is_unchanged(self) -> None:
         data = dict(self.DATA, price_session="regular")
         text, meta, lookup = await self._run(data, (10, 0))
@@ -115,14 +123,6 @@ class GetPriceAfterMarketTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn(rmeta.EXTENDED_SESSION_WARNING, meta["warnings"])
         lookup.assert_not_awaited()
 
-
-class GetPriceQuoteDateTests(GetPriceAfterMarketTests):
-    async def test_no_quote_date_skips_lookup(self) -> None:
-        text, meta, lookup = await self._run(dict(self.DATA, quote_date=None), (17, 0))
-
-        self.assertIn("정규장 종가 (15:30): 확인 불가", text)
-        self.assertEqual(meta["regular_close_check"][0]["status"], "no_quote_date")
-        lookup.assert_not_awaited()
 
 
 class ListSessionTests(unittest.IsolatedAsyncioTestCase):
