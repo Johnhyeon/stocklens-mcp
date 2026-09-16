@@ -115,6 +115,31 @@ class ChartAfterMarketTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual({c["status"] for c in meta["regular_close_check"]}, {"lookup_failed"})
 
 
+class TodayBarNoteTests(unittest.TestCase):
+    """오늘 봉은 16:00 전까지 정규장 체결만 담는다. 그 봉까지 '20:00 마지막가'라고 하면 과한 말이다."""
+
+    ROWS = [_bar("20260914", 202500), _bar("20260915", 197100), _bar("20260916", 199600)]
+
+    def _info(self, *hm):
+        return server._extended_bar_info(self.ROWS, "day", now=datetime(2026, 9, 16, *hm, tzinfo=KST))
+
+    def test_today_bar_state_follows_the_clock(self) -> None:
+        self.assertEqual(self._info(10, 0)["today_bar"], "regular_only_so_far")
+        self.assertEqual(self._info(17, 0)["today_bar"], "after_market_in_progress")
+        self.assertEqual(self._info(20, 30)["today_bar"], "final")
+
+    def test_note_separates_today_from_finished_bars(self) -> None:
+        self.assertIn("16:00부터 애프터마켓이 더해집니다",
+                      server._extended_bar_note(self._info(10, 0)))
+        self.assertIn("20:00까지 바뀝니다", server._extended_bar_note(self._info(17, 0)))
+        self.assertNotIn("오늘(", server._extended_bar_note(self._info(20, 30)))
+
+    def test_past_only_bars_carry_no_today_marker(self) -> None:
+        info = server._extended_bar_info(
+            self.ROWS[:2], "day", now=datetime(2026, 9, 16, 10, 0, tzinfo=KST))
+        self.assertNotIn("today_bar", info)
+
+
 class WeeklyBarTests(unittest.TestCase):
     def test_week_that_ends_after_start_is_mixed(self) -> None:
         # 2026-09-08(화) 주봉은 9/13(일)에 끝나 애프터마켓 전, 9/14 주는 섞인다.

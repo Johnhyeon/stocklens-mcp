@@ -1243,7 +1243,7 @@ def _bar_state_effects(
     return data_completeness, coverage, warns
 
 
-def _extended_bar_info(rows: list[dict] | None, timeframe: str = "day") -> dict | None:
+def _extended_bar_info(rows: list[dict] | None, timeframe: str = "day", now=None) -> dict | None:
     """네이버 일·주·월봉 중 애프터마켓 체결이 합쳐진 봉을 센다. 없으면 None.
 
     2026-09-14(KRX 애프터마켓 첫날) 네이버 일봉을 같은 날 분봉과 80종목 대조했다.
@@ -1269,7 +1269,7 @@ def _extended_bar_info(rows: list[dict] | None, timeframe: str = "day") -> dict 
             affected.append(day)
     if not affected:
         return None
-    return {
+    info = {
         "source": "naver_daily_bars",
         "since": KRX_AFTER_MARKET_START.isoformat(),
         "bars": len(affected),
@@ -1278,15 +1278,34 @@ def _extended_bar_info(rows: list[dict] | None, timeframe: str = "day") -> dict 
         "close": "after_market_last_trade",
         "high_low_volume": "regular_and_after_market",
     }
+    # 오늘 봉은 아직 애프터마켓이 안 들어갔을 수 있다. 16:00 전이면 정규장 체결만 담겨 있어
+    # "종가 = 20:00 마지막 체결가"가 그 봉에는 아직 해당하지 않는다.
+    moment = now or _now_kst()
+    if timeframe == "day" and max(affected) == moment.date().isoformat():
+        if moment.time() < _dt.time(16, 0):
+            info["today_bar"] = "regular_only_so_far"
+        elif moment.time() < _dt.time(20, 0):
+            info["today_bar"] = "after_market_in_progress"
+        else:
+            info["today_bar"] = "final"
+    return info
+
+
+_TODAY_BAR_NOTE = {
+    "regular_only_so_far": " 오늘({day}) 봉은 아직 정규장 체결만 담겨 있고 16:00부터 애프터마켓이 더해집니다.",
+    "after_market_in_progress": " 오늘({day}) 봉은 애프터마켓이 반영되는 중이라 20:00까지 바뀝니다.",
+}
 
 
 def _extended_bar_note(info: dict, what: str = "일봉") -> str:
-    return (
+    note = (
         f"※ {info['since']}부터 네이버 {what}은 애프터마켓(16:00~20:00) 체결을 합친 값입니다"
         f" (이 표에서 {info['bars']}개, {info['first_bar']}~). 종가 = 20:00 애프터마켓 마지막"
         " 체결가, 고가·저가·거래량도 애프터마켓 포함. **정규장 종가(15:30)가 아니므로"
         " '정규장 종가'로 부르지 마세요.**"
     )
+    tail = _TODAY_BAR_NOTE.get(info.get("today_bar"))
+    return note + tail.format(day=info["last_bar"]) if tail else note
 
 
 def _price_session_for_bars(info) -> str:
