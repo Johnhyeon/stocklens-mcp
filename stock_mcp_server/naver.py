@@ -754,26 +754,95 @@ async def _group_page(kind: str, page: int, size: int) -> dict:
     )
 
 
-async def _group_members(kind: str, no: str, count: int) -> tuple[list[dict], dict]:
-    """테마/업종 구성종목을 count 개까지. (행 목록, 편입사유 맵)."""
+# 구성종목을 끝까지 받을 때 넘길 최대 쪽 수. 100×30 = 3,000행. 가장 큰 업종인
+# '기타'가 1,537종목이다(2026-09-17 실측). 예전에는 10쪽(1,000행)에서 멈춰
+# '기타'의 뒤쪽 537개가 말없이 빠졌다.
+_GROUP_PAGES_MAX = 30
+
+
+@cached(ttl_market=300, ttl_closed=3600)  # 장중 5분, 장마감 1시간
+async def _group_members_all(kind: str, no: str) -> dict:
+    """테마/업종 구성종목 **전부**. 쪽을 끝까지 넘겨 한 목록으로 모은다.
+
+    Returns:
+        {"rows": 원본 행(코드가 멀쩡한 것만, 받은 순서 = 등락률 내림차순),
+         "reasons": 편입사유 맵, "total_count": 네이버가 밝힌 전체 수(없으면 None),
+         "complete": 전부 받았는가}
+
+    전체를 한 번에 캐시에 올리는 이유: 목록은 등락률 순이라 장중에 계속 뒤섞인다.
+    호출할 때마다 필요한 쪽만 새로 받으면, 1쪽과 2쪽 사이에 순서가 바뀌어 같은
+    종목이 두 번 나오거나 아무 쪽에도 안 나온다. 캐시 안에서는 쪽끼리 같은 순간의
+    목록을 자른다.
+    """
     what = "테마 상세" if kind == "theme" else "업종 상세"
     rows: list[dict] = []
+    seen: set[str] = set()
     reasons: dict = {}
-    page = 1
-    while len(rows) < count and page <= 10:
+    total: int | None = None
+    ended = False
+    for page in range(1, _GROUP_PAGES_MAX + 1):
         payload = await _api_json(
             f"{MSTOCK_API}/stocks/{kind}/{no}",
             params={"page": page, "pageSize": _GROUP_PAGE_MAX},
             what=f"{what}({no})",
         )
         chunk = _api_list(payload, what=f"{what}({no})", key="stocks")
-        if page == 1 and isinstance(payload.get("themeItemInfoMap"), dict):
-            reasons = payload["themeItemInfoMap"]
-        rows.extend(chunk)
+        if page == 1:
+            if isinstance(payload.get("themeItemInfoMap"), dict):
+                reasons = payload["themeItemInfoMap"]
+            total = _num_int(payload.get("totalCount"))
+        added = 0
+        for row in chunk:
+            if not isinstance(row, dict) or _group_row(row) is None:
+                continue
+            code = str(row.get("itemCode"))
+            # 쪽을 받는 사이 순서가 바뀌면 같은 종목이 앞뒤 쪽에 두 번 온다.
+            if code in seen:
+                continue
+            seen.add(code)
+            rows.append(row)
+            added += 1
+        # 끝은 모자란 쪽으로만 판단한다. totalCount 를 믿고 먼저 멈추면, 그 값이
+        # 실제보다 작을 때 뒤가 또 말없이 잘린다.
         if len(chunk) < _GROUP_PAGE_MAX:
+            ended = True
             break
-        page += 1
-    return rows[:count], reasons
+        if not added:
+            break  # 같은 쪽이 되풀이된다 — 더 넘겨도 새 종목이 없다
+    complete = ended and (total is None or len(rows) >= total)
+    return {"rows": rows, "reasons": reasons, "total_count": total, "complete": complete}
+
+
+def _page_slice(rows: list, count: int, page: int) -> tuple[list, int]:
+    """count 개씩 나눈 page 번째 쪽(1부터). (그 쪽 행, 앞에서 건너뛴 수)."""
+    count = max(1, int(count))
+    page = max(1, int(page))
+    start = (page - 1) * count
+    return rows[start:start + count], start
+
+
+async def _group_members(
+    kind: str, no: str, count: int, page: int = 1
+) -> tuple[list[dict], dict, dict]:
+    """테마/업종 구성종목의 page 번째 쪽. (행 목록, 편입사유 맵, 범위 정보).
+
+    범위 정보는 {"total_count", "fetched_count", "start_index", "page", "count",
+    "complete"} 이다. total_count 는 네이버가 밝힌 수를 먼저 쓰고, 없으면 받은 수다.
+    """
+    members = await _group_members_all(kind, no)
+    rows = members["rows"]
+    chunk, start = _page_slice(rows, count, page)
+    total = members["total_count"]
+    window = {
+        # 네이버가 밝힌 수보다 실제로 더 받았으면 받은 쪽이 사실이다.
+        "total_count": max(total or 0, len(rows)),
+        "fetched_count": len(rows),
+        "start_index": start + 1,
+        "page": max(1, int(page)),
+        "count": max(1, int(count)),
+        "complete": members["complete"],
+    }
+    return chunk, members["reasons"], window
 
 
 async def _find_group(kind: str, name: str) -> dict | None:
@@ -833,6 +902,7 @@ async def get_theme_stocks(
     theme_name: str,
     count: int = 30,
     include_reason: bool = True,
+    page: int = 1,
 ) -> dict:
     """특정 테마의 종목 리스트를 가져옵니다.
 
@@ -840,18 +910,21 @@ async def get_theme_stocks(
 
     Args:
         theme_name: 테마명 (예: "선박", "AI반도체") - 부분 일치
-        count: 반환할 최대 종목 수 (기본 30)
+        count: 한 쪽에 담을 종목 수 (기본 30)
         include_reason: 편입사유 포함 여부 (False면 토큰 대폭 절감)
+        page: count 개씩 나눈 몇 번째 쪽인가 (1부터)
 
     Returns:
-        {theme_name, theme_id, stocks: [{code, name, price, change_rate, volume, reason}]}
+        {theme_name, theme_id, stocks: [{code, name, price, change_rate, volume, reason}],
+         total_count, fetched_count, start_index, page, count, complete}
+        — stocks 는 등락률 내림차순 목록의 한 쪽이다. total_count 가 전체 수다.
     """
     group = await _find_group("theme", theme_name)
     if not group:
         return {"theme_name": theme_name, "theme_id": None, "stocks": []}
 
     theme_id = str(group["no"])
-    rows, reasons = await _group_members("theme", theme_id, count)
+    rows, reasons, window = await _group_members("theme", theme_id, count, page)
 
     stocks = []
     for row in rows:
@@ -871,6 +944,7 @@ async def get_theme_stocks(
         "theme_name": str(group.get("name") or theme_name),
         "theme_id": theme_id,
         "stocks": stocks,
+        **window,
     }
 
 
@@ -948,22 +1022,25 @@ async def get_stock_sector(code: str) -> dict:
     return out
 
 
-async def get_sector_stocks(sector_name: str, count: int = 30) -> dict:
+async def get_sector_stocks(sector_name: str, count: int = 30, page: int = 1) -> dict:
     """특정 업종의 종목 리스트를 가져옵니다.
 
     Args:
         sector_name: 업종명 (예: "통신장비", "반도체") - 부분 일치
-        count: 반환할 최대 종목 수 (기본 30)
+        count: 한 쪽에 담을 종목 수 (기본 30)
+        page: count 개씩 나눈 몇 번째 쪽인가 (1부터)
 
     Returns:
-        {sector_name, sector_id, stocks: [{code, name, price, change_rate, volume}]}
+        {sector_name, sector_id, stocks: [{code, name, price, change_rate, volume}],
+         total_count, fetched_count, start_index, page, count, complete}
+        — stocks 는 등락률 내림차순 목록의 한 쪽이다. total_count 가 전체 수다.
     """
     group = await _find_group("industry", sector_name)
     if not group:
         return {"sector_name": sector_name, "sector_id": None, "stocks": []}
 
     sector_id = str(group["no"])
-    rows, _ = await _group_members("industry", sector_id, count)
+    rows, _, window = await _group_members("industry", sector_id, count, page)
 
     stocks = []
     for row in rows:
@@ -977,6 +1054,7 @@ async def get_sector_stocks(sector_name: str, count: int = 30) -> dict:
         "sector_name": str(group.get("name") or sector_name),
         "sector_id": sector_id,
         "stocks": stocks,
+        **window,
     }
 
 
@@ -1369,9 +1447,44 @@ async def get_multi_chart_stats(
     return ok
 
 
-# 시장 단위 목록 API 가 한 번에 주는 최대 개수. 500까지는 실측으로 확인했고,
-# 우리 도구의 상한(count<=500)과 같아 페이지를 돌 필요가 없다.
+# 시장 단위 목록 API 의 한 쪽 크기. 500까지는 실측으로 확인했다.
+# 이 API 의 startIdx 는 오프셋이 아니라 **0부터 세는 쪽 번호**다(2026-09-17 실측:
+# pageSize=500 에 startIdx=1 이면 501~1000위, startIdx=500 이면 빈 목록).
+# 응답에 전체 개수가 없어서 끝은 모자란 쪽이 오는 것으로 안다.
 _MARKET_LIST_MAX = 500
+# 끝까지 넘길 최대 쪽 수. 500×20 = 1만 행. 2026-09-17 KOSPI 945·KOSDAQ 1,820행.
+_MARKET_LIST_PAGES_MAX = 20
+
+# 전체 목록을 캐시에 올릴 때 남기는 필드. 원본 한 행에 80개 가까운 필드가 있어
+# 코스닥 한 시장이 3MB 다 — 순위표에 쓰는 것만 남긴다.
+_MARKET_ROW_KEYS = (
+    "itemcode", "itemname", "type", "tradeStopYn", "nowPrice", "prevChangeRate",
+    "tradeVolume", "marketSum", "tradingSessionType",
+)
+
+# 시장 목록 행의 증권 구분(type). ST(주식)가 아닌 것도 같은 순위표에 섞여 온다.
+# 2026-09-17 실측: KOSPI 에 리츠 23·인프라펀드 2(맥쿼리인프라, KB발해인프라)·
+# PF 2('대신 KOSPI200인덱스 X클래스' 같은 상장 펀드)·MF 1(맵스리얼티)·DR 1·FS 1,
+# KOSDAQ 에 FS 11·DR 9. 뜻을 확인하지 못한 코드는 추측해 이름 붙이지 않고
+# 코드를 그대로 보인다.
+_SECURITY_TYPE_LABELS = {
+    "RT": "리츠",
+    "IF": "인프라펀드",
+    "PF": "펀드(PF)",
+    "MF": "펀드(MF)",
+    "DR": "외국기업 DR",
+    "FS": "외국기업",
+}
+
+
+def security_type_label(type_code: str | None) -> str | None:
+    """시장 목록의 type 코드 → 표시 이름. 보통 주식(ST)이면 None."""
+    code = str(type_code or "").strip().upper()
+    if code == "ST":
+        return None
+    if not code:
+        return "구분 미상"
+    return _SECURITY_TYPE_LABELS.get(code, f"기타({code})")
 
 
 def _market_type(market: str) -> str:
@@ -1408,6 +1521,53 @@ async def _market_stock_list(
         what=f"종목 목록({order_type})",
     )
     return _api_list(payload, what=f"종목 목록({order_type})")
+
+
+@cached(ttl_market=60, ttl_closed=3600)  # 장중 1분, 장마감 1시간
+async def _market_stock_list_all(order_type: str, market: str) -> dict:
+    """시장 단위 종목 목록 **전체**. 쪽을 끝까지 넘겨 모은다.
+
+    Returns:
+        {"rows": 필드를 줄인 행(코드가 멀쩡한 것만, 받은 순서 = 정렬 순서),
+         "complete": 모자란 쪽을 만나 끝을 확인했는가}
+
+    전체 개수를 알아야 "전체 N개 중 몇 번째"를 말할 수 있는데 응답에 그 값이 없다.
+    끝까지 받는 수밖에 없고, 받은 김에 캐시에 올려 다음 쪽은 같은 순간의 목록에서
+    자른다(쪽마다 새로 받으면 그 사이 순위가 바뀌어 경계 종목이 겹치거나 빠진다).
+    """
+    rows: list[dict] = []
+    seen: set[str] = set()
+    complete = False
+    for idx in range(_MARKET_LIST_PAGES_MAX):
+        payload = await _api_json(
+            f"{STOCK_API}/domestic/market/stock/default",
+            params={
+                "tradeType": "KRX",
+                "marketType": _market_type(market),
+                "orderType": order_type,
+                "startIdx": idx,
+                "pageSize": _MARKET_LIST_MAX,
+            },
+            what=f"종목 목록({order_type})",
+        )
+        chunk = _api_list(payload, what=f"종목 목록({order_type})")
+        added = 0
+        for row in chunk:
+            if not isinstance(row, dict):
+                continue
+            code = str(row.get("itemcode") or "")
+            # 쪽을 받는 사이 순위가 바뀌면 같은 종목이 앞뒤 쪽에 두 번 온다.
+            if len(code) != 6 or code in seen:
+                continue
+            seen.add(code)
+            rows.append({k: row.get(k) for k in _MARKET_ROW_KEYS})
+            added += 1
+        if len(chunk) < _MARKET_LIST_MAX:
+            complete = True
+            break
+        if not added:
+            break  # 같은 쪽이 되풀이된다(startIdx 해석이 바뀐 경우 등) — 끝을 모른다
+    return {"rows": rows, "complete": complete}
 
 
 def _rank_rows(rows: list, count: int) -> list[dict]:
@@ -1476,26 +1636,75 @@ async def get_change_ranking(
     return _rank_rows(rows, count)
 
 
+async def get_market_cap_page(
+    market: str = "KOSPI", count: int = 50, page: int = 1
+) -> dict:
+    """시가총액 순위를 count 개씩 나눈 page 번째 쪽.
+
+    Args:
+        market: "KOSPI" / "KOSDAQ" (ALL 미지원 — KOSPI 로 조회하고 market 에 그렇게 적는다)
+        count: 한 쪽에 담을 종목 수 (1~500)
+        page: 몇 번째 쪽인가 (1부터). 2쪽의 첫 순위는 count+1 위다.
+
+    Returns:
+        {"market", "rows": [{rank, code, name, price, change_rate, volume,
+          trade_value_est_krw, price_session, market_cap_billion, security_type,
+          trade_stop}],
+         "total_count", "start_rank", "page", "count", "pages", "has_next",
+         "complete", "type_counts": {type 코드: 전체 목록 안의 수}, "halted_count"}
+
+    순위는 네이버 목록의 순서다. 리츠·펀드·외국기업 행도 주식과 같은 순위표에
+    섞여 오므로 빼지 않고 security_type 으로 표시한다(보통 주식이면 None).
+    """
+    count = max(1, min(int(count), _MARKET_LIST_MAX))
+    page = max(1, int(page))
+    market_type = _market_type(market)
+    if market_type == "ALL":
+        market_type = "KOSPI"
+    universe = await _market_stock_list_all(_ORDER_MARKET_SUM, market_type)
+    rows = universe["rows"]
+    chunk, start = _page_slice(rows, count, page)
+
+    results = []
+    # chunk 는 코드가 멀쩡한 행만 담고 있어 _rank_rows 가 건너뛰는 행이 없다 —
+    # 그래서 zip 으로 원본 행과 짝을 맞춰도 시가총액이 옆 종목으로 밀리지 않는다.
+    for i, (base, row) in enumerate(zip(_rank_rows(chunk, len(chunk)), chunk)):
+        base["rank"] = start + i + 1
+        # 시가총액은 원 단위로 온다. 이 키의 라벨이 '억원'이므로 여기서 억으로 맞춘다.
+        cap_won = _num(row.get("marketSum"))
+        base["market_cap_billion"] = int(cap_won / 100_000_000) if cap_won else 0
+        base["security_type"] = security_type_label(row.get("type"))
+        base["trade_stop"] = row.get("tradeStopYn") == "Y"
+        results.append(base)
+
+    type_counts: dict[str, int] = {}
+    for row in rows:
+        key = str(row.get("type") or "").strip().upper() or "?"
+        type_counts[key] = type_counts.get(key, 0) + 1
+    total = len(rows)
+    return {
+        "market": market_type,
+        "rows": results,
+        "total_count": total,
+        "start_rank": start + 1,
+        "page": page,
+        "count": count,
+        "pages": -(-total // count),
+        "has_next": start + count < total,
+        "complete": universe["complete"],
+        "type_counts": type_counts,
+        "halted_count": sum(1 for r in rows if r.get("tradeStopYn") == "Y"),
+    }
+
+
 async def get_market_cap_ranking(market: str = "KOSPI", count: int = 50) -> list[dict]:
-    """시가총액 상위 종목을 가져옵니다.
+    """시가총액 상위 종목을 가져옵니다 (1쪽만). 전체 수·다음 쪽은 get_market_cap_page.
 
     Args:
         market: "KOSPI" / "KOSDAQ" (ALL 미지원)
         count: 최대 반환 개수 (기본 50, 최대 500)
     """
-    count = max(1, min(count, _MARKET_LIST_MAX))
-    market_type = _market_type(market)
-    if market_type == "ALL":
-        market_type = "KOSPI"
-    rows = await _market_stock_list(_ORDER_MARKET_SUM, market=market_type, size=count)
-
-    results = []
-    for base, row in zip(_rank_rows(rows, count), rows):
-        # 시가총액은 원 단위로 온다. 이 키의 라벨이 '억원'이므로 여기서 억으로 맞춘다.
-        cap_won = _num(row.get("marketSum"))
-        base["market_cap_billion"] = int(cap_won / 100_000_000) if cap_won else 0
-        results.append(base)
-    return results
+    return (await get_market_cap_page(market, count, 1))["rows"]
 
 
 @cached(ttl_market=30, ttl_closed=3600)  # 장중 30초, 장마감 1시간

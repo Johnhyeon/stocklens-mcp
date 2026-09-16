@@ -40,7 +40,8 @@ from stock_mcp_server.naver import (
     get_volume_ranking as naver_get_volume_ranking,
     get_change_ranking as naver_get_change_ranking,
     get_alert_codes as naver_get_alert_codes,
-    get_market_cap_ranking as naver_get_market_cap_ranking,
+    get_market_cap_page as naver_get_market_cap_page,
+    security_type_label as naver_security_type_label,
     get_multi_stocks as naver_get_multi_stocks,
     get_multi_chart_stats as naver_get_multi_chart_stats,
     scan_stocks_to_snapshot as naver_scan_snapshot,
@@ -969,6 +970,100 @@ _UNLABELED_SESSION_NOTE = (
     " 않습니다. 2026-09-14부터 16:00~20:00 애프터마켓 체결로 현재가·등락률·거래량이 바뀌므로"
     " 이 표의 값을 정규장 종가 기준이라고 단정하지 마세요."
 )
+
+
+# 목록 도구가 한 번에 돌려주는 최대 행 수. 그보다 긴 목록은 page 로 나눠 받는다.
+_LIST_PAGE_MAX = 500
+
+
+def _list_window(count, page) -> tuple[int, int, int]:
+    """(적용 count, 적용 page, 요청 count). count 는 1~500, page 는 1 이상."""
+    requested = int(count)
+    return max(1, min(requested, _LIST_PAGE_MAX)), max(1, int(page)), requested
+
+
+def _group_page_view(
+    result: dict, *, what: str, requested_count: int
+) -> tuple[str | None, str, list[str], dict | None]:
+    """업종·테마 구성종목 한 쪽의 (빈 쪽 안내, 머리말, 꼬리말, coverage).
+
+    구성종목 목록은 등락률 내림차순이다. 한 쪽만 내보내면서 머리말에 그 쪽의 행 수만
+    적으면, 잘린 목록이 업종 전체로 읽히고 그날 많이 내린 종목이 말없이 빠진다
+    (2026-09-17: 제약 175종목이 "(50개 종목)"으로 나갔다). 머리말에 전체 수와 이
+    쪽의 범위를, 꼬리말에 다음 쪽 호출법을 적고, 전체가 아니면 coverage 로 남긴다.
+
+    빈 쪽 안내가 None 이 아니면 요청한 쪽이 목록 끝을 넘었다는 뜻이다.
+    """
+    name = result.get(f"{what}_name")
+    label = "업종" if what == "sector" else "테마"
+    stocks = result.get("stocks") or []
+    shown = len(stocks)
+    fetched = result.get("fetched_count", shown)
+    total = result.get("total_count", fetched)
+    count = result.get("count", max(1, shown))
+    page = result.get("page", 1)
+    start = result.get("start_index", 1)
+    end = start + shown - 1
+    pages = -(-fetched // count) if count else 1
+    fetch_complete = result.get("complete", True) and fetched >= total
+    has_next = start - 1 + count < fetched
+
+    if not shown and fetched:
+        return (
+            f"{label}: {name} — 전체 {total:,}개라 page={page}(count={count})에는 종목이 "
+            f"없습니다. 마지막 쪽은 page={pages} 입니다.",
+            "", [], None,
+        )
+
+    whole = start == 1 and not has_next
+    if whole:
+        head = f"{label}: {name} — 전체 {total:,}개 종목 (등락률 내림차순)"
+    else:
+        head = (f"{label}: {name} — 전체 {total:,}개 중 {start:,}~{end:,}번째 "
+                f"(등락률 내림차순, {page}/{pages}쪽)")
+
+    notes: list[str] = []
+    if has_next:
+        notes.append(
+            f"※ 이 표는 전체 {total:,}개 중 {start:,}~{end:,}번째입니다. 등락률 내림차순이라 "
+            f"**뒤쪽 쪽에 그날 덜 오르거나 많이 내린 종목**이 있습니다."
+        )
+        rest = (f"한 번에 모두 받으려면 `count={total}`." if total <= _LIST_PAGE_MAX
+                else f"count 는 최대 {_LIST_PAGE_MAX}이라 쪽을 나눠 받으세요.")
+        notes.append(
+            f"  다음 쪽: `page={page + 1}` (count={count} 그대로, 전체 {pages}쪽). {rest}"
+        )
+    elif not whole:
+        notes.append(f"※ 마지막 쪽입니다 (전체 {total:,}개).")
+    if requested_count > _LIST_PAGE_MAX and has_next:
+        notes.append(
+            f"※ count 는 한 번에 최대 {_LIST_PAGE_MAX}입니다 (요청 {requested_count} → {count})."
+        )
+    if not fetch_complete:
+        notes.append(
+            f"⚠️ 네이버가 밝힌 {label} 종목 수는 {total:,}개인데 {fetched:,}개만 받았습니다. "
+            "받는 사이 등락률 순서가 바뀌었거나 응답이 중간에 끊겼을 수 있어, "
+            "이 목록에서 빠진 종목이 있을 수 있습니다."
+        )
+
+    coverage = None
+    if not (whole and fetch_complete):
+        coverage = {
+            "requested": {"unit": "stock", "count": requested_count, "page": page},
+            "effective": {"unit": "stock", "count": count, "from": start, "to": end},
+            "returned_count": shown,
+            "total_count": total,
+            "fetched_count": fetched,
+            "page": page,
+            "pages": pages,
+            "next_page": page + 1 if has_next else None,
+            "truncated": has_next,
+            "coverage_complete": False,
+            "reason": ("unknown" if not fetch_complete
+                       else "server_cap" if requested_count > _LIST_PAGE_MAX and has_next
+                       else "pagination"),
+        }
+    return None, head, notes, coverage
 
 
 def _kr_market_note(krx: dict | None = None, price_session: str | None = None) -> list[str]:
@@ -2614,27 +2709,31 @@ async def get_theme_stocks(
     theme_name: str,
     count: int = 30,
     include_reason: bool = True,
+    page: int = 1,
 ) -> str:
     """테마종목 — 특정 테마에 속한 종목 리스트를 가져옵니다.
     "반도체 테마 종목", "2차전지 관련주", "AI 테마주" 같은 질문에 사용합니다.
     테마명 부분 매칭을 지원합니다.
 
     ⚠️ **등락률 내림차순**으로 반환합니다. count로 자르면 그날 많이 오른 종목만 남고
-    **소외된(많이 내린) 종목은 목록에서 빠집니다.** 저평가·소외 종목을 찾는 용도라면
-    count를 테마 전체 종목 수 이상으로 주거나, 시가총액 기준
-    `get_market_cap_ranking`을 모집단으로 쓰세요.
+    **소외된(많이 내린) 종목은 뒤쪽 쪽으로 밀립니다.** 결과 머리말에 테마 전체 종목 수와
+    이 쪽의 범위("전체 N개 중 1~30번째")가 나옵니다. 저평가·소외 종목을 찾는 용도라면
+    count를 전체 종목 수로 주거나(최대 500) 꼬리말의 `page=`로 이어 받으세요.
+    시가총액 기준 모집단이 필요하면 `get_market_cap_ranking`을 쓰세요.
 
     Args:
         theme_name: 테마명 (예: "2차전지", "AI", "반도체")
-        count: 반환할 최대 종목 수 (기본 30)
+        count: 한 번에 받을 종목 수 (기본 30, 최대 500)
         include_reason: 편입사유 포함 여부. False로 하면 토큰 대폭 절감.
                         "왜 이 테마에 들어갔는지" 필요 없으면 False 권장.
+        page: count 개씩 나눈 몇 번째 쪽인가 (기본 1). page=2, count=30 이면 31~60번째.
     """
-    count = min(count, 50)
+    count, page, requested_count = _list_window(count, page)
     result = await naver_get_theme_stocks(
         theme_name,
         count=count,
         include_reason=include_reason,
+        page=page,
     )
     if not result.get("theme_id"):
         return (
@@ -2643,7 +2742,11 @@ async def get_theme_stocks(
         )
 
     stocks = result["stocks"]
-    lines = [f"테마: {result['theme_name']} ({len(stocks)}개 종목)", ""]
+    past_end, head, page_notes, coverage = _group_page_view(
+        result, what="theme", requested_count=requested_count)
+    if past_end:
+        return past_end
+    lines = [head, ""]
 
     if include_reason:
         lines.append("코드 | 종목명 | 현재가 | 등락률 | 거래량 | 편입사유")
@@ -2662,12 +2765,16 @@ async def get_theme_stocks(
                 f"{s['code']} | {s['name']} | {s['price']:,} | {s['change_rate']} | {s['volume']:,}"
             )
 
+    if page_notes:
+        lines += [""] + page_notes
     unlabeled = _after_market_values_possible(build_market_clock()["krx"])
     if unlabeled:
         lines += ["", _UNLABELED_SESSION_NOTE.format(what="테마")]
     return _append_result_meta("\n".join(lines), _kr_meta(
         kind="snapshot",
         price_session=rmeta.PRICE_SESSION_UNKNOWN if unlabeled else None,
+        data_completeness=rmeta.PARTIAL if coverage else rmeta.COMPLETE,
+        coverage=coverage,
         warnings=["테마 목록 시세의 세션이 표시되지 않아 애프터마켓 반영 여부를 확인할 수 없습니다."]
         if unlabeled else None,
     ))
@@ -2699,21 +2806,28 @@ async def list_sectors() -> str:
 @mcp.tool()
 @safe_tool
 @track_metrics("get_sector_stocks")
-async def get_sector_stocks(sector_name: str, count: int = 30) -> str:
+async def get_sector_stocks(sector_name: str, count: int = 30, page: int = 1) -> str:
     """업종종목 — 특정 업종에 속한 종목 리스트를 가져옵니다.
     "통신장비 업종 종목", "반도체 업종", "제약 섹터 종목" 같은 질문에 사용합니다.
     업종명 부분 매칭을 지원합니다.
 
     ⚠️ **등락률 내림차순**으로 반환합니다. count로 자르면 그날 많이 오른 종목만 남고
-    **소외된(많이 내린) 종목은 목록에서 빠집니다.** 업종 전체를 보려면 `list_sectors`로
-    그 업종의 종목 수를 먼저 확인하고 count를 그 이상으로 주세요.
+    **소외된(많이 내린) 종목은 뒤쪽 쪽으로 밀립니다.** 결과 머리말에 업종 전체 종목 수와
+    이 쪽의 범위("전체 175개 중 1~30번째")가 나옵니다.
+    업종 전체를 보려면:
+    - 500종목 이하 업종: count를 머리말의 전체 수로 주세요 (예: 제약 175 → count=175).
+    - 그보다 큰 업종(예: '기타' 약 1,500종목): count=500 으로 page=1, 2, 3, 4 를 차례로.
+      꼬리말에 다음 쪽 호출법이 나옵니다.
+    쪽은 같은 순간의 목록에서 자릅니다(장중 5분 캐시). 몇 분 넘게 띄워 받으면 그 사이
+    등락률 순서가 바뀌어 경계 종목이 겹치거나 빠질 수 있습니다.
 
     Args:
         sector_name: 업종명 (예: "통신장비", "반도체", "제약")
-        count: 반환할 최대 종목 수 (기본 30)
+        count: 한 번에 받을 종목 수 (기본 30, 최대 500)
+        page: count 개씩 나눈 몇 번째 쪽인가 (기본 1). page=2, count=30 이면 31~60번째.
     """
-    count = min(count, 50)
-    result = await naver_get_sector_stocks(sector_name, count=count)
+    count, page, requested_count = _list_window(count, page)
+    result = await naver_get_sector_stocks(sector_name, count=count, page=page)
     if not result.get("sector_id"):
         return (
             f"'{sector_name}' 업종을 찾을 수 없습니다. "
@@ -2721,19 +2835,27 @@ async def get_sector_stocks(sector_name: str, count: int = 30) -> str:
         )
 
     stocks = result["stocks"]
-    lines = [f"업종: {result['sector_name']} ({len(stocks)}개 종목)", ""]
+    past_end, head, page_notes, coverage = _group_page_view(
+        result, what="sector", requested_count=requested_count)
+    if past_end:
+        return past_end
+    lines = [head, ""]
     lines.append("코드 | 종목명 | 현재가 | 등락률 | 거래량")
     lines.append("---|---|---|---|---")
     for s in stocks:
         lines.append(
             f"{s['code']} | {s['name']} | {s['price']:,} | {s['change_rate']} | {s['volume']:,}"
         )
+    if page_notes:
+        lines += [""] + page_notes
     unlabeled = _after_market_values_possible(build_market_clock()["krx"])
     if unlabeled:
         lines += ["", _UNLABELED_SESSION_NOTE.format(what="업종")]
     return _append_result_meta("\n".join(lines), _kr_meta(
         kind="snapshot",
         price_session=rmeta.PRICE_SESSION_UNKNOWN if unlabeled else None,
+        data_completeness=rmeta.PARTIAL if coverage else rmeta.COMPLETE,
+        coverage=coverage,
         warnings=["업종 목록 시세의 세션이 표시되지 않아 애프터마켓 반영 여부를 확인할 수 없습니다."]
         if unlabeled else None,
     ))
@@ -2806,13 +2928,17 @@ async def get_sector_valuation(
     else:
         rows = await naver_get_sector_stocks(sector_name, count=FETCH_ALL)
     # 두 도구 모두 {"stocks": [...]} 형태의 dict 를 돌려준다(리스트가 아니다).
+    listed_total = 0
     if isinstance(rows, dict):
+        listed_total = rows.get("total_count") or 0
         rows = rows.get("stocks") or rows.get("items") or []
     if not rows:
         return f"'{sector_name}'에 해당하는 종목을 찾지 못했습니다. list_sectors / list_themes 로 이름을 확인하세요."
 
     all_codes = [r.get("code") for r in rows if isinstance(r, dict) and r.get("code")]
-    universe = len(all_codes)
+    # 분모는 받은 행 수가 아니라 업종 전체 수다. FETCH_ALL 로 받은 300개를 전체로
+    # 세면 '기타'(1,537종목) 같은 큰 업종이 "업종 전체 300개 · 중앙값"으로 나간다.
+    universe = max(len(all_codes), listed_total)
     # 집계는 업종 전체가 기본이다(SL-11). 등락률 상위 top_n 으로 분모를 자르면
     # 그날 오른 종목 쪽으로 치우친 값이 "업종 중앙값"으로 나간다(실측: 반도체
     # 172개 중 40개만 집계). top_n 은 표시 전용이다.
@@ -3112,32 +3238,113 @@ async def get_change_ranking(
 @mcp.tool()
 @safe_tool
 @track_metrics("get_market_cap_ranking")
-async def get_market_cap_ranking(market: str = "KOSPI", count: int = 50) -> str:
+async def get_market_cap_ranking(market: str = "KOSPI", count: int = 50, page: int = 1) -> str:
     """시가총액순위 — 시가총액 상위 종목을 가져옵니다.
-    "대형주", "시가총액 TOP", "코스피 대장주" 같은 질문에 사용합니다.
+    "대형주", "시가총액 TOP", "코스피 대장주", "코스닥 전 종목 시총" 같은 질문에 사용합니다.
+
+    결과 머리말에 시장 전체 종목 수와 이 표의 순위 범위("전체 1,820개 중 1~50위")가
+    나옵니다. 501위 아래도 받을 수 있습니다 — count 개씩 나눈 쪽을 `page`로 고릅니다.
+    - 시장 전체: count=500 으로 page=1, 2, … 를 꼬리말에 "다음 쪽"이 없을 때까지.
+      (2026-09 기준 KOSPI 약 950개 = 2쪽, KOSDAQ 약 1,800개 = 4쪽)
+    - 특정 순위 구간: 예) 301~400위 = count=100, page=4.
+    쪽은 같은 순간의 목록에서 자릅니다(장중 1분 캐시). 장중에 몇 분 넘게 띄워 받으면
+    그 사이 순위가 바뀌어 경계 종목이 겹치거나 빠질 수 있습니다.
+
+    ⚠️ 순위표에는 주식만 있는 게 아닙니다. 리츠·인프라펀드·상장 펀드·외국기업(DR 포함)
+    행이 같은 순위에 섞여 있고, 거래정지 종목도 들어 있습니다. 해당 행은 '구분' 열에
+    표시되고, 시장 전체의 구분별 개수는 결과 끝에 나옵니다. "상장 기업 수"처럼
+    주식만 셀 때는 그 개수를 쓰세요.
 
     Args:
         market: "KOSPI" / "KOSDAQ" (기본 KOSPI, ALL 미지원)
-        count: 가져올 종목 수 (기본 50, 최대 500)
+        count: 한 번에 받을 종목 수 (기본 50, 최대 500)
+        page: count 개씩 나눈 몇 번째 쪽인가 (기본 1). page=2, count=500 이면 501~1000위.
     """
-    count = min(count, 500)
-    ranks = await naver_get_market_cap_ranking(market=market, count=count)
+    count, page, requested_count = _list_window(count, page)
+    result = await naver_get_market_cap_page(market=market, count=count, page=page)
+    total = result["total_count"]
+    mkt = result["market"]
+    if not total:
+        return f"{mkt} 시가총액 순위를 가져올 수 없습니다."
+    ranks = result["rows"]
+    pages = result["pages"]
     if not ranks:
-        return f"{market} 시가총액 순위를 가져올 수 없습니다."
+        return (f"시가총액 순위 ({mkt}) — 전체 {total:,}개라 page={page}(count={count})에는 "
+                f"종목이 없습니다. 마지막 쪽은 page={pages} 입니다.")
 
-    lines = [f"시가총액 상위 ({market}, {len(ranks)}개):", ""]
-    lines.append("순위 | 코드 | 종목명 | 현재가 | 등락률 | 시가총액(억원)")
-    lines.append("---|---|---|---|---|---")
+    first, last = ranks[0]["rank"], ranks[-1]["rank"]
+    lines = [f"시가총액 상위 ({mkt}) — 전체 {total:,}개 중 {first:,}~{last:,}위 ({page}/{pages}쪽)", ""]
+    show_kind = any(r.get("security_type") or r.get("trade_stop") for r in ranks)
+    if show_kind:
+        lines.append("순위 | 코드 | 종목명 | 현재가 | 등락률 | 시가총액(억원) | 구분")
+        lines.append("---|---|---|---|---|---|---")
+    else:
+        lines.append("순위 | 코드 | 종목명 | 현재가 | 등락률 | 시가총액(억원)")
+        lines.append("---|---|---|---|---|---")
     for r in ranks:
-        lines.append(
+        row = (
             f"{r['rank']} | {r['code']} | {r['name']} | {r['price']:,} | "
             f"{r['change_rate']} | {r['market_cap_billion']:,}"
         )
+        if show_kind:
+            marks = [m for m in (r.get("security_type"), "거래정지" if r.get("trade_stop") else None) if m]
+            row += f" | {' · '.join(marks) if marks else '-'}"
+        lines.append(row)
+
+    lines.append("")
+    if (market or "").upper() != mkt:
+        lines.append(f"※ 시가총액 순위는 KOSPI·KOSDAQ 따로만 됩니다. 요청한 '{market}' 대신 {mkt} 로 조회했습니다.")
+    if result["has_next"]:
+        lines.append(
+            f"※ 다음 쪽: `page={page + 1}` (count={count} 그대로) → {last + 1:,}위부터. "
+            f"전체 {total:,}개는 {pages}쪽입니다."
+        )
+    else:
+        lines.append(f"※ {mkt} 목록의 마지막 쪽입니다 (전체 {total:,}개).")
+    if requested_count > _LIST_PAGE_MAX:
+        lines.append(
+            f"※ count 는 한 번에 최대 {_LIST_PAGE_MAX}입니다 (요청 {requested_count} → {count})."
+        )
+    names = {"ST": "주식"}
+    parts = []
+    for code, n in sorted(result["type_counts"].items(), key=lambda kv: (kv[0] != "ST", -kv[1])):
+        label = names.get(code) or naver_security_type_label(None if code == "?" else code)
+        parts.append(f"{label} {n:,}")
+    composition = f"※ {mkt} 전체 {total:,}개 구분: " + " · ".join(parts)
+    if result["halted_count"]:
+        composition += f". 이 가운데 거래정지 {result['halted_count']:,}개"
+    lines.append(composition + ".")
+    if not result["complete"]:
+        lines.append(
+            f"⚠️ 네이버 목록의 끝을 확인하지 못했습니다. 전체 {total:,}개는 받은 데까지의 수라 "
+            "실제 종목 수보다 적을 수 있습니다."
+        )
+
     session, counts = _rows_price_session(ranks)
     note = _rows_session_note(counts)
     if note:
         lines += ["", note]
-    return _append_result_meta("\n".join(lines), _kr_meta(kind="snapshot", price_session=session))
+    truncated = requested_count > count
+    fetch_complete = bool(result["complete"])
+    coverage = {
+        "requested": {"unit": "rank", "count": requested_count, "page": page},
+        "effective": {"unit": "rank", "count": count, "from": first, "to": last},
+        "returned_count": len(ranks),
+        "total_count": total if fetch_complete else None,
+        "page": page,
+        "pages": pages,
+        "next_page": page + 1 if result["has_next"] else None,
+        "truncated": truncated,
+        "coverage_complete": fetch_complete and not truncated,
+        "reason": ("unknown" if not fetch_complete
+                   else "server_cap" if truncated else None),
+    }
+    return _append_result_meta("\n".join(lines), _kr_meta(
+        kind="snapshot",
+        price_session=session,
+        data_completeness=rmeta.COMPLETE if coverage["coverage_complete"] else rmeta.PARTIAL,
+        coverage=coverage,
+    ))
 
 
 @mcp.tool()

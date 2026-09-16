@@ -191,18 +191,21 @@ Naver theme list sorted by change %.
 
 #### `get_theme_stocks`
 Stocks within a theme.
-- `theme_name` (str, partial match), `count` (int, default 30, max 50), `include_reason` (bool)
+- `theme_name` (str, partial match), `count` (int, default 30, max 500), `include_reason` (bool), `page` (int, default 1)
+- Sorted by change %, so the biggest losers are on later pages. The header shows the theme's total and which rows this page holds, and the next `page` if more remain.
 
 #### `list_sectors`
 Sector list (~79 sectors).
 
 #### `get_sector_stocks`
 Stocks within a sector.
-- `sector_name` (str, partial match), `count`
+- `sector_name` (str, partial match), `count` (int, default 30, max 500), `page` (int, default 1)
+- Sorted by change %, so the biggest losers are on later pages. The header shows the sector's total and which rows this page holds (e.g. "175 total, rows 1-30").
 
 #### `get_volume_ranking` / `get_change_ranking` / `get_market_cap_ranking`
 Top stocks by volume / change / market cap.
-- `market` (`KOSPI|KOSDAQ|ALL`), `count` (int, default 50, max 500), `direction` (for `change_ranking`: `up|down`)
+- `market` (`KOSPI|KOSDAQ|ALL`; market cap has no ALL), `count` (int, default 50, max 500), `direction` (for `change_ranking`: `up|down`)
+- `page` (`get_market_cap_ranking` only, int, default 1): rank 501 and beyond starts at `count=500, page=2`. The result also shows the market's total and marks REITs, funds and halted stocks.
 
 ---
 

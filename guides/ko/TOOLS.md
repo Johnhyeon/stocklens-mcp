@@ -231,7 +231,8 @@ KOSPI / KOSDAQ 지수 현재값.
 
 #### `get_theme_stocks`
 테마 내 종목 리스트.
-- `theme_name` (str, 부분 매칭), `count` (int, 기본 30, 최대 50), `include_reason` (bool)
+- `theme_name` (str, 부분 매칭), `count` (int, 기본 30, 최대 500), `include_reason` (bool), `page` (int, 기본 1)
+- 등락률 순이라 뒤쪽 쪽에 많이 내린 종목이 있습니다. 결과 머리말에 테마 전체 종목 수와 이 표의 범위가 나오고, 더 있으면 다음 `page`를 알려드립니다.
 - 예: `"AI 반도체 테마 종목"`
 
 #### `list_sectors`
@@ -239,12 +240,14 @@ KOSPI / KOSDAQ 지수 현재값.
 
 #### `get_sector_stocks`
 업종 내 종목.
-- `sector_name` (str, 부분 매칭), `count`
+- `sector_name` (str, 부분 매칭), `count` (int, 기본 30, 최대 500), `page` (int, 기본 1)
+- 등락률 순이라 뒤쪽 쪽에 많이 내린 종목이 있습니다. 결과 머리말에 업종 전체 종목 수와 이 표의 범위(예: "전체 175개 중 1~30번째")가 나옵니다.
 - 예: `"통신장비 업종"`
 
 #### `get_volume_ranking` / `get_change_ranking` / `get_market_cap_ranking`
 거래량·등락률·시가총액 상위 종목.
-- `market` (`KOSPI|KOSDAQ|ALL`), `count` (int, 기본 50, 최대 500), `direction` (`change_ranking`만, `up|down`)
+- `market` (`KOSPI|KOSDAQ|ALL`, 시가총액은 ALL 미지원), `count` (int, 기본 50, 최대 500), `direction` (`change_ranking`만, `up|down`)
+- `page` (`get_market_cap_ranking`만, int, 기본 1): 501위 아래는 `count=500, page=2`부터 받습니다. 결과에 시장 전체 종목 수와 리츠·펀드·거래정지 표시가 함께 나옵니다.
 - 예: `"오늘 거래량 TOP 50"`, `"코스닥 하락률 20위"`
 
 #### `screen_by_flow`
