@@ -286,7 +286,10 @@ KOSPI / KOSDAQ 지수 현재값.
 
 #### `get_etf_list`
 ETF 1,000+ 목록 + 카테고리 필터·정렬.
-- `category` (7개 중 선택), `sort_by` (`market_cap|volume|return_1m|return_3m|return_6m|return_1y|dividend_yield`), `limit`
+- `category` (7개 중 선택), `keyword`, `sort_by` (`marketSum` 시가총액·기본 | `quant` 거래량 | `threeMonthEarnRate` 3개월 수익률 | `nav` 주당 NAV — 전부 큰 값이 앞), `limit`
+- 3개월 수익률 순은 오른 ETF가 앞, 많이 내린 ETF가 뒤입니다. 수익률 값이 없는 ETF는 순위에서 빠지고 그 수가 결과 아래에 나옵니다.
+- 1·6·12개월 수익률과 배당은 목록에 없어 정렬 기준으로 쓸 수 없습니다. 종목별로 `get_etf_info`에서 확인합니다.
+- 장 시작 전에는 네이버 목록의 등락률·거래량이 비어 있어 '등락률 없음'으로 나오고, 거래량 순을 요청하면 시가총액 순으로 보여주면서 그렇다고 적습니다.
 
 #### `get_etf_info`
 개별 ETF 상세 (기초지수·총보수·구성종목·수익률 1/3/6/12M).

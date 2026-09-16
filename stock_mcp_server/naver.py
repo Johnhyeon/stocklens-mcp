@@ -1774,6 +1774,28 @@ _ETF_TAB_NAMES = {
     7: "단기자금",
 }
 
+# ETF 목록 정렬 기준 → 표시 이름. 키는 네이버 ETF 목록 응답의 필드 이름이고, 전부 큰 값이 앞이다.
+ETF_SORT_LABELS = {
+    "marketSum": "시가총액 큰 순",
+    "quant": "거래량 많은 순",
+    "threeMonthEarnRate": "3개월 수익률 높은 순",
+    "nav": "주당 NAV 높은 순",
+}
+# 가이드에 한동안 목록에 없는 이름(market_cap·volume·return_3m …)이 적혀 있었다. 목록에 없는
+# 필드로 정렬하면 전부 0 으로 보고 응답 순서(시가총액 순)가 그대로 나갔다 — 뜻이 같은 필드가
+# 있는 이름만 받아 주고, 1·6·12개월 수익률·배당처럼 목록에 아예 없는 값은 받지 않는다.
+_ETF_SORT_ALIASES = {
+    "marketsum": "marketSum", "market_cap": "marketSum",
+    "quant": "quant", "volume": "quant",
+    "threemonthearnrate": "threeMonthEarnRate", "return_3m": "threeMonthEarnRate",
+    "nav": "nav",
+}
+
+
+def etf_sort_key(sort_by: str | None) -> str | None:
+    """ETF 목록 정렬 인자 → 응답 필드 이름. 목록으로 정렬할 수 없는 기준이면 None."""
+    return _ETF_SORT_ALIASES.get((sort_by or "").strip().lower())
+
 
 @cached(ttl_market=300, ttl_closed=3600)  # 장중 5분, 장마감 1시간
 async def get_etf_list(
@@ -1790,9 +1812,21 @@ async def get_etf_list(
             카테고리를 몰라도 테마 이름으로 바로 찾을 수 있다. 이미 한 번에
             받아온 전체 목록을 대상으로 in-memory 필터링이라 추가 네트워크
             호출은 없다. category와 함께 쓰면 AND 조건.
-        sort_by: 정렬 기준 ("marketSum", "quant", "threeMonthEarnRate", "nav")
+        sort_by: 정렬 기준 ("marketSum", "quant", "threeMonthEarnRate", "nav" — 전부 큰 값이 앞)
         limit: 반환 개수 (기본 20, 최대 50)
+
+    Returns:
+        {"items", "total": 순위에 든 수, "categories",
+         "sort_by": 실제로 정렬한 필드, "sort_requested": 요청한 필드,
+         "sort_label": 실제 정렬의 표시 이름,
+         "no_sort_value": 정렬 값이 없는 수 (3개월 수익률이면 순위에서 빼고, 나머지는 맨 뒤),
+         "quotes_live": 등락률·거래량이 채워져 있는가}
     """
+    sort_requested = etf_sort_key(sort_by)
+    if sort_requested is None:
+        raise ValueError(
+            f"ETF 목록 정렬 기준이 아닙니다: {sort_by!r} (가능: {', '.join(ETF_SORT_LABELS)})"
+        )
     resp = await fetch(ETF_LIST_API)
     # 네이버 ETF API는 EUC-KR 인코딩
     import json as _json
@@ -1805,6 +1839,12 @@ async def get_etf_list(
             "ETF 목록 응답에서 etfItemList 를 찾지 못했습니다 "
             f"(응답 키: {sorted(data.get('result', {}).keys()) or sorted(data.keys())})."
         )
+
+    # 장 시작 전에는 등락률·거래량이 전 종목 0 으로 온다(2026-09-17 08:39 실측: 1,171개 전부
+    # changeRate 0.0·quant 0, 같은 시각 종목 시세 API 도 PREOPEN 에 전일대비 0). 그 0 은 보합·
+    # 거래 없음이 아니라 빈 칸이다. 하루 동안 전 종목이 정확히 보합일 수는 없으니 필터 전
+    # 전체 목록으로 판단한다.
+    quotes_live = any((i.get("changeRate") or 0) != 0 or (i.get("quant") or 0) != 0 for i in items)
 
     # 카테고리 필터
     if category:
@@ -1821,11 +1861,19 @@ async def get_etf_list(
         kw = keyword.strip().lower()
         items = [i for i in items if kw in (i.get("itemname") or "").lower()]
 
-    # 정렬
-    reverse = True
-    if sort_by in ("threeMonthEarnRate",):
-        items = [i for i in items if i.get(sort_by) is not None]
-    items.sort(key=lambda x: abs(x.get(sort_by, 0) or 0), reverse=reverse)
+    # 정렬 — 부호 그대로 큰 값이 앞. 예전엔 abs() 로 줄 세워 '3개월 수익률 높은 순' 맨 위에
+    # -67% 레버리지 ETF 들이 왔다(2026-09-17 실측). 시가총액·거래량·NAV 는 음수가 없어
+    # (같은 날 1,171개 전수 확인) 부호를 살려도 순서가 그대로다.
+    sort_field = sort_requested
+    if sort_field == "quant" and not quotes_live:
+        sort_field = "marketSum"  # 전부 0 인 거래량으로는 순서를 만들 수 없다
+    valued = [i for i in items if _num(i.get(sort_field)) is not None]
+    no_value = [i for i in items if _num(i.get(sort_field)) is None]
+    valued.sort(key=lambda x: _num(x.get(sort_field)), reverse=True)
+    if sort_field == "threeMonthEarnRate":
+        items = valued  # 수익률이 없는 ETF 를 순위 어딘가에 끼워 넣지 않는다
+    else:
+        items = valued + no_value  # 값이 없다고 0 으로 줄 세우지 않고 맨 뒤에 둔다
 
     limit = min(limit, 50)
     result_items = []
@@ -1835,10 +1883,10 @@ async def get_etf_list(
             "name": it["itemname"],
             "category": _ETF_TAB_NAMES.get(it.get("etfTabCode"), "기타"),
             "price": it.get("nowVal"),
-            "change_rate": it.get("changeRate"),
+            "change_rate": it.get("changeRate") if quotes_live else None,
             "nav": it.get("nav"),
             "return_3m": it.get("threeMonthEarnRate"),
-            "volume": it.get("quant"),
+            "volume": it.get("quant") if quotes_live else None,
             "market_cap": it.get("marketSum"),  # 억원
         })
 
@@ -1846,6 +1894,11 @@ async def get_etf_list(
         "items": result_items,
         "total": len(items),
         "categories": _ETF_TAB_NAMES,
+        "sort_by": sort_field,
+        "sort_requested": sort_requested,
+        "sort_label": ETF_SORT_LABELS[sort_field],
+        "no_sort_value": len(no_value),
+        "quotes_live": quotes_live,
     }
 
 

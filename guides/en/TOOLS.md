@@ -227,7 +227,10 @@ Chart stats for many stocks (52-week high/low/drawdown/return/avg volume).
 
 #### `get_etf_list`
 1,000+ Korean ETFs with category filter and sorting.
-- `category` (one of 7), `sort_by` (`market_cap|volume|return_*|dividend_yield`), `limit`
+- `category` (one of 7), `keyword`, `sort_by` (`marketSum` market cap, default | `quant` volume | `threeMonthEarnRate` 3-month return | `nav` per-share NAV — all largest first), `limit`
+- 3-month return puts gainers first and the biggest losers last. ETFs without a 3-month return are left out, and the count is shown below the list.
+- 1/6/12-month returns and dividends are not in the list, so they can't be sort keys. Check them per ETF with `get_etf_info`.
+- Before the market opens Naver's list has blank change % and volume: rows show "등락률 없음" (no change data), and a volume sort falls back to market cap with a note saying so.
 
 #### `get_etf_info`
 Single ETF detail (underlying index, total expense ratio, top holdings, 1/3/6/12M returns).

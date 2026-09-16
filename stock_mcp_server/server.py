@@ -47,6 +47,8 @@ from stock_mcp_server.naver import (
     get_multi_chart_stats as naver_get_multi_chart_stats,
     scan_stocks_to_snapshot as naver_scan_snapshot,
     get_etf_list as naver_get_etf_list,
+    etf_sort_key as naver_etf_sort_key,
+    ETF_SORT_LABELS as NAVER_ETF_SORT_LABELS,
     get_etf_detail as naver_get_etf_detail,
     get_consensus as naver_get_consensus,
     get_reports as naver_get_reports,
@@ -4953,10 +4955,19 @@ async def get_etf_list(
       회사(예: 비상장사)를 "보유"한 ETF를 찾는 건 이 키워드로 안 된다 — 그
       회사명이 ETF 이름 자체에 없으면 못 찾으니, 후보 ETF를 좁힌 뒤
       get_etf_info로 구성종목을 직접 확인해야 한다.
-    sort_by: 정렬 기준 — "marketSum"(시가총액), "quant"(거래량),
-      "threeMonthEarnRate"(3개월수익률)
+    sort_by: 정렬 기준, 전부 큰 값이 앞 — "marketSum"(시가총액, 기본), "quant"(거래량),
+      "threeMonthEarnRate"(3개월 수익률 높은 순 — 손실이 큰 ETF는 맨 뒤), "nav"(주당 NAV).
+      1·6·12개월 수익률과 배당은 목록에 없어 정렬할 수 없다(종목별 get_etf_info 로 확인).
     limit: 반환 개수 (기본 20, 최대 50)
     """
+    if naver_etf_sort_key(sort_by) is None:
+        return (
+            f"⚠️ ETF 목록은 '{sort_by}' 기준으로 정렬할 수 없습니다. "
+            "가능한 기준: "
+            + ", ".join(f"{k}({v})" for k, v in NAVER_ETF_SORT_LABELS.items())
+            + ".\n1·6·12개월 수익률과 배당은 ETF 목록에 없는 값이라 순위를 매길 수 없습니다. "
+            "후보를 좁힌 뒤 get_etf_info 로 종목별로 확인하세요."
+        )
     data = await naver_get_etf_list(
         category=category or None,
         keyword=keyword or None,
@@ -4973,15 +4984,27 @@ async def get_etf_list(
         f", 키워드: '{keyword}'" if keyword else "",
     ])
     lines = [
-        f"ETF 목록 ({data['total']}개 중 상위 {len(items)}개{header_extra})",
+        f"ETF 목록 ({data['total']}개 중 상위 {len(items)}개, 정렬: {data['sort_label']}{header_extra})",
         "",
     ]
+    quotes_live = data["quotes_live"]
+    warnings = []
+    if data["sort_by"] != data["sort_requested"]:
+        lines += [
+            f"⚠️ 지금은 네이버 ETF 목록의 거래량이 전 종목 0이라 "
+            f"{NAVER_ETF_SORT_LABELS[data['sort_requested']]}으로 줄 세울 수 없습니다. "
+            f"{data['sort_label']}으로 보여드립니다.",
+            "",
+        ]
+    if not quotes_live:
+        warnings.append("ETF 목록의 등락률·거래량이 전 종목 0으로 옴 — 보합이 아니라 빈 값이라 '등락률 없음'으로 표시")
 
     for it in items:
-        chg = it.get("change_rate", 0) or 0
-        chg_sign = "+" if chg > 0 else ""
+        chg = it.get("change_rate")
+        chg_str = f"{chg:+.2f}%" if chg is not None else "등락률 없음"
         ret3m = it.get("return_3m")
-        ret3m_str = f" | 3M: {'+' if ret3m > 0 else ''}{ret3m:.1f}%" if ret3m else ""
+        # 0.0% 도 값이다 — 참거짓으로 거르면 보합인 ETF 의 수익률 칸이 사라진다.
+        ret3m_str = f" | 3M: {ret3m:+.1f}%" if ret3m is not None else ""
         mcap = it.get("market_cap")
         price = it.get("price")
         nav = it.get("nav")
@@ -4989,18 +5012,37 @@ async def get_etf_list(
         lines.append(
             f"- **{it['name']}** ({it['code']}) "
             f"| {f'{price:,.0f}원' if price is not None else '가격 없음'} "
-            f"({chg_sign}{chg:.2f}%) "
+            f"({chg_str}) "
             f"| NAV {f'{nav:,.0f}원' if nav is not None else '없음'} "
             f"| 시총 {f'{mcap:,.0f}억원' if mcap else '없음'}"
             f"{ret3m_str}"
         )
 
     lines.append("")
+    if data["no_sort_value"]:
+        if data["sort_by"] == "threeMonthEarnRate":
+            lines.append(f"※ 3개월 수익률 값이 없는 ETF {data['no_sort_value']:,}개는 순위에서 뺐습니다.")
+        else:
+            lines.append(
+                f"※ 정렬 값이 없는 ETF {data['no_sort_value']:,}개는 0으로 치지 않고 목록 맨 뒤에 두었습니다."
+            )
+    if not quotes_live:
+        # 장 전 실측(2026-09-17 08:39)에서만 원인을 확인했다. 장중에 이러면 원인을 단정하지 않는다.
+        if build_market_clock()["krx"].get("is_open"):
+            cause = "장중인데 값이 비어 있어 네이버 목록 쪽 문제일 수 있습니다. 등락률은 get_price 로 확인하세요."
+        else:
+            cause = "장이 닫혀 있는 동안 네이버가 이 값을 비워 둔 상태입니다."
+        lines.append(
+            "※ 지금 네이버 ETF 목록은 전 종목 등락률·거래량이 0으로 옵니다. 보합이라는 뜻이 아니어서 "
+            f"'등락률 없음'으로 적었습니다. {cause}"
+        )
     lines.append("카테고리: " + ", ".join(data["categories"].values()))
 
     # ETF·ETN 은 KRX 애프터마켓 대상이 아니다(2026-09-15 16:03 069500 = REGULAR_MARKET/CLOSE).
     return _append_result_meta("\n".join(lines), _kr_meta(
-        kind="snapshot", price_session=rmeta.PRICE_SESSION_REGULAR))
+        kind="snapshot", price_session=rmeta.PRICE_SESSION_REGULAR,
+        data_completeness=rmeta.COMPLETE if quotes_live else rmeta.PARTIAL,
+        warnings=warnings or None))
 
 
 @mcp.tool()
