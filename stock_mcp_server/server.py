@@ -19,7 +19,7 @@ _tls_bootstrap.apply()
 
 import httpx  # noqa: E402
 
-from mcp.server.fastmcp import FastMCP  # noqa: E402
+from stock_mcp_server._tool_schema import LensFastMCP  # noqa: E402
 from stock_mcp_server import _pdf as pdfx  # noqa: E402
 from stock_mcp_server.naver import (
     search_stock as naver_search_stock,
@@ -243,7 +243,7 @@ try:
 except Exception:
     _SESSION_CONTEXT = ""
 
-mcp = FastMCP(
+mcp = LensFastMCP(
     "StockLens",
     instructions="""StockLens — 한국 주식 데이터를 네이버 증권에서 실시간 조회합니다.
 종목코드(예: 005930)나 종목명(예: 삼성전자)으로 검색할 수 있습니다.
