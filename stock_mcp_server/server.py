@@ -3308,6 +3308,9 @@ async def get_indicators(
       `volume.volume_rank_252b`  252봉 중 순위, **1이 최다**
       `position.bars_since_high/low`  달력일이 아니라 **봉 개수**.
         달력일이 필요하면 `high_date`/`low_date`로 직접 계산하세요.
+      `position.high_52w/low_52w`  봉이 1년치(일 252·주 52·월 12)가 안 되면 null.
+        그때 조회 구간 고저는 `lookback_high/low` 에 있습니다
+      주봉·월봉의 크로스 경과는 `days_ago` 가 아니라 `bars_ago`(봉 개수)
     `_meta.data_basis`가 `in_progress_bar`면 마지막 봉이 미마감이라 이 판정들은
     장 마감 시 달라질 수 있습니다.
 
@@ -3444,6 +3447,7 @@ def _indicator_coverage(
     달력 기간 라벨이 붙는 요구량은 봉 주기를 따라야 한다: 52주 위치는
     일봉 252 / 주봉 52 / 월봉 12 봉이다. 계산 창(compute_position)만 고치고
     여기를 252 로 두면, 104주 주봉을 넣어도 판정문이 partial 로 틀린다.
+    분봉은 52주를 채울 수 없어 조회 구간 위치(position_lookback)만 요구한다.
     """
     from stock_mcp_server._indicators import _BARS_PER_YEAR
 
@@ -3457,7 +3461,12 @@ def _indicator_coverage(
         except Exception:
             continue
     if "position_52w" in required:
-        required["position_52w"] = _BARS_PER_YEAR.get(timeframe, 252)
+        bars_per_year = _BARS_PER_YEAR.get(timeframe)
+        if bars_per_year is None:
+            del required["position_52w"]
+            required["position_lookback"] = 2
+        else:
+            required["position_52w"] = bars_per_year
     return {
         "available_bars": available_bars,
         "required_bars": dict(sorted(required.items())),
@@ -4201,7 +4210,9 @@ async def save_analysis_to_excel(
             bars: list = []
             fl: list = []
             try:
-                bars = await get_ohlcv(c, "day", max(detail_days, 130))
+                # 시트가 "52주 고점·저점"이라고 쓴다. 130봉(반년)으로는 52주 값이
+                # 나오지 않으므로 1년치(252봉)에 거래정지 제외 여유를 둔다.
+                bars = await get_ohlcv(c, "day", max(detail_days, 260))
                 ind = compute_indicators(bars, ["ma_phase", "position", "volume"])
                 pos = ind.get("position") or {}
                 vol = ind.get("volume") or {}
@@ -9035,6 +9046,12 @@ async def get_intraday_indicators(
     차트와 같은 봉 데이터로 계산한다(공급원 혼합 없음). 일봉 지표는
     기존 get_indicators 사용. days 가 아니라 **bars**(봉 개수) 기준이다.
 
+    분봉은 일봉과 키 이름이 다르다 — 이름 그대로 읽으세요:
+      `position.lookback_high/low`  조회한 봉 구간의 고가·저가. 52주 값이 아님
+      `ma_cross`·`macd.cross` 의 `bars_ago`  몇 **봉** 전인지
+      `volume.trade_value_est_krw` / `_usd`  종가×거래량 추산. 통화는 이름대로
+      미국 가격은 달러 소수 둘째 자리(1달러 미만은 넷째 자리)
+
     Args:
         symbol: KR 종목코드 또는 US 티커
         market: "KR" | "US"
@@ -9081,10 +9098,15 @@ async def get_intraday_indicators(
             f"{symbol} {interval} 분봉 데이터가 없어 지표를 계산할 수 "
             "없습니다.", "no_session")
 
-    result = compute_indicators(ohlcv, include, params=params)
+    # 분봉은 1년을 봉 수로 정할 수 없다. timeframe 을 넘기지 않으면 일봉으로
+    # 계산돼 5분봉 60개의 고저가 high_52w 로 나갔다(2026-09-17 실측).
+    currency = "KRW" if market == "KR" else "USD"
+    result = compute_indicators(ohlcv, include, params=params,
+                                timeframe=interval, currency=currency)
     ind_errors = _indicator_error_list(result)
     ind_cov = _indicator_coverage(
-        include=include, available_bars=len(ohlcv), params=params)
+        include=include, available_bars=len(ohlcv), params=params,
+        timeframe=interval)
 
     extra = _intraday_meta_extra(dataset, route_meta)
     extra["indicator_coverage"] = ind_cov
