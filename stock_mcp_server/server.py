@@ -38,6 +38,7 @@ from stock_mcp_server.naver import (
     get_sector_stocks as naver_get_sector_stocks,
     get_stock_sector as naver_get_stock_sector,
     get_volume_ranking as naver_get_volume_ranking,
+    volume_sort_key as naver_volume_sort_key,
     get_change_ranking as naver_get_change_ranking,
     get_alert_codes as naver_get_alert_codes,
     get_market_cap_page as naver_get_market_cap_page,
@@ -2310,6 +2311,8 @@ async def screen_by_flow(
 
     "거래대금 상위 중 외국인·기관 동반 매수", "이틀 연속 수급 들어온 종목" 같은 스크리닝 전용.
     랭킹+수급을 서버에서 join해 매치 종목만 반환 → 토큰·시간 절감.
+    후보는 get_volume_ranking 과 같은 순위입니다 — trade_value 면 시장 전체 거래대금 상위 N개
+    (대형주 포함), volume 이면 시장 전체 거래량 상위 N개.
 
     Args:
         top_n: 상위 후보 수 (기본 100, 최대 500). 클수록 정확하나 느림(500≈20~50초)
@@ -2324,10 +2327,12 @@ async def screen_by_flow(
     inst_days = max(0, min(inst_days, 10))
     needed_days = max(foreign_days, inst_days, 1)
 
+    sort_by = naver_volume_sort_key(sort_by)
+    sort_label = "거래대금" if sort_by == "trade_value" else "거래량"
     ranks = await naver_get_volume_ranking(market=market, count=top_n, sort_by=sort_by)
     if not ranks:
-        meta = _kr_meta(kind="bars", data_completeness=rmeta.NONE, warnings=[f"{market} 거래량 순위를 가져오지 못했습니다."])
-        return _append_result_meta(f"{market} 거래량 순위를 가져올 수 없습니다.", meta)
+        meta = _kr_meta(kind="bars", data_completeness=rmeta.NONE, warnings=[f"{market} {sort_label} 순위를 가져오지 못했습니다."])
+        return _append_result_meta(f"{market} {sort_label} 순위를 가져올 수 없습니다.", meta)
 
     # 코드 단위 dedup — 네이버 페이지 경계나 시장 합산에서 같은 종목이
     # 두 번 등장하는 케이스 방지 (먼저 등장한 항목 우선, rank 보존)
@@ -2373,7 +2378,6 @@ async def screen_by_flow(
         if ok_frgn and ok_inst:
             matched.append((item, data))
 
-    sort_label = "거래대금" if sort_by == "trade_value" else "거래량"
     cond_parts = []
     if foreign_days > 0:
         cond_parts.append(f"외국인 {foreign_days}일 연속 순매수")
@@ -2413,7 +2417,7 @@ async def screen_by_flow(
             )
         lines.append("")
 
-    # 후보는 거래량 순위 행이라 세션 표시가 있다. 16시 이후면 현재가가 애프터마켓 체결이다.
+    # 후보는 시장 순위 행이라 세션 표시가 있다. 16시 이후면 현재가가 애프터마켓 체결이다.
     note = _rows_session_note(_rows_price_session([item for item, _ in matched])[1])
     if note:
         lines.append(note)
@@ -3133,10 +3137,15 @@ async def get_volume_ranking(
     """거래량/거래대금 순위 — 상위 종목을 가져옵니다.
 
     "거래량 많은 종목" → sort_by="volume" (기본, 주수 기준)
-    "거래대금 많은 종목"/"거래 규모 큰 종목" → sort_by="trade_value" (원 기준)
+    "거래대금 많은 종목"/"거래 규모 큰 종목"/"돈이 몰린 종목" → sort_by="trade_value" (원 기준)
 
-    대형 고단가 종목(삼전·하이닉스 등)은 거래량(주수)이 작아도 거래대금은 클 수 있어
-    스크리닝 시에는 sort_by="trade_value"가 더 적합한 경우가 많습니다.
+    두 순위는 뽑는 대상부터 다릅니다. volume 은 시장 전체의 거래량 순위, trade_value 는
+    시장 전체의 거래대금 순위를 그대로 받습니다(거래량 상위 안에서 다시 줄 세우는 게 아님).
+    주가가 높은 대형주(삼성전자·SK하이닉스 등)는 주수가 작아 volume 순위에는 잘 안 보이고,
+    주가가 몇 원~몇백 원인 종목은 주수만 커서 volume 순위 위쪽에 올라옵니다.
+    시장 자금이 어디 몰렸는지 볼 때는 trade_value 를 쓰세요.
+
+    거래량·거래대금은 KRX 체결분입니다(넥스트레이드 체결은 들어 있지 않음).
 
     Args:
         market: "KOSPI" / "KOSDAQ" / "ALL" (기본 ALL)
@@ -3144,23 +3153,27 @@ async def get_volume_ranking(
         sort_by: "volume"(거래량 주수) / "trade_value"(거래대금 원)
     """
     count = min(count, 500)
+    sort_by = naver_volume_sort_key(sort_by)
     ranks = await naver_get_volume_ranking(market=market, count=count, sort_by=sort_by)
-    if not ranks:
-        return f"{market} 거래량 순위를 가져올 수 없습니다."
-
     sort_label = "거래대금" if sort_by == "trade_value" else "거래량"
+    if not ranks:
+        return f"{market} {sort_label} 순위를 가져올 수 없습니다."
+
     lines = [f"{sort_label} 상위 ({market}, {len(ranks)}개, 정렬={sort_by}):", ""]
     # 헤더가 '거래대금(원)'인데 셀은 억 단위로 찍혀 헤더와 값이 어긋나 있었다.
     # 단위는 헤더 한 곳에서만 선언하고 셀은 숫자만 둔다.
-    lines.append("순위 | 코드 | 종목명 | 현재가(원) | 등락률 | 거래량(주) | 거래대금(억원, 추산)")
+    # 거래대금은 네이버가 주는 체결 거래대금이다. 현재가×거래량 추산을 찍으면
+    # '거래대금 상위' 순서와 열의 크기 순서가 어긋난다(두 값이 몇 % 다르다).
+    lines.append("순위 | 코드 | 종목명 | 현재가(원) | 등락률 | 거래량(주) | 거래대금(억원)")
     lines.append("---|---|---|---:|---:|---:|---:")
     for r in ranks:
-        tv = r.get("trade_value_est_krw")
-        tv_cell = f"{tv / 100_000_000:,.1f}" if tv is not None else "-"
+        tv = r.get("trade_value_krw")
+        tv_cell = f"{tv / 100_000_000:,.1f}" if tv is not None else "데이터 없음"
         lines.append(
             f"{r['rank']} | {r['code']} | {r['name']} | {r['price']:,} | "
             f"{r['change_rate']} | {r['volume']:,} | {tv_cell}"
         )
+    lines += ["", "※ 거래량·거래대금은 KRX 체결분입니다(넥스트레이드 체결 제외)."]
     session, counts = _rows_price_session(ranks)
     note = _rows_session_note(counts)
     if note:

@@ -247,12 +247,13 @@ KOSPI / KOSDAQ 지수 현재값.
 #### `get_volume_ranking` / `get_change_ranking` / `get_market_cap_ranking`
 거래량·등락률·시가총액 상위 종목.
 - `market` (`KOSPI|KOSDAQ|ALL`, 시가총액은 ALL 미지원), `count` (int, 기본 50, 최대 500), `direction` (`change_ranking`만, `up|down`)
+- `sort_by` (`get_volume_ranking`만, `volume|trade_value`, 기본 `volume`): `trade_value`는 시장 전체 거래대금 순위입니다. 주가가 높은 삼성전자·SK하이닉스는 거래량 순위에는 잘 안 보이지만 거래대금 순위에서는 대개 맨 위입니다. 거래량·거래대금은 KRX 체결분입니다(넥스트레이드 제외).
 - `page` (`get_market_cap_ranking`만, int, 기본 1): 501위 아래는 `count=500, page=2`부터 받습니다. 결과에 시장 전체 종목 수와 리츠·펀드·거래정지 표시가 함께 나옵니다.
 - 예: `"오늘 거래량 TOP 50"`, `"코스닥 하락률 20위"`
 
 #### `screen_by_flow`
 거래대금·거래량 상위 중 **외국인·기관이 며칠 연속 순매수**한 종목만 추립니다.
-- `top_n`, `market`, `foreign_days`, `inst_days`, `exclude_etf` (bool), `sort_by`
+- `top_n`, `market`, `foreign_days`, `inst_days`, `exclude_etf` (bool), `sort_by` (기본 `trade_value` — 시장 전체 거래대금 상위 `top_n`개가 후보)
 - 예: `"외국인 5일 연속 순매수 종목"`
 
 ---

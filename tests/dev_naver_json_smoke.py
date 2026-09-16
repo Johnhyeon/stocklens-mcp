@@ -69,6 +69,20 @@ async def main() -> int:
     vol = await naver.get_volume_ranking(count=5)
     check("get_volume_ranking", len(vol) == 5, f"1위 {vol[0]['name']} {vol[0]['volume']:,}주" if vol else "")
 
+    # 거래대금 상위는 거래량 상위를 다시 줄 세운 게 아니라 시장 전체 거래대금 순위여야 한다.
+    # 2026-09-16 에 삼성전자·SK하이닉스가 빠지고 3원짜리 정리매매 종목이 들어갔던 결함의 실측 확인.
+    tv = await naver.get_volume_ranking("ALL", 10, "trade_value")
+    tv_codes = [r["code"] for r in tv]
+    tv_values = [r["trade_value_krw"] for r in tv]
+    check("get_volume_ranking(trade_value) 대형주 포함",
+          {"005930", "000660"} <= set(tv_codes),
+          " / ".join(f"{r['rank']} {r['name']} {r['trade_value_krw'] / 1e8:,.0f}억" for r in tv[:3])
+          if tv and None not in tv_values[:3] else f"{tv_codes}")
+    check("get_volume_ranking(trade_value) 거래대금 내림차순",
+          len(tv) == 10 and None not in tv_values and tv_values == sorted(tv_values, reverse=True),
+          f"10위 {tv[-1]['name']} {tv[-1]['trade_value_krw'] / 1e8:,.1f}억"
+          if tv and tv[-1]["trade_value_krw"] is not None else "")
+
     up = await naver.get_change_ranking("up", "ALL", 5)
     check("get_change_ranking", len(up) == 5, f"1위 {up[0]['name']} {up[0]['change_rate']}" if up else "")
 

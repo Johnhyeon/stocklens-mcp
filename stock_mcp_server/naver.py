@@ -32,6 +32,9 @@ POLLING_API = "https://polling.finance.naver.com/api"
 # 시장 단위 목록 API 의 정렬 키. stock.naver.com 이 실제로 보내는 값만 쓴다
 # (추측한 이름은 404 가 아니라 엉뚱한 목록을 돌려줄 수 있다).
 _ORDER_VOLUME = "quantTop"
+# 네이버 화면 이름은 '거래대금 상위'인데 키는 priceTop 이다(이름만 보면 '가격순'으로
+# 읽힌다). 2026-09-17 실측: ALL·KOSPI·KOSDAQ 각 500행이 tradeAmount 내림차순, 역전 0.
+_ORDER_TRADE_VALUE = "priceTop"
 _ORDER_UP = "up"
 _ORDER_DOWN = "down"
 _ORDER_MARKET_SUM = "marketSum"
@@ -1459,7 +1462,7 @@ _MARKET_LIST_PAGES_MAX = 20
 # 코스닥 한 시장이 3MB 다 — 순위표에 쓰는 것만 남긴다.
 _MARKET_ROW_KEYS = (
     "itemcode", "itemname", "type", "tradeStopYn", "nowPrice", "prevChangeRate",
-    "tradeVolume", "marketSum", "tradingSessionType",
+    "tradeVolume", "tradeAmount", "marketSum", "tradingSessionType",
 )
 
 # 시장 목록 행의 증권 구분(type). ST(주식)가 아닌 것도 같은 순위표에 섞여 온다.
@@ -1590,11 +1593,19 @@ def _rank_rows(rows: list, count: int) -> list[dict]:
             "volume": volume,
             # 현재가 × 거래량 추산. 실제 거래대금은 체결가 가중이라 살짝 다르다.
             "trade_value_est_krw": price * volume,
+            # 네이버가 주는 체결 거래대금(원). '거래대금 상위' 순서가 이 값이다.
+            # 없으면 0 이 아니라 None — 거래대금 0원은 그 자체로 뜻이 있다.
+            "trade_value_krw": _num_int(row.get("tradeAmount")),
             "price_session": _price_session(row.get("tradingSessionType")),
         })
         if len(results) >= count:
             break
     return results
+
+
+def volume_sort_key(sort_by: str | None) -> str:
+    """거래 순위 정렬 인자를 "trade_value" / "volume" 둘 중 하나로 맞춘다."""
+    return "trade_value" if (sort_by or "").strip().lower() == "trade_value" else "volume"
 
 
 async def get_volume_ranking(
@@ -1608,16 +1619,17 @@ async def get_volume_ranking(
         market: "KOSPI" / "KOSDAQ" / "ALL" (기본 ALL = KOSPI+KOSDAQ 합산)
         count: 최대 반환 개수 (기본 50, 최대 500)
         sort_by: "volume"(거래량=주수) / "trade_value"(거래대금=원). 기본 volume.
+
+    두 순위는 네이버가 **따로 정렬한 목록**을 받는다. 순서를 우리가 다시 매기지 않는다.
+    예전에는 거래량 상위 count 개를 받아 거래대금으로 다시 줄 세웠는데, 모집단이
+    거래량 상위라 주가가 높은 대형주가 빠졌다 — 2026-09-16 거래대금 1·2위
+    SK하이닉스(4.9조)·삼성전자(2.9조)가 '거래대금 상위' 10개에 없고, 3원짜리
+    정리매매 종목(1.0억)이 10위에 들어갔다.
     """
     count = max(1, min(count, _MARKET_LIST_MAX))
-    rows = await _market_stock_list(_ORDER_VOLUME, market=market, size=count)
-    results = _rank_rows(rows, count)
-
-    if sort_by == "trade_value":
-        results.sort(key=lambda x: x.get("trade_value_est_krw", 0), reverse=True)
-        for i, item in enumerate(results, 1):
-            item["rank"] = i
-    return results
+    order = _ORDER_TRADE_VALUE if volume_sort_key(sort_by) == "trade_value" else _ORDER_VOLUME
+    rows = await _market_stock_list(order, market=market, size=count)
+    return _rank_rows(rows, count)
 
 
 async def get_change_ranking(

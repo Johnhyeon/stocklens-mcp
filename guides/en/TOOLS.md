@@ -205,6 +205,7 @@ Stocks within a sector.
 #### `get_volume_ranking` / `get_change_ranking` / `get_market_cap_ranking`
 Top stocks by volume / change / market cap.
 - `market` (`KOSPI|KOSDAQ|ALL`; market cap has no ALL), `count` (int, default 50, max 500), `direction` (for `change_ranking`: `up|down`)
+- `sort_by` (`get_volume_ranking` only, `volume|trade_value`, default `volume`): `trade_value` is the market-wide trading value ranking. High-priced stocks like Samsung Electronics and SK hynix rarely show up by share volume but usually top the trading value list. Volume and trading value count KRX trades only (Nextrade excluded).
 - `page` (`get_market_cap_ranking` only, int, default 1): rank 501 and beyond starts at `count=500, page=2`. The result also shows the market's total and marks REITs, funds and halted stocks.
 
 ---
