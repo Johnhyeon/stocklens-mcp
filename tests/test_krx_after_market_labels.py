@@ -209,3 +209,48 @@ class MarketNoteTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class EtfEtnBarsTests(unittest.IsolatedAsyncioTestCase):
+    """ETF·ETN 은 애프터마켓 거래 대상이 아니다. 2026-09-14~16 KODEX 200(069500) 일봉 종가 = 15:30 체결가 3/3."""
+
+    async def _chart(self, sosok):
+        with patch.object(server, "naver_get_krx_sosok", AsyncMock(return_value=sosok)),              patch.object(server, "get_ohlcv", AsyncMock(return_value=BARS)),              patch.object(server, "build_market_clock", _clock(21, 0)),              patch.object(server, "_now_kst", return_value=datetime(2026, 9, 15, 21, 0, tzinfo=KST)),              patch.object(server, "get_regular_session_close", AsyncMock(return_value=None)) as lookup:
+            text = await server.get_chart(code="069500", count=3)
+        return text, _meta(text), lookup
+
+    async def test_etf_bars_get_no_after_market_label(self) -> None:
+        for sosok in ("ETF", "ETN"):
+            text, meta, lookup = await self._chart(sosok)
+            self.assertEqual(meta["price_session"], "regular", sosok)
+            self.assertNotIn("session_mix", meta)
+            self.assertNotIn(rmeta.EXTENDED_SESSION_WARNING, meta.get("warnings", []))
+            self.assertNotIn("정규장 종가(15:30)가 아니므로", text)
+            lookup.assert_not_awaited()
+
+    async def test_unknown_market_keeps_the_label(self) -> None:
+        # 시장 구분을 못 읽으면 '정규장만'이라고 단정하지 않는다
+        _, meta, _ = await self._chart(None)
+        self.assertEqual(meta["price_session"], "regular_and_after")
+        self.assertIn("session_mix", meta)
+
+
+class KrxSosokLookupTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self) -> None:
+        from stock_mcp_server import naver
+        self.naver = naver
+        naver._SOSOK_CACHE.clear()
+
+    async def test_reads_and_remembers_market(self) -> None:
+        api = AsyncMock(return_value={"sosok": "ETF", "isNxtYn": "N"})
+        with patch.object(self.naver, "_api_json", api):
+            self.assertEqual(await self.naver.get_krx_sosok("069500"), "ETF")
+            self.assertEqual(await self.naver.get_krx_sosok("069500"), "ETF")
+        self.assertEqual(api.await_count, 1)
+
+    async def test_failure_and_invalid_code_are_not_remembered(self) -> None:
+        with patch.object(self.naver, "_api_json", AsyncMock(side_effect=RuntimeError("down"))):
+            self.assertIsNone(await self.naver.get_krx_sosok("005930"))
+        with patch.object(self.naver, "_api_json", AsyncMock(return_value={"sosok": "INVALID_ITEMCODE"})):
+            self.assertIsNone(await self.naver.get_krx_sosok("500001"))
+        self.assertEqual(self.naver._SOSOK_CACHE, {})

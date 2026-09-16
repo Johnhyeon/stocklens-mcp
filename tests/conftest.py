@@ -55,3 +55,19 @@ def _isolate_license_state(tmp_path_factory, monkeypatch):
         lambda: [root / "lens" / "trial_started.json", root / "shared" / "trial_started.json"],
         raising=False,
     )
+
+
+@pytest.fixture(autouse=True)
+def _default_krx_sosok(monkeypatch):
+    """일봉 도구가 애프터마켓 이름표를 붙이기 전에 시장 구분(ETF·ETN 여부)을 네이버에 묻는다.
+
+    테스트가 그 한 번 때문에 실제 네트워크에 나가지 않게 기본값을 일반 주식으로 둔다.
+    ETF·ETN 경로를 보는 테스트는 자기 안에서 다시 patch 한다.
+    """
+    try:
+        from unittest.mock import AsyncMock
+
+        from stock_mcp_server import server
+    except Exception:
+        return
+    monkeypatch.setattr(server, "naver_get_krx_sosok", AsyncMock(return_value="KOSPI"), raising=False)

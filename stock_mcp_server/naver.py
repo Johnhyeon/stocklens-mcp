@@ -218,6 +218,28 @@ MINUTE_CHART_URL = "https://api.stock.naver.com/chart/domestic/item/{code}/minut
 REGULAR_CLOSE_UNAVAILABLE = "no_1530_bar"
 
 
+_SOSOK_CACHE: dict[str, str] = {}
+
+
+async def get_krx_sosok(code: str) -> str | None:
+    """종목의 시장 구분(KOSPI, KOSDAQ, ETF, ETN 등). 못 읽으면 None.
+
+    2026-09-16 실측: 069500 은 "ETF", 530031 은 "ETN", 005930 은 "KOSPI".
+    상장 구분은 하루 안에 바뀌지 않으니 읽은 값만 프로세스 동안 기억한다. 실패는 기억하지 않는다.
+    """
+    if code in _SOSOK_CACHE:
+        return _SOSOK_CACHE[code]
+    try:
+        data = await _api_json(f"{STOCK_API}/domestic/detail/{code}/sosok", what=f"시장 구분({code})")
+    except Exception:
+        return None
+    value = data.get("sosok") if isinstance(data, dict) else None
+    if isinstance(value, str) and value and value != "INVALID_ITEMCODE":
+        _SOSOK_CACHE[code] = value
+        return value
+    return None
+
+
 @cached(ttl_market=300, ttl_closed=3600)
 async def get_regular_session_close(code: str, day: str) -> int | None:
     """그 거래일의 **정규장 종가**(15:30 종가 단일가 체결가). 확인할 수 없으면 None.

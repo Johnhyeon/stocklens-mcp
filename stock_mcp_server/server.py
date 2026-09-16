@@ -27,6 +27,7 @@ from stock_mcp_server.naver import (
     PARSE_MISS_KEY,
     get_ohlcv,
     get_regular_session_close,
+    get_krx_sosok as naver_get_krx_sosok,
     get_current_price,
     get_investor_flow,
     get_financials,
@@ -695,7 +696,7 @@ async def get_chart(
             f"※ 거래정지 placeholder 등 비정상 봉 {exclusion_info['count']}개 제외"
             f" ({', '.join(b['date'] for b in exclusion_info['bars'][:5])})."
         )
-    extended = _extended_bar_info(data, timeframe)
+    extended = _extended_bar_info(data, timeframe) if await _bars_can_include_after_market(code) else None
     regular_checks: list[dict] = []
     if extended:
         if timeframe == "day":
@@ -1308,6 +1309,19 @@ def _extended_bar_note(info: dict, what: str = "일봉") -> str:
     return note + tail.format(day=info["last_bar"]) if tail else note
 
 
+# ETF·ETN 은 KRX 애프터마켓 거래 대상이 아니다(파이낸셜뉴스 2026-09-09 보도, 2026-09-14~16
+# KODEX 200·TIGER 200 일봉 종가 = 15:30 체결가 3/3). 그 봉에는 애프터마켓 이름표를 달지 않는다.
+_NO_AFTER_MARKET_SOSOK = frozenset({"ETF", "ETN"})
+
+
+async def _bars_can_include_after_market(code: str) -> bool:
+    """이 종목 일봉에 애프터마켓 체결이 들어갈 수 있나. 시장 구분을 못 읽으면 True.
+
+    모르는 것을 '정규장만'이라고 내보내지 않는다. 이름표가 과하면 불편하지만, 모자라면 틀린다.
+    """
+    return (await naver_get_krx_sosok(code)) not in _NO_AFTER_MARKET_SOSOK
+
+
 def _price_session_for_bars(info) -> str:
     """네이버 일봉 계열의 price_session. 애프터마켓이 섞인 봉이 하나라도 있으면 합산."""
     return rmeta.PRICE_SESSION_REGULAR_AND_AFTER if info else rmeta.PRICE_SESSION_REGULAR
@@ -1627,7 +1641,7 @@ async def get_flow(code: str, days: int = 20) -> str:
         "[참고] 종가·거래량은 편의 제공이며, **가격 차트·시계열 분석 소스로 사용 금지**. "
         "차트는 get_chart, 현재가는 get_price 사용."
     )
-    flow_extended = _extended_bar_info(data, "day")
+    flow_extended = _extended_bar_info(data, "day") if await _bars_can_include_after_market(code) else None
     if flow_extended:
         lines.append(
             f"※ [참고] 종가: {flow_extended['since']}부터는 20:00 애프터마켓 마지막 체결가입니다"
@@ -1713,7 +1727,7 @@ async def get_event_reaction(
     reaction_extended = _extended_bar_info(
         [{"date": p.get("date")} for p in (reaction.get("points") or {}).values()
          if isinstance(p, dict) and p.get("status") == "available"]
-    )
+    ) if await _bars_can_include_after_market(code) else None
     text = format_event_reaction(reaction)
     extra = {"event_window": fields["event_window"], "flow_window": fields["flow_window"]}
     if reaction_extended:
@@ -1933,7 +1947,7 @@ async def get_event_reactions(
         for _, _, _, r in rows
         for p in (r.get("points") or {}).values()
         if isinstance(p, dict) and p.get("status") == "available"
-    ])
+    ]) if await _bars_can_include_after_market(code) else None
     if reactions_extended:
         lines.append(_extended_bar_note(reactions_extended, "일봉").replace(
             "이 표에서", "반응 계산에 쓴 봉 중"))
@@ -3227,7 +3241,8 @@ async def get_multi_chart_stats(codes: list[str], days: int = 260) -> str:
         "'52주 고점' 같은 표현을 쓰면 안 됩니다."
     )
     lines.append(f"※ {CORPORATE_ACTION_NOTE}")
-    stats_extended = _extended_bar_info([{"date": s.get("current_date")} for s in stats])
+    eligible = await asyncio.gather(*(_bars_can_include_after_market(s.get("code")) for s in stats))
+    stats_extended = _extended_bar_info([{"date": s.get("current_date")} for s, ok in zip(stats, eligible) if ok])
     if stats_extended:
         lines.append(
             f"※ {stats_extended['since']}부터 네이버 일봉은 애프터마켓(16:00~20:00) 체결을 합친 값입니다."
@@ -3332,7 +3347,7 @@ async def get_indicators(
         include=include, available_bars=len(ohlcv), params=params,
         timeframe=timeframe,
     )
-    extended = _extended_bar_info(ohlcv, timeframe)
+    extended = _extended_bar_info(ohlcv, timeframe) if await _bars_can_include_after_market(code) else None
     payload = {
         "code": code,
         "timeframe": timeframe,
@@ -3675,7 +3690,7 @@ async def get_indicators_bulk(
                 return code, {"error": f"봉 {len(_exc)}개 전체가 비정상 "
                                        "(거래정지 placeholder 등 입력 데이터 이상)"}, None
             bars_seen.append(len(ohlcv))
-            ext = _extended_bar_info(ohlcv, timeframe)
+            ext = _extended_bar_info(ohlcv, timeframe) if await _bars_can_include_after_market(code) else None
             if ext:
                 extended_by_code[code] = ext
             # 봉 상태는 **그 종목의 시계열로** 계산해야 한다. 종목별 마지막
