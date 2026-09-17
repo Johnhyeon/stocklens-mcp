@@ -9106,7 +9106,7 @@ async def export_us_to_excel(
         f"경로: {saved}\n"
         f"행 수: {len(df)}\n"
         f"컬럼: {', '.join(df.columns)}\n\n"
-        f"💡 이 파일을 엑셀·Gemini·ChatGPT 등에서 바로 분석 가능. Claude 토큰 소비 없음."
+        f"💡 이 파일을 엑셀·Gemini·ChatGPT 등에서 바로 분석 가능. AI 토큰 소비 없음."
     )
 
 

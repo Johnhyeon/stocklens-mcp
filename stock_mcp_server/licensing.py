@@ -737,7 +737,7 @@ def activate_cli() -> None:
             ))
             sys.exit(0)
         print(f"활성화 완료 ✅  (license_id: {res['license_id']})")
-        print("Claude Desktop을 완전히 종료했다가 다시 켜면 StockLens 도구를 쓸 수 있습니다.")
+        print("쓰고 계신 AI 앱(Claude·ChatGPT)을 완전히 종료했다가 다시 켜면 StockLens 도구를 쓸 수 있습니다.")
         sys.exit(0)
 
     if args.json:

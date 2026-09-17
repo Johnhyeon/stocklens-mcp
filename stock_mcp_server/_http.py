@@ -125,6 +125,20 @@ async def fetch(
                     await asyncio.sleep(backoff)
                     continue
                 raise
+            except OSError as e:
+                # 2026-09-17 대표 PC(ChatGPT 앱) 실측: 프로세스의 첫 조회가
+                # "exception: access violation writing 0x0000000000000048" 로 죽고,
+                # 바로 다시 부르면 됐다. 이 문구는 ctypes 가 네이티브 호출의 접근 위반을
+                # 옮긴 것이고, 첫 TLS 악수에서 truststore 가 Windows 인증서 API 를 부르는
+                # 자리 말고는 네이티브 호출이 없다. 재현은 안 됐고(환경 변수를 비워도
+                # 정상) 원인을 끝까지 좁히지 못했다. 한 번 더 시도하면 통과했으므로
+                # 그 사실을 그대로 코드로 옮긴다 — 같은 요청을 한 번 더 보낸다.
+                # 다른 OSError(디스크·소켓 계열)는 재시도로 풀리지 않으니 건드리지 않는다.
+                last_exc = e
+                if "access violation" in str(e) and attempt < max_retries:
+                    await asyncio.sleep(0.2)
+                    continue
+                raise
 
     if last_exc:
         raise last_exc
