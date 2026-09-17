@@ -819,6 +819,21 @@ def _data_is_latest_day(bar_forming, data_as_of, market_state: dict) -> bool:
     return day is None or day == market_state.get("last_trading_day")
 
 
+def _closed_if_before_latest_day(day, market: str = "KR") -> bool | None:
+    """일 단위 데이터의 마지막 날이 최근 거래일보다 앞이면 그 날은 끝났다(False).
+
+    최근 거래일 당일 데이터면 None 을 돌려 예전처럼 장 상태로 판정하게 둔다.
+    지난 사건 창·지난 결제일 통계에 '장중 조회 — 마지막 봉이 아직 마감되지
+    않았습니다'가 붙던 것을 막는다(2026-09-17 전수 점검).
+    """
+    d = rmeta.normalize_day(day)
+    if not d:
+        return None
+    last = build_market_clock()["krx" if market == "KR" else "us"].get(
+        "last_trading_day")
+    return False if last and d < str(last) else None
+
+
 def _us_meta(
     *,
     kind: str,
@@ -1863,7 +1878,10 @@ async def get_event_reaction(
         )
 
     # 수급은 최근 구간만 제공된다. 실패해도 주가 반응은 계산하되 결측으로 표시한다.
-    flow_days = max(20, min(before + after + 10, 60))
+    # 받을 일수는 창 길이가 아니라 '오늘부터 사건 창 시작까지'다. 창 길이로 잡으면
+    # 30거래일 전 사건(before=5, after=5)에 20일만 받아 수급이 있는데도 "없음"이
+    # 나갔다(2026-09-17 전수 점검).
+    flow_days = _event_flow_days(ohlcv, [event_date], before, after)
     flow_error = None
     try:
         flows = await get_investor_flow(code, flow_days)
@@ -1891,12 +1909,17 @@ async def get_event_reaction(
         text += "\n\n" + _extended_bar_note(reaction_extended, "일봉").replace(
             "이 표에서", "반응 계산에 쓴 봉 중")
         extra["session_mix"] = reaction_extended
+    # 이 응답의 숫자는 사건 창의 마지막 날까지다. 500봉 전체의 최신일을 적으면
+    # 2025년 사건 창이 오늘 날짜·장중 미완성 봉으로 표시된다.
+    window_end = (reaction.get("window") or {}).get("end_date") or \
+        fields["event_window"].get("last_usable_trading_date")
     return _append_result_meta(
         text,
         _kr_meta(
             kind="bars",
             code=code,
-            data_as_of=fields["event_window"].get("last_usable_trading_date"),
+            data_as_of=window_end,
+            bar_forming=_closed_if_before_latest_day(window_end),
             data_completeness=fields["data_completeness"],
             coverage=fields["coverage"],
             price_adjustment=reaction.get("price_adjustment"),
@@ -1905,6 +1928,27 @@ async def get_event_reaction(
             warnings=fields["warnings"] or None,
         ),
     )
+
+# 네이버 매매동향은 한 번에 이만큼까지만 받는다(naver.get_investor_flow 상한).
+_NAVER_FLOW_MAX_DAYS = 100
+
+
+def _event_flow_days(ohlcv, event_dates, before: int, after: int) -> int:
+    """가장 오래된 사건 창의 시작까지 닿는 수급 일수.
+
+    매매동향은 최신부터 N행을 준다. 창 길이(before+after)로 N 을 잡으면 오늘에서
+    먼 사건은 창에 닿지 못해 수급이 있는데도 '없음'이 된다.
+    """
+    days = sorted(
+        d for d in (rmeta.normalize_day(row.get("date"))
+                    for row in (ohlcv or []) if isinstance(row, dict))
+        if d)
+    events = [d for d in (rmeta.normalize_day(e) for e in event_dates) if d]
+    if not days or not events:
+        return max(20, min(before + after + 10, _NAVER_FLOW_MAX_DAYS))
+    since_oldest_event = sum(1 for d in days if d >= min(events))
+    return max(20, min(since_oldest_event + before + 5, _NAVER_FLOW_MAX_DAYS))
+
 
 # ETF/ETN 식별용 운용사 브랜드 — 거래량 랭킹 결과에서 종목명으로 빠르게 거름.
 _ETF_NAME_PREFIXES = (
@@ -2040,7 +2084,8 @@ async def get_event_reactions(
                 f"데이터 없음이 아니라 조회 실패이므로 재시도하세요.")
     flow_error = None
     try:
-        flows = await get_investor_flow(code, 60)
+        flows = await get_investor_flow(
+            code, _event_flow_days(ohlcv, list(seen), before, after))
     except Exception as e:
         flows, flow_error = [], type(e).__name__
 
@@ -2131,10 +2176,16 @@ async def get_event_reactions(
         ev_cov = {"truncated": False, "coverage_complete": False, "reason": ev_reason}
     else:
         ev_cov = None
+    # 표의 숫자는 각 사건 창의 마지막 날까지다. 가장 늦은 창 끝을 기준일로 적는다.
+    # 적지 않으면 몇 달 전 공시들만 담긴 표가 오늘 날짜·장중 미완성 봉으로 나갔다.
+    window_ends = [(r.get("window") or {}).get("end_date") for _, _, _, r in rows]
+    window_end = max((d for d in window_ends if d), default=None)
     return _append_result_meta(
         "\n".join(lines),
         _kr_meta(
             kind="bars", code=code,
+            data_as_of=window_end,
+            bar_forming=_closed_if_before_latest_day(window_end),
             data_completeness=rmeta.PARTIAL if incomplete else rmeta.COMPLETE,
             coverage=ev_cov,
             price_adjustment=price_adjustment_meta(),
@@ -5778,6 +5829,7 @@ async def get_us_event_reaction(
             f"# US 이벤트 반응 - {ticker} ({day})\n\n"
             "사건 이후의 완성된 거래일이 아직 없습니다. 다음 정규장 이후 다시 조회하세요.",
             _us_meta(kind="bars", ticker=ticker, data_as_of=dates[-1],
+                     bar_forming=False,  # 진행 중인 봉은 위에서 이미 뺐다
                      data_completeness=rmeta.NONE,
                      coverage={"truncated": False, "coverage_complete": False,
                                "reason": "insufficient_post_event_history"},
@@ -5832,7 +5884,10 @@ async def get_us_event_reaction(
         "\n".join(lines),
         _us_meta(
             kind="bars", ticker=ticker,
-            data_as_of=dates[-1],
+            # 숫자는 사건 창의 마지막 완성봉까지다. 1년치 이력의 최신일이 아니다.
+            data_as_of=dates[basis_idx + actual_after],
+            # 진행 중인 봉은 위에서 이미 뺐다. 장중에도 '마지막 봉 미마감'이 아니다.
+            bar_forming=False,
             data_completeness=rmeta.PARTIAL if short else rmeta.COMPLETE,
             coverage=({"requested": {"unit": "trading_day", "after": after},
                        "effective": {"unit": "trading_day", "after": actual_after},
@@ -8594,6 +8649,8 @@ async def get_us_multi_diagnosis(
                 section_gaps.append(f"{t}.{s}")
 
     has_gap = bool(failed or truncated or section_gaps)
+    technical_bases = {(e.get("technicals") or {}).get("basis")
+                       for e in entries.values() if e.get("technicals")}
     coverage = {
         "requested_entities": requested_entities,
         "returned_entities": len(entries) - len(failed),
@@ -8622,6 +8679,10 @@ async def get_us_multi_diagnosis(
         "_meta": _us_meta(
             kind="bars",
             data_as_of=(max(per_entity_as_of.values()) if per_entity_as_of else None),
+            # 모든 종목이 완성 봉만으로 계산됐으면 '마지막 봉 미마감'이 아니다.
+            # 마감 여부를 확인 못 한 종목이 하나라도 있으면 예전처럼 장 상태로 둔다.
+            bar_forming=(False if technical_bases and technical_bases
+                         <= {"completed_bars"} else None),
             data_completeness=rmeta.PARTIAL if has_gap else rmeta.COMPLETE,
             coverage=coverage,
             price_adjustment=price_adjustment_meta(),
@@ -9639,16 +9700,23 @@ def _evidence_meta(*, code: str | None, provider: str | None,
                    profile: str | None, provider_status: str,
                    data_as_of: str | None, completeness: str,
                    warnings: list[str], coverage: dict | None = None,
-                   extra: dict | None = None) -> dict:
+                   extra: dict | None = None,
+                   bar_forming: bool | None = None) -> dict:
     # coverage 는 extra 가 아니라 정규 슬롯으로 넘긴다. extra 로 넘기면
     # v3 검증(미정의 reason·잘라놓고 complete 주장)을 통째로 건너뛴다.
     payload = rmeta.provider_extension(
         provider=provider or "none", provider_status=provider_status,
         provider_profile=profile)
     payload.update(extra or {})
+    if completeness == rmeta.NONE:
+        # 값이 하나도 없다. '마지막 봉이 아직 마감되지 않았습니다'는 이 응답의
+        # 이름표가 아니다.
+        bar_forming = False
+    elif bar_forming is None:
+        bar_forming = _closed_if_before_latest_day(data_as_of)
     return _kr_meta(kind="bars", code=code, data_as_of=data_as_of,
                     data_completeness=completeness, warnings=warnings,
-                    coverage=coverage, extra=payload)
+                    coverage=coverage, extra=payload, bar_forming=bar_forming)
 
 
 def _evidence_error(code: str | None, message: str, provider_status: str,
@@ -9662,14 +9730,34 @@ def _evidence_error(code: str | None, message: str, provider_status: str,
     return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
 
 
+# 라우터·서비스 사유 -> provider_status. 여기 없는 사유를 전부 unsupported
+# ("키 문제가 아닙니다")로 덮으면 만료된 키·호출 한도·없는 종목이 모두
+# '이 증권사는 지원하지 않음'으로 나간다(2026-09-17 전수 점검).
+_EVIDENCE_REASON_STATUS = {
+    "provider_not_configured": "not_configured",
+    "unknown_capability": "entity_not_found",
+    "provider_changed_during_request": "provider_unavailable",
+    "unsupported_by_selected_provider": "unsupported",
+    "unverified_by_selected_provider": "unsupported",
+}
+
+
 def _evidence_status_of(result) -> str:
     if result.ok:
         return "ok"
-    return {
-        "provider_not_configured": "not_configured",
-        "unknown_capability": "entity_not_found",
-        "provider_changed_during_request": "provider_unavailable",
-    }.get(result.error_code or "", "unsupported")
+    code = result.error_code or ""
+    if code in rmeta.PROVIDER_STATUSES:
+        # 어댑터가 올린 실제 사유(rate_limited·credential_invalid·entity_not_found…)
+        return code
+    if code == "all_entities_failed":
+        reasons = [f.get("reason") for f in
+                   (getattr(result, "entity_failures", None) or [])
+                   if f.get("reason") in rmeta.PROVIDER_STATUSES]
+        if reasons:
+            # 종목마다 사유가 다르면 가장 많은 것. 종목별 사유는 entity_failures 에 있다.
+            return max(dict.fromkeys(reasons), key=reasons.count)
+        return "provider_unavailable"
+    return _EVIDENCE_REASON_STATUS.get(code, "unsupported")
 
 
 def _validate_evidence_request(code, codes, source):
@@ -9785,6 +9873,12 @@ async def get_detailed_investor_flow(
     if single:
         if result.records:
             payload.update(_flow_dataset_json(result.records[0]))
+        elif result.error_code in rmeta.PROVIDER_STATUSES:
+            # 여러 종목일 때만 실패 사유가 경고에 실렸다. 한 종목이면 이유 없이
+            # ok:false 만 나갔다.
+            warnings.append(
+                f"{entities[0]} 조회 실패({result.error_code}). 다른 증권사로 "
+                "대체하지 않았습니다.")
     else:
         payload["entities"] = {d.symbol: _flow_dataset_json(d)
                                for d in result.records}
@@ -9799,25 +9893,27 @@ async def get_detailed_investor_flow(
         if dataset.rows:
             newest = max(r.date for r in dataset.rows).isoformat()
             as_of = newest if as_of is None else max(as_of, newest)
+    # 배치 결과의 coverage 는 종목 수만 센다. 종목마다 요청한 일수를 다 받았는지는
+    # 각 dataset 에 있다(한국투자증권은 최근 30거래일까지만 준다).
+    rows_complete = result.coverage.get("complete", True) and all(
+        d.coverage.get("complete", True) for d in result.records)
     completeness = rmeta.COMPLETE
     if not result.ok:
         completeness = rmeta.NONE
-    elif result.data_availability["unavailable"] or \
-            not result.coverage.get("complete", True):
+    elif result.data_availability["unavailable"] or not rows_complete:
         completeness = rmeta.PARTIAL
 
     unavailable = result.data_availability["unavailable"]
+    coverage_complete = bool(result.ok and not unavailable and rows_complete)
     payload["_meta"] = _evidence_meta(
         code=entities[0] if single else None, provider=result.provider,
         profile=result.profile, provider_status=_evidence_status_of(result),
         data_as_of=as_of, completeness=completeness, warnings=warnings,
         coverage={
             **result.coverage,
-            "coverage_complete": (result.ok and not unavailable
-                                  and result.coverage.get("complete", True)),
-            # 요청한 항목 일부를 이 증권사가 주지 않는다는 뜻이다.
-            "reason": None if (result.ok and not unavailable) else
-            "source_limit",
+            "coverage_complete": coverage_complete,
+            # 요청한 항목·일수 일부를 이 증권사가 주지 않는다는 뜻이다.
+            "reason": None if coverage_complete else "source_limit",
         },
         extra={"data_availability": result.data_availability})
     return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
@@ -9914,7 +10010,10 @@ async def get_supply_pressure(
     warnings: list[str] = list(result.warnings)
     for blocks in per_entity.values():
         for block in blocks.values():
-            if block.status != "ok":
+            # status ok 인데 행이 0개인 블록("해당 구간 데이터가 없습니다")도
+            # 받은 것이 아니다. 그 경고가 최상위에서 빠지면 없는 데이터가 받은
+            # 것처럼 읽힌다.
+            if block.status != "ok" or not block.rows:
                 warnings.extend(block.warnings)
     for failure in result.entity_failures:
         warnings.append(
@@ -9928,9 +10027,9 @@ async def get_supply_pressure(
                 stamp = block.data_as_of.isoformat()
                 as_of = stamp if as_of is None else max(as_of, stamp)
     served = sum(1 for blocks in per_entity.values()
-                 for b in blocks.values() if b.status == "ok")
+                 for b in blocks.values() if b.status == "ok" and b.rows)
     total = sum(len(blocks) for blocks in per_entity.values())
-    if not payload["ok"]:
+    if not payload["ok"] or served == 0:
         completeness = rmeta.NONE
     elif served < total:
         completeness = rmeta.PARTIAL
@@ -10051,7 +10150,9 @@ async def get_investor_deposit(days: int = 20) -> str:
     enough = len(rows) >= min(days, 100)
     return _append_result_meta(
         NEWLINE.join(lines),
-        _kr_meta(kind="snapshot", data_as_of=rows[0]["date"],
+        # 결제일 기준 통계라 며칠 뒤처진다. 장중 스냅샷(realtime)도, '최근 거래일
+        # 기준'도 아니다. 표의 가장 최근 날짜로 확정치다.
+        _kr_meta(kind="bars", data_as_of=max(r["date"] for r in rows), bar_forming=False,
                  data_completeness=rmeta.COMPLETE if enough else rmeta.PARTIAL,
                  coverage={"returned_count": len(rows),
                            "coverage_complete": enough,

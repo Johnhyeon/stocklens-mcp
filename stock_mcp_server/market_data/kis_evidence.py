@@ -31,6 +31,8 @@ from stock_mcp_server.market_data.kis_client import KisApiError, KisClient
 
 _PATH = "/uapi/domestic-stock/v1/quotations/inquire-investor"
 _TR_ID = "FHKST01010900"
+# FHKST01010900 은 기준일 인자 없이 최근 30거래일을 고정으로 준다(실측).
+_KIS_FLOW_FIXED_ROWS = 30
 
 # (정규 이름, 수량 필드, 금액 필드)
 _CATEGORIES: tuple[tuple[str, str, str], ...] = (
@@ -444,6 +446,15 @@ class KisEvidenceProvider:
                 f"{days} 는 아직 정산 전입니다. 공급자가 값을 비워 보내므로 "
                 "0으로 채우지 않고 미정산으로 표시했습니다.")
 
+        # 최근 30거래일 고정이라 그보다 많이 물으면 30행에서 끝난다. 그걸
+        # complete 로 적으면 60일을 물은 사용자가 30일치를 전부로 읽는다.
+        # 30행보다 적게 왔으면 그 종목 이력이 거기까지인 것이다.
+        complete = len(rows) >= row_limit or len(raw_rows) < _KIS_FLOW_FIXED_ROWS
+        if not complete:
+            warnings.append(
+                f"한국투자증권은 최근 {_KIS_FLOW_FIXED_ROWS}거래일까지만 줍니다 "
+                f"(요청 {row_limit}거래일, 받은 {len(rows)}거래일).")
+
         return InvestorFlowDataset(
             symbol=symbol,
             provider=self.provider_id,
@@ -453,7 +464,7 @@ class KisEvidenceProvider:
             data_state="provisional" if provisional else "final",
             measure=measure,
             unit=UNIT_BY_MEASURE[measure],
-            coverage={"rows": len(rows), "complete": True,
+            coverage={"rows": len(rows), "complete": complete,
                       "requested_rows": row_limit},
             warnings=tuple(warnings),
             source_endpoint="kis_kr_investor_daily",

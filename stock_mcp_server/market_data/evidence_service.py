@@ -455,6 +455,10 @@ class EvidenceService:
             warnings.extend(dataset.warnings)
 
         returned, unavailable = _flow_availability(adapter)
+        if not records:
+            # 증권사가 주는 항목이라도 이번에 한 종목도 받지 못했다. 능력표를
+            # 그대로 returned 에 적으면 받은 것처럼 읽힌다(2026-09-17 전수 점검).
+            returned = []
         unit = records[0].unit if records else \
             UNIT_BY_MEASURE.get(measure, "shares")
         return BatchEvidenceResult(

@@ -23,6 +23,7 @@ from stock_mcp_server.event_reaction import (
     UNAVAILABLE_HEADLINES,
     EVENT_AFTER_PRICE_HISTORY,
     EVENT_BEFORE_PRICE_HISTORY,
+    FLOW_PARTIAL_FOR_EVENT_WINDOW,
     FLOW_UNAVAILABLE_FOR_EVENT_WINDOW,
     INSUFFICIENT_POST_EVENT_HISTORY,
     NO_PRICE_HISTORY,
@@ -72,7 +73,13 @@ def _normal_bars():
 
 
 def _normal_flows():
+    # 사건 창(D-5~D+5) 전 거래일에 수급 행이 있다. 한 날만 있으면 구간 합이
+    # 아니다(FLOW_PARTIAL_FOR_EVENT_WINDOW).
     return [
+        _flow("2026.05.08", 10, 20),
+        _flow("2026.05.11", 30, -40),
+        _flow("2026.05.12", -50, 60),
+        _flow("2026.05.13", 70, 80),
         _flow("2026.05.14", -100, 200),
         _flow("2026.05.15", 500, 700),
         _flow("2026.05.18", 600, -100),
@@ -310,6 +317,29 @@ class EventReactionTests(unittest.TestCase):
             self.assertEqual(reaction["flow"][key]["days"], 0)
         self.assertIn("이 기간 수급 데이터 없음", text)
         self.assertNotIn("+0 |", text)
+
+    def test_flow_rows_covering_part_of_the_window_are_not_a_window_sum(self):
+        # 2026-09-17 전수 점검: 창 5거래일 중 1거래일만 수급이 있어도 available 로
+        # 합산돼 구간 합처럼 읽혔다.
+        flows = [f for f in _normal_flows() if f["date"] >= "2026.05.14"]
+        reaction = build_event_reaction(
+            code="005930",
+            event_date="2026-05-15",
+            ohlcv=_normal_bars(),
+            flows=flows,
+            before=5,
+            after=5,
+        )
+        pre = reaction["flow"]["pre"]
+        self.assertEqual(pre["days"], 1)
+        self.assertIs(pre["complete"], False)
+        self.assertEqual(pre["expected_days"], 5)
+        self.assertNotIn("complete", reaction["flow"]["post"])
+        self.assertEqual(reaction["validation"]["status"], "partial")
+        self.assertIn(FLOW_PARTIAL_FOR_EVENT_WINDOW, reaction["validation"]["codes"])
+        text = format_event_reaction(reaction)
+        self.assertIn("5거래일 중 1거래일만", text)
+        self.assertNotIn("데이터 없음입니다", text)
 
     def test_real_zero_flow_sum_stays_numeric_zero(self):
         flows = [

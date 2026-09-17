@@ -21,6 +21,7 @@ NO_PRICE_HISTORY = "NO_PRICE_HISTORY"
 NO_TRADING_ACTIVITY = "NO_TRADING_ACTIVITY"
 INSUFFICIENT_POST_EVENT_HISTORY = "INSUFFICIENT_POST_EVENT_HISTORY"
 FLOW_UNAVAILABLE_FOR_EVENT_WINDOW = "FLOW_UNAVAILABLE_FOR_EVENT_WINDOW"
+FLOW_PARTIAL_FOR_EVENT_WINDOW = "FLOW_PARTIAL_FOR_EVENT_WINDOW"
 PROVIDER_ERROR = "PROVIDER_ERROR"
 
 CODE_MESSAGES: dict[str, str] = {
@@ -38,8 +39,12 @@ CODE_MESSAGES: dict[str, str] = {
         "기준 거래일 뒤로 거래된 날이 모자라 일부 시점은 등락률을 내지 못했습니다."
     ),
     FLOW_UNAVAILABLE_FOR_EVENT_WINDOW: (
-        "이 기간의 기관·외국인 수급이 없습니다(수급은 최근 60거래일까지만 조회합니다). "
+        "이 기간의 기관·외국인 수급이 없습니다(수급은 최근 100거래일까지만 조회합니다). "
         "순매매 0이 아니라 데이터가 없는 것입니다."
+    ),
+    FLOW_PARTIAL_FOR_EVENT_WINDOW: (
+        "구간 일부 거래일만 수급이 있습니다. 표의 합계는 구간 전체 합이 아닙니다"
+        "(수급은 최근 100거래일까지만 조회합니다)."
     ),
     PROVIDER_ERROR: "데이터를 불러오지 못했습니다. 데이터가 없는 것과는 다르며 재시도 대상입니다.",
 }
@@ -198,15 +203,29 @@ def _normalize_flows(flows: list[dict] | None) -> list[dict]:
     return rows
 
 
-def _flow_segment(rows: list[dict], *, expected: bool, flow_error: str | None) -> dict:
-    """수급 결측(데이터 없음)과 실제 순매매 0을 구분해 반환."""
+def _flow_segment(
+    rows: list[dict],
+    *,
+    expected: bool,
+    flow_error: str | None,
+    expected_days: int | None = None,
+) -> dict:
+    """수급 결측(데이터 없음)과 실제 순매매 0을 구분해 반환.
+
+    expected_days 는 그 구간의 거래일 수다. 행이 그보다 적으면 합계는 구간 전체가
+    아니다 — 한 건만 있어도 available 로 합산돼 구간 합처럼 읽혔다(2026-09-17).
+    """
     if rows:
-        return {
+        segment = {
             "status": "available",
             "days": len(rows),
             "institutional": sum(int(r.get("institutional") or 0) for r in rows),
             "foreign": sum(int(r.get("foreign") or 0) for r in rows),
         }
+        if expected_days is not None and len(rows) < expected_days:
+            segment["complete"] = False
+            segment["expected_days"] = expected_days
+        return segment
     if not expected:
         # 구간 자체가 없음(before=0 등) — 결측이 아니다.
         return {
@@ -465,11 +484,15 @@ def _reaction_core(
     post_flow_rows = [r for r in flow_rows if basis_date <= r["date"] <= end_date]
 
     flow = {
-        "pre": _flow_segment(pre_flow_rows, expected=bool(pre_bars), flow_error=flow_error),
-        "post": _flow_segment(post_flow_rows, expected=True, flow_error=flow_error),
+        "pre": _flow_segment(pre_flow_rows, expected=bool(pre_bars), flow_error=flow_error,
+                             expected_days=len(pre_bars)),
+        "post": _flow_segment(post_flow_rows, expected=True, flow_error=flow_error,
+                              expected_days=len(post_bars)),
     }
     if any(seg["status"] == "unavailable" for seg in flow.values()):
         codes.append(FLOW_UNAVAILABLE_FOR_EVENT_WINDOW)
+    if any(seg.get("complete") is False for seg in flow.values()):
+        codes.append(FLOW_PARTIAL_FOR_EVENT_WINDOW)
     if flow_error and PROVIDER_ERROR not in codes:
         codes.append(PROVIDER_ERROR)
 
@@ -652,8 +675,10 @@ def reaction_meta_fields(reaction: dict) -> dict:
         "pre_status": pre_status,
         "post_status": post_status,
         # not_applicable(before=0 등)은 결측이 아니라 구간 부재다.
-        "pre_complete": pre_status in ("available", "not_applicable"),
-        "post_complete": post_status == "available",
+        "pre_complete": pre_status in ("available", "not_applicable")
+        and (flow.get("pre") or {}).get("complete") is not False,
+        "post_complete": post_status == "available"
+        and (flow.get("post") or {}).get("complete") is not False,
     }
 
     event_window = {
@@ -737,13 +762,19 @@ def format_event_reaction(reaction: dict) -> str:
                 f"| {label} | {row['days']} | {_fmt_signed(row['institutional'])} | "
                 f"{_fmt_signed(row['foreign'])} |"
             )
+            if row.get("complete") is False:
+                flow_notes.append(
+                    f"- {label}: {row.get('expected_days')}거래일 중 {row['days']}거래일만 "
+                    "수급이 있어 합계가 구간 전체가 아닙니다 "
+                    f"(`{FLOW_PARTIAL_FOR_EVENT_WINDOW}`)"
+                )
             continue
         lines.append(f"| {label} | {_MISSING} | {_MISSING} | {_MISSING} |")
         if row["status"] == "unavailable":
             why = (
                 "수급 조회에 실패했습니다"
                 if row.get("reason") == "provider_error"
-                else "수급은 최근 60거래일까지만 조회합니다"
+                else "수급은 최근 100거래일까지만 조회합니다"
             )
             flow_notes.append(
                 f"- {label}: 이 기간 수급 데이터 없음 — {why} "
@@ -753,7 +784,8 @@ def format_event_reaction(reaction: dict) -> str:
     if flow_notes:
         lines.append("")
         lines.extend(flow_notes)
-        lines.append("- 위 구간의 기관·외국인 값은 순매매 0이 아니라 데이터 없음입니다.")
+        if any(FLOW_UNAVAILABLE_FOR_EVENT_WINDOW in note for note in flow_notes):
+            lines.append("- 위 구간의 기관·외국인 값은 순매매 0이 아니라 데이터 없음입니다.")
 
     lines.extend(
         [
