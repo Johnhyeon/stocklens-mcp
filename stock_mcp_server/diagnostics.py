@@ -83,8 +83,10 @@ _RECENT_DETAIL_MAX_LINES = 8
 _RECENT_DETAIL_CHARS = 120
 
 # 고객 문구(summary/action)는 LeetKit Manager 화면에 그대로 뜬다. 규칙:
-# - 터미널 명령·환경변수 이름·예외 이름을 쓰지 않는다. 그런 원문은 details.lines 에만
-#   남긴다(Manager [결과 복사]로 지원 쪽에 오는 용도).
+# - 터미널 명령·환경변수 이름·예외 이름을 쓰지 않는다.
+# - details.lines 도 Manager 상세 창에 보인다(명령어·경로 모양 줄만 걸러지고,
+#   RECENT_TOOL_FAILURES·BROKER_DATA_REACHABLE 줄은 숨겨진다). 줄 앞은 한국어로 쓰고
+#   예외 원문은 줄 끝 괄호 안에 짧게만 붙인다(_short).
 # - 할 일은 Manager 버튼 하나로, 이름은 화면 글자 그대로. 해요체.
 # DartLens·TelegramLens 와 같은 상태는 Lens 이름만 다른 같은 문장을 쓴다.
 _ACTION_UPDATE_THEN_SUPPORT = (

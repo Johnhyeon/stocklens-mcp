@@ -7,7 +7,9 @@
 
 주 고객층(40~50대 비개발자)은 터미널 명령에서 멈춘다. 안내는 Manager 버튼 하나로 하고,
 버튼 이름은 화면 글자 그대로 쓴다(DartLens·TelegramLens 도 같은 검사를 둔다).
-details.lines 는 [결과 복사]로 지원 쪽에 오는 줄이라 여기서 검사하지 않는다.
+details.lines 도 Manager 상세 창에 보인다. 온라인 확인(KR/US/증권사) 줄은 한국어로
+시작하는지·URL 이 없는지 따로 검사한다. RECENT_TOOL_FAILURES 줄은 화면에 안 뜨고
+[결과 복사]·지원 번들로만 가므로 지원용 형식 그대로 둔다.
 """
 
 from __future__ import annotations
