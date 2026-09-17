@@ -183,14 +183,17 @@ class KiwoomDomesticProvider:
             if not rows:
                 break
 
-            # 실측(2026-08-27): 없는 종목은 return_code 0 + 전 필드 빈
-            # 문자열 행이 온다. 형식 파손(키 자체가 없음)과 구분해
-            # 종목 없음으로 분류한다.
+            # 전 필드가 빈 문자열인 행만 온다 = 그 날짜에 봉이 없다.
+            # 실측(2026-09-17): 없는 종목(999999)과 보관 기간 밖 날짜
+            # (005930 2025-08-29, 가장 오래된 날은 2025-09-01)가 똑같은
+            # 모양이라 응답만으로는 둘을 가를 수 없다. '종목 없음'으로
+            # 단정하지 않고 KIS 와 같이 빈 결과로 돌려준다. 형식 파손
+            # (cntr_tm 키 자체가 없음)은 아래에서 source_parse_error 다.
             if not bars and all(
                     "cntr_tm" in row
                     and not str(row.get("cntr_tm") or "").strip()
                     for row in rows):
-                raise KiwoomApiError("entity_not_found")
+                break
 
             page_bars: list[NormalizedBar] = []
             other_day = 0
