@@ -723,17 +723,14 @@ def _broker_summary() -> tuple[dict, dict]:
         unknown = False
         for name in descriptor.supported_profiles:
             prec = record["profiles"].get(name)
-            usernames = []
             ref = (prec or {}).get("credential_ref")
-            if ref and ref != "legacy":
-                usernames.append(f"{pid}:{name}:{ref}")
-            usernames.append(f"{pid}:{name}")
-            configured = False
+            # 분봉·수급이 실제로 꺼내는 슬롯 하나만 본다. v1 고정 슬롯까지
+            # 찾으면 연결 기록이 가리키는 키가 없어도 "connected"가 된다
+            # (2026-09-17 실측: 상태는 connected, 분봉은 not_configured).
+            username = (f"{pid}:{name}:{ref}" if ref and ref != "legacy"
+                        else f"{pid}:{name}")
             try:
-                for username in dict.fromkeys(usernames):
-                    if keyring.get_password(service, username):
-                        configured = True
-                        break
+                configured = bool(keyring.get_password(service, username))
             except Exception:  # noqa: BLE001
                 unknown = True
                 break

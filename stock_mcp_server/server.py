@@ -9149,7 +9149,8 @@ async def _fetch_intraday_dataset(
 
     if dataset is None:
         dataset, route_meta = await _fetch_with_failover(
-            resolution, providers, _make_request(trading_date))
+            resolution, providers, _make_request(trading_date),
+            credential_issue=_PROVIDER_RUNTIME.credential_issue(selected))
         if broker_kr and primary_completed and \
                 dataset.provider == selected and dataset.bars and \
                 dataset.coverage.get("complete"):

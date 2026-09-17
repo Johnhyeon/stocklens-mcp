@@ -90,22 +90,20 @@ class BrokerService:
     # --- 조회 ---
 
     def has_profile(self, provider: str, profile: str) -> bool:
-        """keyring 기준 설정 여부. 상태 파일이 지워져도 슬롯을 찾는다."""
+        """keyring 기준 설정 여부. 상태 파일이 지워져도 v1 슬롯을 찾는다.
+
+        연결 기록이 슬롯을 가리키면 그 슬롯만 본다. 분봉·수급이 실제로 쓰는
+        키가 그것이기 때문이다. 예전에는 그 슬롯이 없어도 v1 고정 슬롯이
+        남아 있으면 "설정됨"이라 해서, Manager 는 연결됨인데 분봉은
+        not_configured 로 실패했다 (2026-09-17 실측).
+        """
         state = self.state()
         record = (state["providers"].get(provider) or {}).get(
             "profiles", {}).get(profile) or {}
-        usernames = []
         ref = record.get("credential_ref")
-        if ref:
-            usernames.append(
-                self.credentials._username(provider, profile, ref))
-        legacy = f"{provider}:{profile}"
-        if legacy not in usernames:
-            usernames.append(legacy)
-        for username in usernames:
-            if self.credentials._get_raw(provider, username):
-                return True
-        return False
+        username = (self.credentials._username(provider, profile, ref)
+                    if ref else f"{provider}:{profile}")
+        return bool(self.credentials._get_raw(provider, username))
 
     def status(self, provider: str) -> dict:
         """비밀 없는 상태 요약. keyring 불가 시 KeychainUnavailableError."""

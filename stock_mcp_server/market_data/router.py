@@ -236,8 +236,13 @@ async def fetch_with_failover(
     resolution: SourceResolution,
     providers: dict,
     request: BarRequest,
+    *,
+    credential_issue: str | None = None,
 ) -> tuple[BarDataset, dict]:
     """고정된 공급자로 조회한다. 자동 전환은 없다 (1.0 정책).
+
+    credential_issue 는 공급자를 만들지 못한 이유(runtime.credential_issue)다.
+    안내 문장만 고르고 라우팅에는 쓰지 않는다.
 
     장애·빈 결과·partial 모두 그대로 보고한다. 다른 공급자의 데이터로
     메우는 순간 거래량 기준 등 숫자의 의미가 소리 없이 바뀐다. 전환은
@@ -249,17 +254,17 @@ async def fetch_with_failover(
     selected = resolution.selected_provider
     primary = providers.get(selected)
     if primary is None:
-        # 상태 파일은 "연결됨"인데 공급자를 만들지 못한 경우다. 자격
-        # 증명 슬롯을 읽지 못했다는 뜻이고(다른 계정으로 실행, 키체인
-        # 잠김, 슬롯 삭제 등), 키가 틀린 것과는 다르다. 예전에는 여기서
-        # KeyError 로 죽어 사용자가 원인도 다음 행동도 알 수 없었다.
+        # 상태 파일은 "연결됨"인데 공급자를 만들지 못한 경우다. 키 기록이
+        # 없거나(다른 계정으로 실행, 슬롯 삭제, 상태 파일만 옮겨짐) 키
+        # 저장소를 못 열었다(키체인 잠김 등). 키가 틀린 것과는 다르다.
+        # 예전에는 여기서 KeyError 로 죽어 원인도 다음 행동도 알 수 없었다.
         # 다른 공급자가 준비돼 있어도 대신 쓰지 않는다 (1.0 정책).
+        from stock_mcp_server.market_data.credential_store import (
+            credential_issue_message,
+        )
         raise RouterError(
             "not_configured",
-            f"{selected} 연결 기록은 있지만 저장된 키를 읽지 못했습니다. "
-            "키 자체의 문제가 아니라 이 컴퓨터·계정에서 자격 증명 저장소를 "
-            f"열지 못한 것입니다. LeetKit Manager 에서 {selected} 를 "
-            "다시 연결해주세요.")
+            credential_issue_message(selected, credential_issue))
     meta = {
         "requested_source": resolution.requested_source,
         "selected_provider": resolution.selected_provider,

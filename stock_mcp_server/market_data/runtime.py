@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -18,9 +19,18 @@ from stock_mcp_server.market_data.connection_state import (
     load_state_v2,
     provider_capabilities_v2,
 )
-from stock_mcp_server.market_data.credential_store import CredentialStore
+from stock_mcp_server.market_data.broker_profiles import (
+    KeychainUnavailableError,
+)
+from stock_mcp_server.market_data.credential_store import (
+    ISSUE_KEY_MISSING,
+    ISSUE_STORE_UNAVAILABLE,
+    CredentialStore,
+)
 from stock_mcp_server.market_data.naver_provider import NaverBarProvider
 from stock_mcp_server.market_data.yahoo_provider import YahooBarProvider
+
+_log = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -61,6 +71,8 @@ class ProviderRuntime:
         self._home = home
         # (provider, profile) -> (generation, client)
         self._clients: dict[tuple[str, str], tuple[int, object]] = {}
+        # provider -> 마지막으로 키를 꺼내지 못한 이유 (ISSUE_*)
+        self._credential_issues: dict[str, str] = {}
 
     @property
     def home(self) -> Path | str | None:
@@ -79,9 +91,18 @@ class ProviderRuntime:
         for key in [k for k in self._clients if k[0] == provider]:
             del self._clients[key]
 
+    def credential_issue(self, provider: str) -> str | None:
+        """client() 가 None 을 준 이유. 키 문제가 아니었으면 None."""
+        return self._credential_issues.get(provider)
+
     def client(self, provider: str, profile: str,
                snapshot: RuntimeSnapshot | None = None):
-        """provider generation 에 고정된 클라이언트. 자격 증명이 없으면 None."""
+        """provider generation 에 고정된 클라이언트. 자격 증명이 없으면 None.
+
+        키 저장소를 못 열어도 예외를 올리지 않고 None 을 준다. 예전에는
+        KeychainUnavailableError 가 분봉·수급 도구 밖으로 그대로 새어 고객
+        화면에 날것 오류가 떴다 (2026-09-17). 이유는 credential_issue() 로 본다.
+        """
         if snapshot is None:
             snapshot = self.snapshot()
         generation = snapshot.provider_generation(provider)
@@ -89,15 +110,23 @@ class ProviderRuntime:
         if cached is not None and cached[0] == generation:
             return cached[1]
 
-        client = self._build_client(provider, profile)
+        try:
+            client = self._build_client(provider, profile)
+        except KeychainUnavailableError as exc:
+            # 메시지에는 비밀값이 없다 (예외 클래스 이름만). 지원 로그용.
+            _log.warning("%s 키 저장소를 열지 못함: %s", provider, exc)
+            self._credential_issues[provider] = ISSUE_STORE_UNAVAILABLE
+            return None
         if client is None:
             return None
+        self._credential_issues.pop(provider, None)
         self._clients[(provider, profile)] = (generation, client)
         return client
 
     def _build_client(self, provider: str, profile: str):
         payload = self._credentials.load_active(provider, profile)
         if payload is None:
+            self._credential_issues[provider] = ISSUE_KEY_MISSING
             return None
         home = self._home
 

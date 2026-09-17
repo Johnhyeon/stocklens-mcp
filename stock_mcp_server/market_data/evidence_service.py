@@ -265,10 +265,14 @@ class EvidenceService:
     def _adapter(self, runtime, snapshot, provider):
         adapter = runtime.evidence_provider_for(provider, snapshot=snapshot)
         if adapter is None:
+            from stock_mcp_server.market_data.credential_store import (
+                credential_issue_message,
+            )
+            issue_of = getattr(runtime, "credential_issue", None)
             raise EvidenceRouterError(
                 "not_configured",
-                f"{provider} 연결 기록은 있지만 저장된 키를 읽지 못했습니다. "
-                f"LeetKit Manager 에서 {provider} 를 다시 연결해주세요.",
+                credential_issue_message(
+                    provider, issue_of(provider) if issue_of else None),
                 error_code="provider_not_configured", provider=provider)
         return adapter
 

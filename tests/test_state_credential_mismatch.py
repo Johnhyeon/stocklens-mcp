@@ -62,7 +62,8 @@ class FetchWithMissingProviderTests(unittest.TestCase):
                 _resolution("kiwoom"),
                 providers={"naver": object()}, request=None))
         message = str(ctx.exception)
-        self.assertIn("kiwoom", message)
+        # 고객에게는 공급자 id 가 아니라 증권사 이름으로 말한다.
+        self.assertIn("키움증권", message)
         self.assertIn("다시 연결", message)
         # 키가 틀렸다는 뜻으로 읽히면 안 된다 (키는 읽지도 못한 상태다).
         self.assertNotIn("잘못", message)

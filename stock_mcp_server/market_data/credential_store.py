@@ -33,6 +33,32 @@ from stock_mcp_server.market_data.secrets import SecretPayload
 
 _SERVICE_PREFIX = "stocklens-broker"
 
+# 연결 기록은 "연결됨"인데 키를 꺼내지 못한 이유. 둘은 고객이 할 일이 다르다.
+# 한동안 둘을 한 문장("저장소를 열지 못했다")으로 안내해, 키 기록만 없어진
+# 경우에도 저장소 문제로 읽혔다 (2026-09-17).
+ISSUE_KEY_MISSING = "key_missing"            # 저장소는 열렸고 키가 없다
+ISSUE_STORE_UNAVAILABLE = "store_unavailable"  # 저장소 자체를 못 열었다
+
+_SUPPORT_LINE = "그래도 같으면 LeetKit Manager 상단 [지원 문의]로 알려주세요."
+
+
+def credential_issue_message(provider: str, issue: str | None) -> str:
+    """키를 꺼내지 못했을 때 고객에게 보여줄 안내. 비밀값·기술 원인은 싣지 않는다."""
+    try:
+        name = registry.require(provider).display_name
+    except Exception:  # noqa: BLE001  모르는 공급자여도 안내는 나가야 한다
+        name = provider
+    if issue == ISSUE_STORE_UNAVAILABLE:
+        return (
+            f"이 컴퓨터의 키 저장소(Windows 자격 증명 관리자나 Mac 키체인)를 "
+            f"열지 못해 {name} 키를 꺼내지 못했습니다. 키가 틀린 것은 "
+            "아닙니다. 컴퓨터를 다시 시작한 뒤 한 번 더 시도해주세요.\n"
+            + _SUPPORT_LINE)
+    return (
+        f"{name} 연결 기록은 있는데 이 컴퓨터에 저장된 키를 찾지 못했습니다. "
+        f"LeetKit Manager에서 {name}을 다시 연결해주세요.\n"
+        + _SUPPORT_LINE)
+
 
 @dataclass(frozen=True)
 class PendingCredential:
