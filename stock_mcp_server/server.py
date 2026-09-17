@@ -806,6 +806,19 @@ async def get_chart(
 _append_result_meta = rmeta.append_meta
 
 
+def _data_is_latest_day(bar_forming, data_as_of, market_state: dict) -> bool:
+    """장 상태 안내·지연 표시가 이 데이터에 해당하는가.
+
+    봉 상태를 모르는 도구(bar_forming=None)는 예전처럼 늘 해당한다고 본다.
+    봉 상태를 아는 도구는 데이터 기준일이 최근 거래일일 때만 해당한다 —
+    지난 날짜를 물은 응답에 "최근 거래일(X) 기준"을 달면 이름표가 틀린다.
+    """
+    if bar_forming is None:
+        return True
+    day = rmeta.normalize_day(data_as_of)
+    return day is None or day == market_state.get("last_trading_day")
+
+
 def _us_meta(
     *,
     kind: str,
@@ -817,18 +830,25 @@ def _us_meta(
     price_adjustment: dict | None = None,
     extra: dict | None = None,
     warnings: list[str] | None = None,
+    bar_forming: bool | None = None,
 ) -> dict:
-    """US 도구용 메타. yfinance는 15분 지연 공지가 있어 is_delayed를 세운다."""
+    """US 도구용 메타. yfinance는 15분 지연 공지가 있어 is_delayed를 세운다.
+
+    bar_forming 은 `_kr_meta` 와 같다 — 넘기면 판정이 시계가 아니라 데이터에서 온다.
+    """
     us_state = build_market_clock()["us"]
     if kind == "filing":
         basis = rmeta.BASIS_FILING
+    elif kind == "bars" and bar_forming is not None:
+        basis = rmeta.BASIS_IN_PROGRESS_BAR if bar_forming else rmeta.BASIS_LAST_CLOSE
     elif us_state.get("is_open"):
         basis = rmeta.BASIS_IN_PROGRESS_BAR if kind == "bars" else rmeta.BASIS_REALTIME
     else:
         basis = rmeta.BASIS_LAST_CLOSE
 
+    latest = _data_is_latest_day(bar_forming, data_as_of, us_state)
     warns = list(warnings or [])
-    if kind != "filing" and not us_state.get("is_open"):
+    if kind != "filing" and not us_state.get("is_open") and latest:
         warns.insert(
             0,
             f"미국장 마감 상태 — 표시된 값은 최근 거래일({us_state.get('last_trading_day')}) 기준입니다.",
@@ -844,7 +864,8 @@ def _us_meta(
         data_as_of=data_as_of or (None if kind == "filing" else us_state.get("last_trading_day")),
         market="US",
         session=us_state.get("status"),
-        is_delayed=bool(us_state.get("is_open")),  # yfinance 실시간은 지연 시세
+        # yfinance 실시간은 지연 시세. 지난 거래일 데이터는 지연될 것이 없다.
+        is_delayed=bool(us_state.get("is_open")) and latest,
         data_completeness=data_completeness,
         coverage=coverage,
         entity_info=rmeta.entity(stock_code=ticker),
@@ -1502,6 +1523,7 @@ def _kr_meta(
     extra: dict | None = None,
     warnings: list[str] | None = None,
     price_session: str | None = None,
+    bar_forming: bool | None = None,
 ) -> dict:
     """KRX 도구용 메타. 세션 상태에서 data_basis를 자동 판정한다.
 
@@ -1513,6 +1535,14 @@ def _kr_meta(
       "bars"        차트·지표·수급 — 장중이면 **in_progress_bar**(마지막 봉 미마감)
       "filing"      재무·컨센서스 — 세션과 무관하게 공시 기반
 
+    bar_forming 은 도구가 받은 봉에서 직접 확인한 '마지막 봉이 아직 만들어지는
+    중인가'다. 넘기면 판정이 시계가 아니라 데이터에서 온다.
+      True/False  kind="bars" 의 basis 를 in_progress_bar / last_close 로 정한다.
+                  장 상태 안내("최근 거래일(X) 기준")는 data_as_of 가 최근 거래일일
+                  때만 붙인다. 2025-09-10 분봉을 장중에 물었더니 "마지막 봉이 아직
+                  마감되지 않았습니다"가 붙어 나갔다(2026-09-17 실측).
+      None        예전처럼 장 상태로 판정한다. 봉 상태를 직접 모르는 도구용.
+
     data_as_of는 실제 데이터에서 뽑은 날짜를 넘기는 게 원칙이고(차트 마지막 봉,
     공시 발표일), 없을 때만 시장 캘린더의 최근 거래일로 대체한다.
     """
@@ -1523,13 +1553,15 @@ def _kr_meta(
     )
     if kind == "filing":
         basis = rmeta.BASIS_FILING
+    elif kind == "bars" and bar_forming is not None:
+        basis = rmeta.BASIS_IN_PROGRESS_BAR if bar_forming else rmeta.BASIS_LAST_CLOSE
     elif krx.get("is_open") or extended_live:
         basis = rmeta.BASIS_IN_PROGRESS_BAR if kind == "bars" else rmeta.BASIS_REALTIME
     else:
         basis = rmeta.BASIS_LAST_CLOSE
 
     warns = list(warnings or [])
-    if kind != "filing":
+    if kind != "filing" and _data_is_latest_day(bar_forming, data_as_of, krx):
         warns = _kr_market_note(krx, price_session) + warns
 
     data_completeness, coverage, warns = _bar_state_effects(
@@ -8809,6 +8841,57 @@ def _intraday_providers(market: str, source: str = "auto") -> dict:
     return _PROVIDER_RUNTIME.providers_for(market, source)
 
 
+def _intraday_tz(market: str):
+    return _ZoneInfo("Asia/Seoul" if market == "KR" else "America/New_York")
+
+
+def _intraday_now(market: str):
+    """분봉 완성·진행 판정의 기준 시각(시장 현지). 테스트가 고정할 수 있게 모은다."""
+    return _dt.datetime.now(_intraday_tz(market))
+
+
+def _intraday_no_data_note(day) -> str:
+    # 증권사 응답은 이 셋을 구분해 주지 않는다(2026-09-17 실측: KIS 는 행 0개,
+    # 키움은 빈 행 1개로 같은 모양). 1분봉 가장 오래된 날(같은 날 실측) —
+    # KIS 국내 2025-09-08, 키움 국내 2025-09-01, KIS 미국 2026-08-14, 키움 미국
+    # 2026-03-02. 날마다 밀리는 값이라 고객 문구에는 날짜를 넣지 않는다.
+    return (f"{day}에 받은 봉이 없습니다. 분봉 보관 기간보다 오래된 날짜이거나, "
+            "거래가 없던 날(휴장·거래정지)이거나, 종목코드가 틀렸을 수 있습니다. "
+            "응답만으로는 셋을 구분할 수 없습니다.")
+
+
+def _intraday_bar_labels(market: str, bars, trading_date, now=None) -> dict:
+    """분봉 응답의 이름표를 받은 봉에서 정한다. 시계는 '오늘 장이 끝났나'에만 쓴다.
+
+    - bar_forming  마지막 봉이 아직 만들어지는 중인가 (completed_only=False 일 때만 참)
+    - data_as_of   마지막 봉의 거래일. 봉이 없으면 요청한 기준일
+    - warnings     기준일과 다른 날의 봉이면 그 사실, 오늘 장이 진행 중이면 그 사실
+    """
+    tz = _intraday_tz(market)
+    if not bars:
+        return {"bar_forming": False, "data_as_of": trading_date.isoformat(),
+                "warnings": []}
+    if now is None:
+        now = _intraday_now(market)
+    last = bars[-1]
+    last_day = last.start_at.astimezone(tz).date()
+    forming = last.complete is not True
+    warns: list[str] = []
+    if last_day != trading_date:
+        warns.append(
+            f"기준일 {trading_date.isoformat()}에는 봉이 없어 그 이전 거래일"
+            f"({last_day.isoformat()})까지의 봉입니다.")
+    if not forming:
+        win = _session_window(market, last_day)
+        if win is not None and now < win.close_at:
+            warns.append(
+                "정규장이 아직 진행 중입니다. "
+                f"{last.end_at.astimezone(tz).strftime('%H:%M')}에 끝난 봉까지만 "
+                "담았고, 장이 끝날 때까지 봉이 더 붙습니다.")
+    return {"bar_forming": forming, "data_as_of": last_day.isoformat(),
+            "warnings": warns}
+
+
 def _previous_trading_day(market: str, day):
     for step in range(1, 31):
         candidate = day - _dt.timedelta(days=step)
@@ -8929,9 +9012,7 @@ async def _fetch_intraday_dataset(
     providers = _intraday_providers(market, source)
 
     if now is None:
-        now = _dt.datetime.now(
-            _ZoneInfo("Asia/Seoul") if market == "KR"
-            else _ZoneInfo("America/New_York"))
+        now = _intraday_now(market)
 
     target_minutes = _INTRADAY_INTERVALS[interval]
     default_venue = "KRX" if market == "KR" else (venue or "")
@@ -9023,8 +9104,14 @@ async def _fetch_intraday_dataset(
     needed_rows = row_limit * (
         target_minutes // _INTRADAY_INTERVALS[dataset.source_interval]
         if dataset.source_interval in _INTRADAY_INTERVALS else 1)
+    # 끝난 거래일인데 그 날 봉이 0개면 그 날짜에 데이터가 없는 것이다(보관
+    # 기간 밖·거래정지·잘못된 코드). 이전 거래일을 이어 붙이면 묻지 않은
+    # 날짜로 답하게 되고 빈 날마다 증권사 호출만 늘어 키움은 곧 rate_limited
+    # 에 걸린다(2026-09-17 실측). 진행 중인 오늘(장 시작 직후 봉 0개)이나
+    # 휴장일 기준은 예전처럼 이전 거래일로 이어 간다.
+    anchor_has_no_data = not dataset.bars and primary_completed
     if dataset.provider in _provider_registry.ids() and market == "KR" \
-            and len(dataset.bars) < needed_rows:
+            and len(dataset.bars) < needed_rows and not anchor_has_no_data:
         merged = list(dataset.bars)
         warnings = list(dataset.warnings)
         day = trading_date
@@ -9143,7 +9230,7 @@ def _intraday_meta_extra(dataset, route_meta: dict) -> dict:
 
 
 def _intraday_error_result(symbol: str, market: str, message: str,
-                           provider_status: str) -> str:
+                           provider_status: str, trading_date=None) -> str:
     # 자동 전환이 없으므로(1.0 정책) 장애 시 사용자가 스스로 고를 수 있는
     # 대안을 안내한다. Yahoo 는 거래량 기준이 달라 명시 선택으로만 쓴다.
     if provider_status == "unsupported":
@@ -9163,6 +9250,11 @@ def _intraday_error_result(symbol: str, market: str, message: str,
             "데이터로 볼 수 있습니다 (거래량 기준이 증권사와 다릅니다).")
     meta_fn = _kr_meta if market == "KR" else _us_meta
     kwargs = {"code": symbol} if market == "KR" else {"ticker": symbol}
+    if trading_date is not None:
+        # 봉이 하나도 없다. '마지막 봉이 아직 마감되지 않았습니다'도, 오늘 날짜도
+        # 이 응답의 이름표가 아니다. 물어본 기준일을 적는다.
+        kwargs["data_as_of"] = trading_date.isoformat()
+        kwargs["bar_forming"] = False
     meta = meta_fn(
         kind="bars", data_completeness=rmeta.NONE,
         warnings=[message],
@@ -9253,15 +9345,15 @@ async def get_intraday_chart(
             source=source)
     except _RouterError as exc:
         return _intraday_error_result(
-            symbol, market, str(exc), exc.provider_status)
+            symbol, market, str(exc), exc.provider_status, trading_date)
     except (_KisApiError, _KiwoomApiError, _TossApiError) as exc:
         return _intraday_error_result(
             symbol, market,
             f"증권사 데이터 조회 실패: {exc.provider_status}",
-            exc.provider_status)
+            exc.provider_status, trading_date)
     except _SymbolMappingError as exc:
         return _intraday_error_result(symbol, market, str(exc),
-                                      "entity_not_found")
+                                      "entity_not_found", trading_date)
 
     extra = _intraday_meta_extra(dataset, route_meta)
     warnings = list(dataset.warnings)
@@ -9272,14 +9364,22 @@ async def get_intraday_chart(
 
     meta_fn = _kr_meta if market == "KR" else _us_meta
     kwargs = {"code": symbol} if market == "KR" else {"ticker": symbol}
+    if market == "KR":
+        # 증권사 국내 분봉은 정규장(09:00~15:30) 행만 남긴다. 애프터마켓 체결은 없다.
+        kwargs["price_session"] = rmeta.PRICE_SESSION_REGULAR
+    labels = _intraday_bar_labels(market, dataset.bars, trading_date)
 
     if not dataset.bars:
+        note = _intraday_no_data_note(trading_date.isoformat())
         meta = meta_fn(
             kind="bars", data_completeness=rmeta.NONE,
-            warnings=warnings + ["조회된 봉이 없습니다."],
+            data_as_of=labels["data_as_of"],
+            bar_forming=labels["bar_forming"],
+            warnings=warnings + [note],
             extra=extra, **kwargs)
         return _append_result_meta(
-            f"{symbol} {interval} 분봉 데이터가 없습니다.", meta)
+            f"{symbol} {interval} 분봉 데이터가 없습니다 "
+            f"({trading_date.isoformat()}).\n{note}", meta)
 
     rows = [{
         "datetime": b.start_at.strftime("%Y-%m-%d %H:%M"),
@@ -9310,12 +9410,12 @@ async def get_intraday_chart(
     completeness = rmeta.PARTIAL if partial or \
         not dataset.coverage.get("complete", True) else rmeta.COMPLETE
 
-    last = dataset.bars[-1]
     meta = meta_fn(
         kind="bars",
-        data_as_of=last.start_at.date().isoformat(),
+        data_as_of=labels["data_as_of"],
+        bar_forming=labels["bar_forming"],
         data_completeness=completeness,
-        warnings=warnings,
+        warnings=warnings + labels["warnings"],
         extra=extra,
         **kwargs)
     return _append_result_meta("\n".join(lines), meta)
@@ -9376,22 +9476,24 @@ async def get_intraday_indicators(
             source=source)
     except _RouterError as exc:
         return _intraday_error_result(
-            symbol, market, str(exc), exc.provider_status)
+            symbol, market, str(exc), exc.provider_status, trading_date)
     except (_KisApiError, _KiwoomApiError, _TossApiError) as exc:
         return _intraday_error_result(
             symbol, market,
             f"증권사 데이터 조회 실패: {exc.provider_status}",
-            exc.provider_status)
+            exc.provider_status, trading_date)
     except _SymbolMappingError as exc:
         return _intraday_error_result(symbol, market, str(exc),
-                                      "entity_not_found")
+                                      "entity_not_found", trading_date)
 
     ohlcv = _bars_to_ohlcv(dataset.bars)
     if not ohlcv:
         return _intraday_error_result(
             symbol, market,
             f"{symbol} {interval} 분봉 데이터가 없어 지표를 계산할 수 "
-            "없습니다.", "no_session")
+            f"없습니다 ({trading_date.isoformat()}).\n"
+            + _intraday_no_data_note(trading_date.isoformat()),
+            "no_session", trading_date)
 
     # 분봉은 1년을 봉 수로 정할 수 없다. timeframe 을 넘기지 않으면 일봉으로
     # 계산돼 5분봉 60개의 고저가 high_52w 로 나갔다(2026-09-17 실측).
@@ -9427,12 +9529,14 @@ async def get_intraday_indicators(
 
     meta_fn = _kr_meta if market == "KR" else _us_meta
     kwargs = {"code": symbol} if market == "KR" else {"ticker": symbol}
-    last_date = (dataset.bars[-1].start_at.date().isoformat()
-                 if dataset.bars else None)
+    if market == "KR":
+        kwargs["price_session"] = rmeta.PRICE_SESSION_REGULAR
+    labels = _intraday_bar_labels(market, dataset.bars, trading_date)
     meta = meta_fn(
-        kind="bars", data_as_of=last_date,
+        kind="bars", data_as_of=labels["data_as_of"],
+        bar_forming=labels["bar_forming"],
         data_completeness=completeness,
-        warnings=warnings, extra=extra, **kwargs)
+        warnings=warnings + labels["warnings"], extra=extra, **kwargs)
 
     payload = {
         "symbol": symbol,
