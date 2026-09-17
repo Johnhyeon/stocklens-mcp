@@ -1,6 +1,6 @@
 """diagnostics.run_diagnostics()의 구조 계약 + stocklens-doctor --json CLI 계약 테스트.
 
-Manager가 파싱하는 표면이므로: 체크 ID 9종이 항상 모두 존재하는지, 기본(오프라인)
+Manager가 파싱하는 표면이므로: 체크 ID 10종이 항상 모두 존재하는지, 기본(오프라인)
 진단이 네트워크 없이 5초 이내 끝나는지, JSON이 항상 json.loads 가능한지,
 라이선스 미활성 상태를 'ok'로 잘못 표시하지 않는지를 확인한다.
 """
@@ -29,6 +29,7 @@ ALL_CHECK_IDS = {
     "KR_DATA_REACHABLE",
     "US_DATA_REACHABLE",
     "UPDATE_CHECK_REACHABLE",
+    "RECENT_TOOL_FAILURES",  # 오프라인 검사 — metrics 기록만 읽는다
 }
 ONLINE_ONLY_IDS = {"KR_DATA_REACHABLE", "US_DATA_REACHABLE", "UPDATE_CHECK_REACHABLE"}
 
@@ -88,7 +89,9 @@ class SafeCheckFaultInjectionTests(unittest.TestCase):
         crashed = next(c for c in report.checks if c.id == "LICENSE_ACTIVE")
         self.assertEqual(crashed.status, "fail")
         self.assertTrue(crashed.critical)  # critical 체크의 크래시는 critical=False로 뭉개면 안 됨
-        self.assertIn("RuntimeError", crashed.summary)
+        # 예외 이름은 화면(summary)이 아니라 지원용 details 줄에 남는다.
+        self.assertNotIn("RuntimeError", crashed.summary)
+        self.assertIn("RuntimeError", " ".join(crashed.detail))
         self.assertEqual(report.overall, "fail")
 
     def test_non_critical_check_crash_degrades_but_does_not_fail_overall(self) -> None:

@@ -104,8 +104,10 @@ class TestNetworkBudget:
 class TestMessages:
     def test_revoked_message_does_not_tell_them_to_re_enter_the_key(self):
         """이 사람은 키를 갖고 있다. 재입력하라고 하면 시간만 버린다."""
-        assert "활성화하세요" not in L.REVOKED_MESSAGE
-        assert "osy980315@gmail.com" in L.REVOKED_MESSAGE
+        assert "[활성화]" not in L.REVOKED_MESSAGE
+        # 문의는 메일 주소가 아니라 Manager 의 [지원 문의]로 받는다(진단 파일이 같이 온다).
+        assert "LeetKit Manager 상단 [지원 문의]" in L.REVOKED_MESSAGE
+        assert "@" not in L.REVOKED_MESSAGE
 
     def test_locked_message_picks_by_reason(self, _isolated, monkeypatch):
         monkeypatch.setattr(L, "license_block_reason", lambda: "revoked")

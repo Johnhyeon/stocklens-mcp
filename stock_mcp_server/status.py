@@ -9,8 +9,8 @@
 쓰므로, 폐기 목록 캐시가 하루 지났으면 프로세스당 한 번 목록을 받는다(2.5초 제한).
 다른 도구를 처음 부를 때도 똑같이 일어나는 일이라 여기서만 느려지는 건 아니다.
 
-깊은 진단(오프라인 재현, 실제 국내/미국 시세 재조회 등)은 `stocklens-doctor`
-커맨드라인 쪽 몫이다.
+깊은 진단(오프라인 재현, 실제 국내/미국 시세 재조회 등)은 `diagnostics`(LeetKit
+Manager의 [진단]) 몫이다. 고객에게는 Manager 버튼으로만 안내한다.
 """
 
 from __future__ import annotations
@@ -176,18 +176,29 @@ _LICENSE_LABEL = {
 }
 
 # 상태마다 할 일이 다르다(diagnostics._LICENSE_BLOCKED_FIX와 같은 이유). 안내는
-# LeetKit Manager 버튼으로만 한다 — 터미널 명령은 적지 않는다.
+# LeetKit Manager 버튼으로만 한다 — 터미널 명령은 적지 않는다. 이 글은 Claude 답변 안에
+# 들어가므로 도구 잠금 안내(licensing.*_MESSAGE)와 같은 문장을 쓴다. 둘이 다르면
+# 같은 상태를 두 가지 말로 듣게 된다.
 _LICENSE_NEXT_STEP = {
-    "missing": ("LeetKit Manager의 StockLens 카드에서 [활성화]를 눌러 메일로 받은 키를 넣어주세요.",),
+    "missing": (
+        "LeetKit Manager의 StockLens 카드에서 [활성화]를 눌러 메일로 받은 키를 넣어주세요.",
+        "그래도 같으면 LeetKit Manager 상단 [지원 문의]를 눌러주세요.",
+    ),
     "invalid": (
         "LeetKit Manager의 StockLens 카드에서 [활성화]를 눌러 메일로 받은 키를 다시 넣어주세요.",
-        "그래도 같으면 Manager 상단 [지원 문의]로 알려주세요.",
+        "그래도 같으면 LeetKit Manager 상단 [지원 문의]를 눌러주세요.",
     ),
-    "expired": ("계속 쓰시려면 LeetKit Manager의 StockLens 카드에서 [구매]하신 뒤, 받은 키를 [활성화]로 넣어주세요.",),
-    "revoked": ("환불·결제 취소로 중지된 키입니다. 착오라면 LeetKit Manager 상단 [지원 문의]로 알려주세요.",),
+    "expired": (
+        "계속 쓰시려면 LeetKit Manager의 StockLens 카드에서 [구매]를 누르고, "
+        "받은 키를 같은 카드의 [활성화]로 넣어주세요.",
+    ),
+    "revoked": (
+        "환불이나 결제 취소로 중지된 키예요.",
+        "착오라면 LeetKit Manager 상단 [지원 문의]를 눌러 알려주세요.",
+    ),
     "clock": (
-        "컴퓨터의 날짜와 시간을 현재로 맞춘 뒤 다시 시도해주세요.",
-        "그래도 같으면 LeetKit Manager 상단 [지원 문의]로 알려주세요.",
+        "날짜와 시간을 오늘로 맞춘 뒤 다시 물어봐 주세요.",
+        "그래도 같으면 LeetKit Manager 상단 [지원 문의]를 눌러주세요.",
     ),
 }
 _MARKET_LABEL = {"ok": "정상", "degraded": "일부 실패", "down": "장애", "unknown": "기록 없음"}
