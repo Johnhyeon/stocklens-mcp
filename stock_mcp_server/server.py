@@ -7420,9 +7420,11 @@ async def get_report_content(
 @safe_tool
 @track_metrics("get_disclosure")
 async def get_disclosure(code: str) -> str:
-    """공시목록 — 종목의 최근 공시 (DART 전자공시) 목록.
+    """공시목록 — 종목의 최근 거래소 공시 목록 (네이버 증권 게재, KOSCOM 제공).
 
-    "공시", "IR", "실적 발표", "공정공시" 같은 질문에 사용합니다.
+    "공시", "IR", "실적 발표", "공정공시", "오늘 왜 오르나(재료 확인)" 같은 질문에 사용합니다.
+    공시가 0건이어도 "재료 없음"이 아닙니다 — 회사 보도자료·언론 기사는 공시가 아니라
+    이 목록에 안 잡힙니다.
 
     Args:
         code: 종목코드 6자리 (예: "005930")
@@ -7434,7 +7436,11 @@ async def get_disclosure(code: str) -> str:
     items = await naver_get_disclosure_list(code)
 
     if not items:
-        return f"종목코드 {code}의 공시 내역이 없습니다."
+        return (
+            f"종목코드 {code}의 최근 거래소 공시가 네이버 목록에 없습니다 "
+            "(조회는 성공, 0건). 공시가 없다는 것이지 재료가 없다는 뜻은 아닙니다 — "
+            "보도자료·기사는 공시가 아닙니다."
+        )
 
     lines = [f"## 공시 목록 ({code}, 최근 {len(items)}건)", ""]
     lines.append("날짜 | 제목 | 출처")

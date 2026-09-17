@@ -451,85 +451,9 @@ class NaverParseError(RuntimeError):
     """
 
 
-def _flatten_header_labels(table) -> list[str]:
-    """헤더 행들의 rowspan/colspan을 펼쳐 '컬럼 인덱스 → 라벨'을 만든다.
-
-    네이버 수급표는 2단 헤더다(<thead>가 아니라 <tr><th> 로 들어 있다):
-
-        1단: 날짜 종가 전일비 등락률 거래량 │ 기관    │ 외국인(colspan=3)
-        2단:  (rowspan=2 로 1단이 점유)     │ 순매매량 │ 순매매량 보유주수 지분율
-
-    상위·하위를 합쳐 `외국인 순매매량` / `외국인 보유주수` 처럼 구분 가능한 라벨을 만든다.
-    이래야 '외국인' 컬럼이 셋인 표에서 순매매량만 정확히 집어낼 수 있다.
-    """
-    header_rows = [tr for tr in table.select("tr") if tr.select("th")]
-    if not header_rows:
-        return []
-
-    grid: dict[int, list[str]] = {}
-    occupied: dict[int, int] = {}  # 컬럼 → 위 행의 rowspan이 점유하는 마지막 행 인덱스(배타)
-    for r, tr in enumerate(header_rows[:2]):
-        c = 0
-        for th in tr.select("th"):
-            while occupied.get(c, 0) > r:  # 위 행이 rowspan 으로 잡고 있는 자리는 건너뛴다
-                c += 1
-            label = " ".join(th.text.split())
-            try:
-                colspan = max(1, int(th.get("colspan") or 1))
-                rowspan = max(1, int(th.get("rowspan") or 1))
-            except (TypeError, ValueError):
-                colspan = rowspan = 1
-            for k in range(colspan):
-                grid.setdefault(c + k, []).append(label)
-                if rowspan > 1:
-                    occupied[c + k] = r + rowspan
-            c += colspan
-
-    if not grid:
-        return []
-    return [" ".join(grid.get(i, [])) for i in range(max(grid) + 1)]
-
-
-# 컬럼 규칙: (필드명, 라벨에 반드시 있어야 할 키워드들, 있으면 안 되는 키워드들)
-#
-# 위치가 아니라 '이름'으로 컬럼을 찾는다 — 네이버가 컬럼을 추가하거나 순서를 바꿔도
-# 값이 엉뚱한 자리로 들어가지 않는다. 이름을 못 찾으면 조용히 넘어가지 않고 예외를 던진다.
-# must_not 은 '거래량' vs '전일거래량'처럼 한쪽이 다른 쪽을 포함할 때 필요하다.
-ColumnRule = tuple[str, tuple[str, ...], tuple[str, ...]]
-
-
-def _resolve_columns(table, rules: tuple[ColumnRule, ...], *, what: str) -> dict[str, int]:
-    """표 헤더를 읽어 '필드 → 컬럼 인덱스'를 만든다. 특정 실패 시 NaverParseError.
-
-    후보가 0개면 컬럼이 사라졌거나 이름이 바뀐 것이고, 2개 이상이면 규칙이 모호한
-    것이다. 둘 다 '아무 값이나 집어서 계속 진행'하면 안 되는 상황이다.
-    """
-    labels = _flatten_header_labels(table)
-    if not labels:
-        raise NaverParseError(
-            f"{what}의 헤더 행을 찾지 못했습니다 (네이버 페이지 구조 변경 가능성)."
-        )
-    mapping: dict[str, int] = {}
-    for field, must, must_not in rules:
-        hits = [
-            i
-            for i, lab in enumerate(labels)
-            if all(k in lab for k in must) and not any(k in lab for k in must_not)
-        ]
-        if len(hits) != 1:
-            raise NaverParseError(
-                f"{what}에서 '{field}' 컬럼을 특정하지 못했습니다 "
-                f"(일치 {len(hits)}개, 기대 1개). 실제 헤더: {labels}"
-            )
-        mapping[field] = hits[0]
-    return mapping
-
-
-_DISCLOSURE_RULES: tuple[ColumnRule, ...] = (
-    ("title", ("제목",), ()),
-    ("source", ("정보제공",), ()),
-    ("date", ("날짜",), ()),
-)
+# 옛 HTML 표 파서(_flatten_header_labels·_resolve_columns)는 2026-09-17 공시 목록까지
+# JSON 으로 옮기면서 마지막 사용처가 없어져 지웠다. 네이버 HTML 표를 다시 읽을 일이
+# 생기면 git 이력(1.1.2 이전)에 있다 — 위치가 아니라 헤더 이름으로 컬럼을 찾는 방식.
 
 
 def _parse_int_strict(text: str | None) -> int | None:
@@ -2242,53 +2166,55 @@ async def get_report_detail(nid: str) -> dict:
 # 공시 목록
 # ---------------------------------------------------------------------------
 
-DISCLOSURE_URL = f"{BASE_URL}/item/news_notice.naver"
+# 2026-09-17 실측: 구 화면 `finance.naver.com/item/news_notice.naver` 가 410 Gone 을
+# 돌려준다. 9/11 개편 때 유일하게 살아남은 HTML 페이지였는데 그것마저 내려갔다.
+# 410 은 오류로 안 올라오고(fetch 는 429·5xx 만 재시도/예외) 표 없는 본문이 파싱돼
+# 빈 목록 → "공시 내역이 없습니다" 로 나갔다. 삼성전자도 '공시 없음'이었다.
+# 새 화면이 쓰는 JSON 으로 옮긴다. JSON 이 아니면 _api_json 이 파싱 실패로 올린다.
+DISCLOSURE_URL = f"{MSTOCK_API}/stock/{{code}}/disclosure"
 
 
 @cached(ttl_market=300, ttl_closed=3600)  # 장중 5분, 장마감 1시간
-async def get_disclosure_list(code: str, page: int = 1) -> list[dict]:
-    """종목의 최근 공시 목록을 가져옵니다."""
-    resp = await fetch(DISCLOSURE_URL, params={"code": code, "page": page})
-    soup = BeautifulSoup(resp.text, "lxml")
+async def get_disclosure_list(code: str, page: int = 1, page_size: int = 30) -> list[dict]:
+    """종목의 최근 공시 목록 — 네이버 증권이 싣는 거래소 공시(KOSCOM 제공).
 
-    # 페이지에 표가 여럿이라 '제목·정보제공·날짜' 헤더가 풀리는 표를 골라 쓴다.
-    # 아무 표나 훑으면서 앞 세 칸을 집으면, 다른 표가 끼어들 때 조용히 섞인다.
-    table = None
-    idx: dict[str, int] = {}
-    for candidate in soup.select("table"):
-        try:
-            idx = _resolve_columns(candidate, _DISCLOSURE_RULES, what="공시 목록")
-        except NaverParseError:
-            continue
-        table = candidate
-        break
+    행 예: {"itemCode": "036090", "disclosureId": 90644244,
+           "title": "(주)위지트 전환가액의조정", "datetime": "2026-08-03T06:52:44",
+           "author": "KOSCOM"}
 
-    if table is None:
-        raise NaverParseError(
-            "공시 목록 표를 찾지 못했습니다 — '제목·정보제공·날짜' 헤더를 가진 표가 "
-            "페이지에 없습니다 (네이버 구조 변경 가능성)."
-        )
+    돌려주는 모양은 옛 HTML 파서와 같다(title/source/date/link). 소비처(사건 반응·
+    엑셀 내보내기)가 date 를 'YYYY-MM-DD' 10자로 읽는다.
 
-    max_idx = max(idx.values())
+    - date 는 datetime 의 날짜 부분. DART 접수일과 대조해 같음을 확인했다
+      (삼성전자 자기주식취득결정 08-21, 위지트 전환가액조정 08-03·07-31).
+    - datetime 의 시각은 매일 06:50~06:53 으로 고정돼 있어 공시 시각이 아니라
+      네이버 적재 시각으로 보인다. 그래서 time 은 싣지 않는다 — 이름표가 틀린
+      값을 내보내지 않는다.
+    - link 는 JSON 에 없다. 빈 문자열로 둔다(추측해서 URL 을 만들지 않는다).
+    - DART 에만 접수되는 보고서(임원 소유상황 등)는 이 목록에 없다. 전체는
+      DartLens list_disclosures 가 맡는다.
+    """
+    what = f"공시 목록({code})"
+    payload = await _api_json(
+        DISCLOSURE_URL.format(code=code), what=what,
+        params={"pageSize": page_size, "page": page},
+    )
+    rows = _api_list(payload, what=what)
+
     results = []
-    for row in table.select("tr"):
-        cells = row.select("td")
-        if len(cells) <= max_idx:
+    for row in rows:
+        if not isinstance(row, dict):
             continue
-
-        title_a = cells[idx["title"]].find("a")
-        if not title_a:
-            continue
-
-        title = title_a.get_text(strip=True)
+        title = str(row.get("title") or "").strip()
         if not title:
             continue
-
+        stamp = str(row.get("datetime") or "").strip()
+        date = stamp[:10] if len(stamp) >= 10 else ""
         results.append({
             "title": title,
-            "source": cells[idx["source"]].get_text(strip=True),
-            "date": cells[idx["date"]].get_text(strip=True),
-            "link": title_a.get("href", ""),
+            "source": str(row.get("author") or "").strip(),
+            "date": date,
+            "link": "",
         })
 
     return results
