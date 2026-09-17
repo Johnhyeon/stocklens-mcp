@@ -115,7 +115,9 @@ class PositionGuardTests(unittest.TestCase):
         out = compute_indicators(self.HANWHA, ["position"])
         pos = out["position"]
         self.assertNotIn("error", pos)
-        self.assertGreater(pos["low_52w"], 0)
+        # 16봉이라 52주 이름은 비고 조회 구간 저가로 나온다(test_intraday_label_contract).
+        self.assertIsNone(pos["low_52w"])
+        self.assertEqual(pos["lookback_low"], 280000)
 
     def test_flat_series_does_not_divide_by_zero(self):
         rows = [_bar(f"202608{d:02d}", o=500, h=500, lo=500, c=500, v=0)

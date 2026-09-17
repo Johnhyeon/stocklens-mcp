@@ -27,15 +27,30 @@ def _to_df(ohlcv: list[dict]) -> pd.DataFrame:
     return df
 
 
-def round_to_tick(price) -> int | None:
+def _round_foreign(p: float) -> float:
+    return round(p, 2) if abs(p) >= 1 else round(p, 4)
+
+
+def _price(value, currency: str = "KRW") -> int | float:
+    """가격 한 점. 원화는 원 단위 정수, 그 밖의 통화는 소수 자리를 남긴다."""
+    v = float(value)
+    return int(v) if currency == "KRW" else _round_foreign(v)
+
+
+def round_to_tick(price, currency: str = "KRW") -> int | float | None:
     """KRX 호가가격단위로 라운딩 (2023.1.25 시행 기준).
 
     이평선·BB·매물대 등 계산 결과를 실거래 가능 가격으로 표시.
     None/NaN 입력은 None 반환.
+
+    원화가 아닌 가격(미국 분봉)에는 KRX 호가단위를 쓰지 않는다. 그대로 두면
+    187.35달러짜리 이평선이 187로 나간다. 소수 둘째 자리(1달러 미만은 넷째)까지.
     """
     if price is None or (isinstance(price, float) and pd.isna(price)):
         return None
     p = float(price)
+    if currency != "KRW":
+        return _round_foreign(p)
     if p < 2000:
         tick = 1
     elif p < 5000:
@@ -75,12 +90,14 @@ _CROSS_LABELS = {
 }
 
 
-def compute_ma(df: pd.DataFrame, periods: tuple[int, ...] = _MA_PERIODS) -> dict:
+def compute_ma(df: pd.DataFrame, periods: tuple[int, ...] = _MA_PERIODS,
+               currency: str = "KRW") -> dict:
     """각 기간의 이동평균 최신값 (호가단위 라운딩)."""
     result = {}
     for p in periods:
         if len(df) >= p:
-            result[f"ma{p}"] = round_to_tick(df["close"].rolling(p).mean().iloc[-1])
+            result[f"ma{p}"] = round_to_tick(df["close"].rolling(p).mean().iloc[-1],
+                                             currency)
         else:
             result[f"ma{p}"] = None
     return result
@@ -331,7 +348,7 @@ def compute_obv(df: pd.DataFrame, window: int = 20) -> dict:
 # 거래량 / 위치 / 캔들
 # ─────────────────────────────────────────────────────────────
 
-def compute_volume(df: pd.DataFrame) -> dict:
+def compute_volume(df: pd.DataFrame, currency: str = "KRW") -> dict:
     """거래량 요약.
 
     키 이름이 곧 정의여야 한다. 예전 이름들이 실제와 달라 오독을 유발했다:
@@ -341,10 +358,12 @@ def compute_volume(df: pd.DataFrame) -> dict:
                          trade_value_est_krw로 교체.
       rank_52w         → 1이 최다인지 최소인지, 모집단이 뭔지 이름에 없었다.
                          volume_rank_252b(1=최다, 252봉 중)로 교체.
+    미국 분봉은 달러다. 통화가 이름에 들어가므로 trade_value_est_usd 로 나간다.
     """
+    value_key = f"trade_value_est_{currency.lower()}"
     empty = {
         "latest": None, "latest_date": None, "avg_20b": None,
-        "ratio_vs_avg_20b": None, "trade_value_est_krw": None,
+        "ratio_vs_avg_20b": None, value_key: None,
         "volume_rank_252b": None,
     }
     if len(df) < 20:
@@ -354,7 +373,10 @@ def compute_volume(df: pd.DataFrame) -> dict:
     avg_20b = float(df["volume"].rolling(20).mean().iloc[-1])
     ratio = latest_vol / avg_20b if avg_20b > 0 else None
     # 종가 × 거래량. 실제 거래대금은 체결가 가중이라 이 값과 약간 다르다.
-    trade_value_est = int(df["close"].iloc[-1]) * latest_vol
+    if currency == "KRW":
+        trade_value_est = int(df["close"].iloc[-1]) * latest_vol
+    else:
+        trade_value_est = int(round(float(df["close"].iloc[-1]) * latest_vol))
 
     volume_rank = None
     if len(df) >= 252:
@@ -366,43 +388,67 @@ def compute_volume(df: pd.DataFrame) -> dict:
         "latest_date": str(df["date"].iloc[-1]) if "date" in df.columns else None,
         "avg_20b": int(avg_20b),
         "ratio_vs_avg_20b": round(float(ratio), 2) if ratio else None,
-        "trade_value_est_krw": trade_value_est,
+        value_key: trade_value_est,
         "volume_rank_252b": volume_rank,
     }
 
 
-def compute_position(df: pd.DataFrame, bars_per_year: int = 252) -> dict:
-    """52주(1년) 고저 대비 현재가 위치.
+def compute_position(df: pd.DataFrame, bars_per_year: int | None = 252,
+                     currency: str = "KRW") -> dict:
+    """조회 구간 고저 대비 현재가 위치. 창이 1년을 채울 때만 52주 이름을 쓴다.
 
     창은 라벨을 따라야 한다: 일봉 252개, 주봉 52개, 월봉 12개가 1년이다.
     252 고정으로 되돌아보면 주봉에서 약 5년치가 "52주 고가"로 나간다.
+
+    거꾸로 창이 1년에 못 미치면 52주 이름을 붙이지 않는다. 5분봉 60개의 고저가
+    high_52w 로 나갔다(2026-09-17 실측, high_date 가 당일 11:35). 이때는 *_52w 를
+    null 로 비우고 같은 값을 lookback_* 로 준다. 분봉(bars_per_year=None)은 52주를
+    채울 수 없으니 *_52w 키 자체를 내지 않는다.
     """
     if len(df) < 2:
         return {}
 
-    lookback = df.iloc[-bars_per_year:] if len(df) >= bars_per_year else df
-    high_52w = float(lookback["high"].max())
-    low_52w = float(lookback["low"].min())
-    if low_52w <= 0 or high_52w <= 0:
+    window = bars_per_year or len(df)
+    lookback = df.iloc[-window:] if len(df) >= window else df
+    high = float(lookback["high"].max())
+    low = float(lookback["low"].min())
+    if low <= 0 or high <= 0:
         # split_valid_bars 를 거치면 올 수 없는 값이다. 계산 오류(ZeroDivision)
         # 대신 입력 데이터 이상을 그대로 말한다.
-        return {"error": f"입력 데이터 이상 - 52주 저가 {low_52w:.0f} / "
-                         f"고가 {high_52w:.0f} (거래정지 placeholder 미분리 의심)"}
+        return {"error": f"입력 데이터 이상 - 조회 구간 저가 {low:.0f} / "
+                         f"고가 {high:.0f} (거래정지 placeholder 미분리 의심)"}
     high_idx = lookback["high"].idxmax()
     low_idx = lookback["low"].idxmin()
     high_date = str(lookback.loc[high_idx, "date"]) if "date" in lookback.columns else None
     low_date = str(lookback.loc[low_idx, "date"]) if "date" in lookback.columns else None
     price = float(df["close"].iloc[-1])
+    pct_high = round((price - high) / high * 100, 2)
+    pct_low = round((price - low) / low * 100, 2)
+
+    out: dict = {"price": _price(price, currency)}
+    if bars_per_year is not None and len(lookback) >= bars_per_year:
+        out.update({
+            "high_52w": _price(high, currency),
+            "low_52w": _price(low, currency),
+            "pct_from_high_52w": pct_high,
+            "pct_from_low_52w": pct_low,
+        })
+    else:
+        if bars_per_year is not None:
+            out.update({"high_52w": None, "low_52w": None,
+                        "pct_from_high_52w": None, "pct_from_low_52w": None})
+        out.update({
+            "lookback_high": _price(high, currency),
+            "lookback_low": _price(low, currency),
+            "pct_from_lookback_high": pct_high,
+            "pct_from_lookback_low": pct_low,
+        })
 
     # days_since_* 는 달력일이 아니라 **봉 개수**(거래일)였다. 2026-02-11 고점이
     # 123으로 나오는데 달력으로는 184일이라, "123일 전"으로 서술되면 틀린다.
     # bars_since_* 로 바꿔 이름이 단위를 말하게 한다. 달력일은 high_date로 계산.
     return {
-        "price": int(price),
-        "high_52w": int(high_52w),
-        "low_52w": int(low_52w),
-        "pct_from_high_52w": round((price - high_52w) / high_52w * 100, 2),
-        "pct_from_low_52w": round((price - low_52w) / low_52w * 100, 2),
+        **out,
         "high_date": high_date,
         "low_date": low_date,
         "bars_since_high": int(len(lookback) - 1 - lookback.index.get_loc(high_idx)),
@@ -471,6 +517,7 @@ def compute_support_resistance(
     window: int = 10,
     tolerance_pct: float = 1.5,
     min_touches: int = 2,
+    currency: str = "KRW",
 ) -> dict:
     """지지·저항 자동 추출.
 
@@ -505,8 +552,9 @@ def compute_support_resistance(
         strength = "strong" if touches >= 4 else "medium" if touches >= 3 else "weak"
         return {
             "kind": kind,
-            "price_range": [round_to_tick(price_low), round_to_tick(price_high)],
-            "avg_price": round_to_tick(avg_price),
+            "price_range": [round_to_tick(price_low, currency),
+                            round_to_tick(price_high, currency)],
+            "avg_price": round_to_tick(avg_price, currency),
             "touches": touches,
             "touch_dates": dates,
             "avg_volume_at_touch": int(sum(volumes) / len(volumes)),
@@ -524,7 +572,7 @@ def compute_support_resistance(
     return {
         "support_levels": supports,
         "resistance_levels": resistances,
-        "current_price": round_to_tick(current_price),
+        "current_price": round_to_tick(current_price, currency),
         "lookback_candles": len(df),
         "params": {
             "window": window,
@@ -534,7 +582,8 @@ def compute_support_resistance(
     }
 
 
-def compute_volume_profile(df: pd.DataFrame, bins: int = 20) -> dict:
+def compute_volume_profile(df: pd.DataFrame, bins: int = 20,
+                           currency: str = "KRW") -> dict:
     """가격대별 누적 거래량 분포 (매물대 분석).
 
     POC (Point of Control) = 최대 매물 집중 가격대
@@ -561,7 +610,8 @@ def compute_volume_profile(df: pd.DataFrame, bins: int = 20) -> dict:
             mask = (prices >= bin_low) & (prices < bin_high)
         vol_sum = float(volumes[mask].sum())
         profile.append({
-            "price_range": [round_to_tick(bin_low), round_to_tick(bin_high)],
+            "price_range": [round_to_tick(bin_low, currency),
+                            round_to_tick(bin_high, currency)],
             "volume": int(vol_sum),
         })
 
@@ -591,11 +641,11 @@ def compute_volume_profile(df: pd.DataFrame, bins: int = 20) -> dict:
             "volume_pct": poc["volume_pct"],
         },
         "value_area": {
-            "low": round_to_tick(va_low),
-            "high": round_to_tick(va_high),
+            "low": round_to_tick(va_low, currency),
+            "high": round_to_tick(va_high, currency),
             "coverage_pct": round(cumsum, 1),
         },
-        "current_price": round_to_tick(current),
+        "current_price": round_to_tick(current, currency),
         "current_in_value_area": va_low <= current <= va_high,
         "total_volume": int(total),
         "lookback_candles": len(df),
@@ -603,7 +653,8 @@ def compute_volume_profile(df: pd.DataFrame, bins: int = 20) -> dict:
     }
 
 
-def compute_price_channel(df: pd.DataFrame, period: int = 20) -> dict:
+def compute_price_channel(df: pd.DataFrame, period: int = 20,
+                          currency: str = "KRW") -> dict:
     """Donchian Channel — N봉 고가/저가 기반 가격 채널.
 
     Upper = N봉 최고가, Lower = N봉 최저가, Mid = (U+L)/2
@@ -639,10 +690,10 @@ def compute_price_channel(df: pd.DataFrame, period: int = 20) -> dict:
     lower_date = str(df.loc[lower_idx, "date"]) if "date" in df.columns else None
 
     return {
-        "upper": round_to_tick(upper),
-        "lower": round_to_tick(lower),
-        "midline": round_to_tick(midline),
-        "current": round_to_tick(current),
+        "upper": round_to_tick(upper, currency),
+        "lower": round_to_tick(lower, currency),
+        "midline": round_to_tick(midline, currency),
+        "current": round_to_tick(current, currency),
         "position_pct": round(position * 100, 1),
         "width_pct": round(width_pct, 2),
         "state": state,
@@ -652,7 +703,7 @@ def compute_price_channel(df: pd.DataFrame, period: int = 20) -> dict:
     }
 
 
-def compute_candle(df: pd.DataFrame) -> dict:
+def compute_candle(df: pd.DataFrame, currency: str = "KRW") -> dict:
     if len(df) < 2:
         return {}
 
@@ -669,10 +720,10 @@ def compute_candle(df: pd.DataFrame) -> dict:
 
     return {
         "date": str(last.get("date", "")),
-        "open": int(last["open"]),
-        "high": int(last["high"]),
-        "low": int(last["low"]),
-        "close": int(last["close"]),
+        "open": _price(last["open"], currency),
+        "high": _price(last["high"], currency),
+        "low": _price(last["low"], currency),
+        "close": _price(last["close"], currency),
         "body_pct": round(float(body / last["open"] * 100), 2) if last["open"] else 0,
         "range_pct": round(float(rng / last["open"] * 100), 2) if last["open"] else 0,
         "upper_wick_pct": round(float(upper_wick / last["open"] * 100), 2) if last["open"] else 0,
@@ -762,7 +813,30 @@ def split_valid_bars(ohlcv: list[dict]) -> tuple[list[dict], list[dict]]:
 
 
 # 봉 주기별 1년치 봉 수. "52주" 라벨이 붙는 창은 이 수를 따라야 한다.
+# 여기 없는 주기(분봉 "5m" 등)는 1년을 봉 수로 정할 수 없어 52주 라벨을 쓰지 않는다.
 _BARS_PER_YEAR = {"day": 252, "week": 52, "month": 12}
+
+# 가격을 그대로 내보내는 지표. 통화에 맞춰 반올림한다.
+_PRICE_INDICATORS = {"ma", "volume", "position", "candle",
+                     "support_resistance", "volume_profile", "price_channel"}
+
+
+def _cross_age_in_bars(result: dict) -> None:
+    """크로스 경과(days_ago)는 봉 개수다. 일봉이 아니면 bars_ago 로 부른다.
+
+    주봉의 3은 3주, 5분봉의 3은 15분이다. "3일 전 골든크로스"로 읽히면 틀린다.
+    일봉은 거래일 수라 기존 이름을 유지한다(구매자 가이드가 이 이름으로 설명한다).
+    """
+    crosses = []
+    ma_cross = result.get("ma_cross")
+    if isinstance(ma_cross, dict):
+        crosses.extend(v for v in ma_cross.values() if isinstance(v, dict))
+    macd = result.get("macd")
+    if isinstance(macd, dict) and isinstance(macd.get("cross"), dict):
+        crosses.append(macd["cross"])
+    for cross in crosses:
+        if "days_ago" in cross:
+            cross["bars_ago"] = cross.pop("days_ago")
 
 
 def compute_indicators(
@@ -770,6 +844,7 @@ def compute_indicators(
     include: list[str],
     params: dict | None = None,
     timeframe: str = "day",
+    currency: str = "KRW",
 ) -> dict:
     """OHLCV와 요청 지표 키 리스트로 종합 지표 dict 생성.
 
@@ -779,8 +854,10 @@ def compute_indicators(
         params: 지표별 파라미터 오버라이드 dict. 예:
             {"rsi": {"period": 21}, "bollinger": {"std": 2.5}}
             지표 키별 dict가 그대로 compute_* 함수 kwargs로 전달됨.
-        timeframe: 봉 주기("day"/"week"/"month"). 52주 위치처럼 달력 기간
-            라벨이 붙는 지표의 창 크기가 이 주기를 따른다.
+        timeframe: 봉 주기("day"/"week"/"month", 분봉은 "5m" 등). 52주 위치처럼
+            달력 기간 라벨이 붙는 지표의 창 크기와 이름이 이 주기를 따른다.
+        currency: 가격 통화. "KRW" 는 KRX 호가단위, 그 밖은 소수 자리로 반올림하고
+            거래대금 추산 키 이름에 통화가 들어간다.
     """
     # 거래정지 placeholder(가격 0)를 실제 봉으로 계산하지 않는다.
     valid, excluded = split_valid_bars(ohlcv)
@@ -800,8 +877,10 @@ def compute_indicators(
             continue
         kwargs = dict(params.get(key) or {})
         if key == "position":
-            kwargs.setdefault("bars_per_year",
-                              _BARS_PER_YEAR.get(timeframe, 252))
+            # 파라미터로 창을 바꾸게 두면 52주 라벨이 다시 거짓이 된다.
+            kwargs["bars_per_year"] = _BARS_PER_YEAR.get(timeframe)
+        if key in _PRICE_INDICATORS:
+            kwargs["currency"] = currency
         try:
             result[key] = fn(df, **kwargs)
         except TypeError as e:
@@ -809,4 +888,6 @@ def compute_indicators(
         except Exception as e:
             result[key] = {"error": f"{type(e).__name__}: {e}"}
 
+    if timeframe != "day":
+        _cross_age_in_bars(result)
     return result
