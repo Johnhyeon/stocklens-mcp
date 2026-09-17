@@ -38,6 +38,7 @@ from stock_mcp_server.naver import (
     get_sector_stocks as naver_get_sector_stocks,
     get_stock_sector as naver_get_stock_sector,
     get_volume_ranking as naver_get_volume_ranking,
+    get_market_list_status as naver_get_market_list_status,
     volume_sort_key as naver_volume_sort_key,
     get_change_ranking as naver_get_change_ranking,
     get_alert_codes as naver_get_alert_codes,
@@ -949,6 +950,32 @@ def _rows_session_note(counts: dict[str, int]) -> str | None:
         " 애프터마켓이 들어갑니다. 정규장 종가·정규장 등락률이 아닙니다."
         " ETF·ETN은 애프터마켓이 없어 정규장 값 그대로입니다."
     )
+
+
+async def _preopen_ranking_reply(label: str, market: str, *, kind: str = "snapshot") -> str | None:
+    """순위가 비었을 때, 장 시작 전이라 비었다면 그 사실을 말하는 응답. 아니면 None.
+
+    네이버는 개장 전(marketStatus=PREOPEN)에 거래 기반 순위를 빈 배열로 준다
+    (2026-09-17 08:33 실측). 예전엔 "순위를 가져올 수 없습니다"라고만 해서 장애처럼
+    읽혔고, 장전 루틴은 원인을 알 수 없었다.
+    """
+    try:
+        status = await naver_get_market_list_status(market)
+    except Exception:
+        return None  # 장 상태를 못 읽으면 원래 안내를 쓴다 — 원인을 짐작해 적지 않는다
+    if status != "PREOPEN":
+        return None
+    text = (
+        f"장 시작 전이라 {label} 순위가 아직 없습니다 ({market}).\n"
+        "네이버는 개장 전에 거래량·거래대금·등락률 순위를 비워 두고, 정규장이 열리면 다시 채웁니다. "
+        "이 시간에는 전 거래일 순위도 받을 수 없습니다."
+    )
+    meta = _kr_meta(
+        kind=kind,
+        data_completeness=rmeta.NONE,
+        warnings=["장 시작 전(네이버 PREOPEN)이라 순위가 비어 있음 — 해당 종목 없음·거래 없음으로 해석하지 말 것"],
+    )
+    return _append_result_meta(text, meta)
 
 
 def _after_market_values_possible(krx: dict) -> bool:
@@ -2333,6 +2360,9 @@ async def screen_by_flow(
     sort_label = "거래대금" if sort_by == "trade_value" else "거래량"
     ranks = await naver_get_volume_ranking(market=market, count=top_n, sort_by=sort_by)
     if not ranks:
+        preopen = await _preopen_ranking_reply(sort_label, market, kind="bars")
+        if preopen:
+            return preopen
         meta = _kr_meta(kind="bars", data_completeness=rmeta.NONE, warnings=[f"{market} {sort_label} 순위를 가져오지 못했습니다."])
         return _append_result_meta(f"{market} {sort_label} 순위를 가져올 수 없습니다.", meta)
 
@@ -3159,7 +3189,8 @@ async def get_volume_ranking(
     ranks = await naver_get_volume_ranking(market=market, count=count, sort_by=sort_by)
     sort_label = "거래대금" if sort_by == "trade_value" else "거래량"
     if not ranks:
-        return f"{market} {sort_label} 순위를 가져올 수 없습니다."
+        return (await _preopen_ranking_reply(sort_label, market)
+                or f"{market} {sort_label} 순위를 가져올 수 없습니다.")
 
     lines = [f"{sort_label} 상위 ({market}, {len(ranks)}개, 정렬={sort_by}):", ""]
     # 헤더가 '거래대금(원)'인데 셀은 억 단위로 찍혀 헤더와 값이 어긋나 있었다.
@@ -3202,7 +3233,9 @@ async def get_change_ranking(
     count = min(count, 500)
     ranks = await naver_get_change_ranking(direction=direction, market=market, count=count)
     if not ranks:
-        return f"{direction} 등락률 순위를 가져올 수 없습니다."
+        label = "상승률" if (direction or "").lower() == "up" else "하락률"
+        return (await _preopen_ranking_reply(label, market)
+                or f"{direction} 등락률 순위를 가져올 수 없습니다.")
 
     # 급등주 목록은 시장경보 종목이 섞이기 가장 쉬운 자리다. 종목마다 페이지를
     # 여는 대신 경보 목록(수십 종목)만 한 번 받아 매칭한다.

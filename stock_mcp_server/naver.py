@@ -1632,6 +1632,22 @@ async def get_volume_ranking(
     return _rank_rows(rows, count)
 
 
+async def get_market_list_status(market: str = "ALL") -> str | None:
+    """시장 목록 행이 알려 주는 장 상태(marketStatus). 모르면 None.
+
+    장 시작 전(PREOPEN)에는 거래 기반 순위(up·down·quantTop·priceTop …)가 빈 배열로
+    온다. 시가총액 목록은 그때도 오고 행에 marketStatus 가 실린다(2026-09-17 08:33 실측:
+    005930 행 marketStatus=PREOPEN, tradeVolume 0). 빈 순위가 '장 전이라 없음'인지
+    '못 받음'인지는 이 값으로 가른다 — 우리 시계로 짐작하지 않는다.
+    """
+    rows = await _market_stock_list(_ORDER_MARKET_SUM, market=market, size=1)
+    for row in rows:
+        if isinstance(row, dict):
+            status = str(row.get("marketStatus") or "").strip().upper()
+            return status or None
+    return None
+
+
 async def get_change_ranking(
     direction: str = "up", market: str = "ALL", count: int = 50
 ) -> list[dict]:
