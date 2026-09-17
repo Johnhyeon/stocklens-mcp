@@ -8,9 +8,16 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
+import secrets
+import time
 import unittest
+from datetime import date, datetime, timedelta, timezone
 from unittest.mock import patch
+
+import pytest
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from stock_mcp_server import licensing, status
 
@@ -103,15 +110,112 @@ class BuildStatusTests(unittest.TestCase):
         data = json.loads(payload)
         self.assertEqual(data, snap.to_dict())
 
-    def test_active_license_reflected(self) -> None:
-        with patch.object(status, "load_metrics", return_value=[]), patch.object(
-            licensing, "stored_key", return_value="FAKE"
-        ), patch.object(licensing, "verify_key", return_value={"valid": True, "license_id": "abcd1234"}), patch(
-            "stock_mcp_server._update_check._load_cache", return_value=None
-        ):
-            snap = status.build_status()
 
-        self.assertEqual(snap.license_status, "active")
+# ---------- 라이선스: "활성화됨"이면 도구가 정말 열려 있어야 한다 ----------
+#
+# 여기는 verify_key 를 mock 하지 않고 임시 키쌍으로 진짜 서명한 키를 쓴다. 예전 버그가
+# 바로 "서명이 맞으면 active"였고, verify_key 를 mock 한 테스트는 그걸 통과시켰다.
+
+_EPOCH = date(1970, 1, 1)
+
+
+def _utc_today() -> date:
+    # 제품 코드가 UTC 로 판단한다 — 로컬 날짜를 쓰면 KST 00~09시에 하루 어긋난다.
+    return datetime.now(timezone.utc).date()
+
+
+@pytest.fixture
+def use_key(tmp_path, monkeypatch):
+    priv = Ed25519PrivateKey.generate()
+    monkeypatch.setattr(
+        licensing, "_PUBLIC_KEY_B64", base64.b64encode(priv.public_key().public_bytes_raw()).decode()
+    )
+    monkeypatch.setattr(licensing, "_home", lambda: tmp_path)
+    monkeypatch.setattr(licensing, "_licensed_cache", False)
+    monkeypatch.setattr(licensing, "_fetch_revoked", lambda: pytest.fail("상태 조회 테스트가 네트워크를 탔다"))
+    monkeypatch.setattr(status, "load_metrics", lambda *a, **k: [])
+    monkeypatch.setattr("stock_mcp_server._update_check._load_cache", lambda: None)
+
+    def use(expires_on: date | None = None, revoked: bool = False) -> None:
+        payload = licensing.PRODUCT + secrets.token_bytes(6)
+        if expires_on is not None:
+            payload += (expires_on - _EPOCH).days.to_bytes(4, "big")
+        key = base64.b32encode(payload + priv.sign(payload)).decode().rstrip("=")
+        monkeypatch.setattr(licensing, "stored_key", lambda: key)
+        # 방금 받은 목록으로 둔다 — 하루가 안 지났으니 다시 받지 않는다.
+        (tmp_path / "revoked_cache.json").write_text(
+            json.dumps({"revoked": [payload[4:10].hex()] if revoked else [], "fetched_at": time.time()}),
+            encoding="utf-8",
+        )
+
+    return use
+
+
+def _assert_matches_gate(snap: status.StatusSnapshot) -> None:
+    assert (snap.license_status == "active") is licensing.is_licensed()
+
+
+def test_live_trial_key_is_active(use_key):
+    use_key(_utc_today() + timedelta(days=3))
+    snap = status.build_status()
+    assert snap.license_status == "active"
+    _assert_matches_gate(snap)
+    assert "- 라이선스: 활성화됨" in status.format_status(snap)
+
+
+def test_expired_trial_key_is_not_active(use_key):
+    use_key(_utc_today() - timedelta(days=1))
+    snap = status.build_status()
+    assert snap.license_status == "expired"
+    _assert_matches_gate(snap)
+    text = status.format_status(snap)
+    assert "- 라이선스: 사용 기간 끝남" in text
+    assert "활성화됨" not in text
+    assert "[구매]" in text and "[활성화]" in text
+
+
+def test_revoked_key_is_not_active(use_key):
+    use_key(None, revoked=True)
+    snap = status.build_status()
+    assert snap.license_status == "revoked"
+    _assert_matches_gate(snap)
+    text = status.format_status(snap)
+    assert "- 라이선스: 사용 중지됨" in text
+    assert "활성화됨" not in text
+    assert "[지원 문의]" in text
+
+
+def test_clock_turned_back_is_not_active(use_key, tmp_path):
+    use_key(_utc_today() + timedelta(days=5))
+    (tmp_path / "clock_seen").write_text((_utc_today() + timedelta(days=10)).isoformat(), encoding="utf-8")
+    snap = status.build_status()
+    assert snap.license_status == "clock"
+    _assert_matches_gate(snap)
+    assert "- 라이선스: 컴퓨터 날짜 확인 필요" in status.format_status(snap)
+
+
+def test_every_blocked_state_has_label_and_next_step():
+    """새 상태가 생겼는데 이름표나 안내를 빠뜨리면 영문 코드가 그대로 나간다."""
+    assert set(status._LICENSE_NEXT_STEP) == set(status._LICENSE_LABEL) - {"active"}
+
+
+@pytest.mark.parametrize("state", sorted(status._LICENSE_LABEL))
+def test_license_guidance_never_asks_for_terminal(state):
+    snap = status.StatusSnapshot(
+        package_version="0.0.0",
+        license_status=state,
+        kr_market_status="unknown",
+        us_market_status="unknown",
+        last_success_at=None,
+        last_failure_at=None,
+        last_failure_error_code=None,
+        cache_writable=True,
+        update_available=False,
+        latest_version=None,
+    )
+    text = status.format_status(snap)
+    for banned in ("stocklens-activate", "stocklens-doctor", "터미널", "명령"):
+        assert banned not in text
 
 
 class StocklensStatusToolTests(unittest.TestCase):

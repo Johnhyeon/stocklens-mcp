@@ -5,6 +5,10 @@
 `_metrics` JSONL 로그와 `_update_check`의 24시간 캐시를 그대로 재사용해서
 조립한다(새 계측·새 네트워크 호출 없음).
 
+예외 하나: 라이선스 판정은 도구 잠금과 같은 `licensing.license_block_reason()`을
+쓰므로, 폐기 목록 캐시가 하루 지났으면 프로세스당 한 번 목록을 받는다(2.5초 제한).
+다른 도구를 처음 부를 때도 똑같이 일어나는 일이라 여기서만 느려지는 건 아니다.
+
 깊은 진단(오프라인 재현, 실제 국내/미국 시세 재조회 등)은 `stocklens-doctor`
 커맨드라인 쪽 몫이다.
 """
@@ -37,7 +41,10 @@ _NON_MARKET_TOOLS = {
 @dataclass
 class StatusSnapshot:
     package_version: str
-    license_status: str  # "active" | "missing" | "invalid"
+    # "active" | "missing" | "invalid" | "expired" | "revoked" | "clock"
+    # 뒤의 셋은 키 자체는 진짜인데 지금 못 쓰는 상태다. 예전엔 서명만 보고 전부
+    # "active"로 보고해서, 체험이 끝나 도구는 잠겼는데 여기서는 "활성화됨"이라고 했다.
+    license_status: str
     kr_market_status: str  # "ok" | "degraded" | "down" | "unknown"
     us_market_status: str
     last_success_at: str | None
@@ -63,12 +70,15 @@ class StatusSnapshot:
 
 
 def _license_status() -> str:
+    """도구 잠금 안내(`licensing.locked_message`)와 Manager 진단
+    (`diagnostics._license_summary`)이 쓰는 판정 함수를 그대로 쓴다.
+
+    `verify_key`는 형식·서명만 본다. 그걸로 판정하면 기간이 끝났거나 중지된 키도
+    "활성화됨"이 된다 — 도구는 잠겨 있는데.
+    """
     from stock_mcp_server import licensing
 
-    key = licensing.stored_key()
-    if not key:
-        return "missing"
-    return "active" if licensing.verify_key(key)["valid"] else "invalid"
+    return licensing.license_block_reason() or "active"
 
 
 def _cache_writable() -> bool:
@@ -154,7 +164,32 @@ def build_status() -> StatusSnapshot:
     )
 
 
-_LICENSE_LABEL = {"active": "활성화됨", "missing": "미활성화(키 없음)", "invalid": "무효(서명 불일치)"}
+_LICENSE_LABEL = {
+    "active": "활성화됨",
+    "missing": "미활성화(키 없음)",
+    # 깨진 키·다른 제품 키·서명 불일치가 전부 여기로 온다. "서명 불일치"로 못박으면
+    # 복사하다 한 글자 빠진 사람에게도 위조라고 말하는 셈이다.
+    "invalid": "유효하지 않은 키",
+    "expired": "사용 기간 끝남",
+    "revoked": "사용 중지됨",
+    "clock": "컴퓨터 날짜 확인 필요",
+}
+
+# 상태마다 할 일이 다르다(diagnostics._LICENSE_BLOCKED_FIX와 같은 이유). 안내는
+# LeetKit Manager 버튼으로만 한다 — 터미널 명령은 적지 않는다.
+_LICENSE_NEXT_STEP = {
+    "missing": ("LeetKit Manager의 StockLens 카드에서 [활성화]를 눌러 메일로 받은 키를 넣어주세요.",),
+    "invalid": (
+        "LeetKit Manager의 StockLens 카드에서 [활성화]를 눌러 메일로 받은 키를 다시 넣어주세요.",
+        "그래도 같으면 Manager 상단 [지원 문의]로 알려주세요.",
+    ),
+    "expired": ("계속 쓰시려면 LeetKit Manager의 StockLens 카드에서 [구매]하신 뒤, 받은 키를 [활성화]로 넣어주세요.",),
+    "revoked": ("환불·결제 취소로 중지된 키입니다. 착오라면 LeetKit Manager 상단 [지원 문의]로 알려주세요.",),
+    "clock": (
+        "컴퓨터의 날짜와 시간을 현재로 맞춘 뒤 다시 시도해주세요.",
+        "그래도 같으면 LeetKit Manager 상단 [지원 문의]로 알려주세요.",
+    ),
+}
 _MARKET_LABEL = {"ok": "정상", "degraded": "일부 실패", "down": "장애", "unknown": "기록 없음"}
 
 
@@ -168,6 +203,7 @@ def format_status(status: StatusSnapshot) -> str:
         "StockLens 상태",
         version_line,
         f"- 라이선스: {_LICENSE_LABEL.get(status.license_status, status.license_status)}",
+        *(f"  {step}" for step in _LICENSE_NEXT_STEP.get(status.license_status, ())),
         f"- 국내 시장: {_MARKET_LABEL.get(status.kr_market_status, status.kr_market_status)}",
         f"- 미국 시장: {_MARKET_LABEL.get(status.us_market_status, status.us_market_status)}",
         f"- 최근 성공 조회: {status.last_success_at or '기록 없음'}",
