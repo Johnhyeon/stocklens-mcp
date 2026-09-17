@@ -4,7 +4,13 @@ from __future__ import annotations
 
 import pytest
 
-from stock_mcp_server._error_class import CATEGORIES, action_for, classify_error
+from stock_mcp_server._error_class import (
+    CATEGORIES,
+    action_for,
+    classify_error,
+    classify_exception,
+    still_failing,
+)
 
 CASES = [
     # cancelled
@@ -99,11 +105,60 @@ def test_categories_list_is_the_shared_contract():
     )
 
 
-@pytest.mark.parametrize("category", CATEGORIES)
+@pytest.mark.parametrize("category", [c for c in CATEGORIES if c != "cancelled"])
 def test_every_category_has_an_action(category):
     text = action_for(category, "StockLens")
     assert text and "{lens}" not in text
     assert "[" in text
+
+
+def test_cancelled_has_no_action():
+    """취소는 실패로 안 세므로 할 일도 없다."""
+    assert action_for("cancelled", "StockLens") is None
+
+
+@pytest.mark.parametrize(
+    ("trailing", "expected"),
+    [
+        ([], False),
+        (["other"], False),  # AI 앱이 인자를 한 번 잘못 넣은 경우
+        (["timeout"], False),  # 한 번 삐끗한 타임아웃
+        (["connect"], False),
+        (["other", "other"], True),  # 다시 불러도 또 실패 — 진짜 결함
+        (["timeout", "connect"], True),
+        (["tls"], True),  # 원인이 분명하고 저절로 안 풀림 — 한 번이면 충분
+        (["dns"], True),
+        (["blocked"], True),
+        (["auth"], True),
+        (["schema"], True),
+    ],
+)
+def test_still_failing(trailing, expected):
+    assert still_failing(trailing) is expected
+
+
+def test_classify_exception_prefers_tls_anywhere_then_outer_first():
+    import ssl
+
+    class ProviderUnavailable(Exception):
+        pass
+
+    try:
+        try:
+            raise ssl.SSLCertVerificationError("certificate verify failed")
+        except ssl.SSLError as inner:
+            raise ProviderUnavailable("provider_unavailable") from inner
+    except ProviderUnavailable as wrapped:
+        assert classify_exception(wrapped) == "tls"
+
+    try:
+        try:
+            raise TimeoutError("timed out")
+        except TimeoutError:
+            raise ProviderUnavailable("credential_invalid") from None
+    except ProviderUnavailable as wrapped:
+        # 바깥이 이미 인증 실패라고 말하면 안쪽 타임아웃보다 그게 할 일에 맞다.
+        assert classify_exception(wrapped) == "auth"
 
 
 def test_auth_action_is_per_lens():

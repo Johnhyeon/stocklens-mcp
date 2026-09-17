@@ -362,8 +362,13 @@ def _clock_turned_back(expiry: "date | None") -> bool:
 
 # 아래 reason 들은 LeetKit Manager 의 활성화 창에 그대로 뜬다. 한 글자 빠지게 복사한
 # 사람에게 "서명 불일치(위조/변조)"라고 하면 범인 취급이 되므로, 할 일 하나만 적는다.
-_REASON_RETRY_PASTE = (
-    "키를 확인할 수 없어요. 메일로 받은 키를 빠짐없이 다시 붙여넣어 주세요. "
+# 문구는 DartLens·TelegramLens 의 _ACTIVATION_COPY 와 Lens 이름만 빼고 같다.
+_REASON_MALFORMED = (
+    "StockLens 라이선스 키로 읽을 수 없어요. 메일로 받은 키를 앞뒤 공백 없이 그대로 붙여넣어 주세요. "
+    "그래도 같으면 상단 [지원 문의]를 눌러주세요."
+)
+_REASON_BAD_SIGNATURE = (
+    "StockLens 라이선스 키로 확인되지 않아요. 메일로 받은 키를 그대로 다시 붙여넣어 주세요. "
     "그래도 같으면 상단 [지원 문의]를 눌러주세요."
 )
 
@@ -375,18 +380,18 @@ def verify_key(key_str: str) -> dict:
     except Exception:
         return {
             "valid": False,
-            "reason": "지금 설치된 StockLens로는 키를 확인할 수 없어요. 상단 [지원 문의]를 눌러주세요.",
+            "reason": "키를 확인하는 중에 문제가 생겼어요. 상단 [지원 문의]를 눌러주세요.",
         }
     try:
         raw = _decode(key_str)
     except Exception:
-        return {"valid": False, "reason": _REASON_RETRY_PASTE}
+        return {"valid": False, "reason": _REASON_MALFORMED}
     payload_len = len(raw) - _SIG_LEN
     if payload_len not in (_PAYLOAD_LEN, _PAYLOAD_LEN_WITH_EXPIRY) or raw[:4] != PRODUCT:
         return {
             "valid": False,
             "reason": (
-                "StockLens 키가 아니에요. 메일에서 StockLens 키를 찾아 넣어주세요. "
+                "StockLens 키가 아니에요. 메일에서 StockLens 키를 찾아 그대로 붙여넣어 주세요. "
                 "그래도 같으면 상단 [지원 문의]를 눌러주세요."
             ),
         }
@@ -394,7 +399,7 @@ def verify_key(key_str: str) -> dict:
     try:
         pub.verify(sig, payload)
     except InvalidSignature:
-        return {"valid": False, "reason": _REASON_RETRY_PASTE}
+        return {"valid": False, "reason": _REASON_BAD_SIGNATURE}
     # 만료일은 서명 안에 들어 있다 — 고쳐 쓰면 서명이 깨지므로 위 검증에서 걸린다.
     return {
         "valid": True,
@@ -572,9 +577,9 @@ def save_key(key_str: str) -> dict:
         return {
             "valid": False,
             "reason": (
-                "이 컴퓨터에서는 이미 체험판을 썼어요. 체험은 컴퓨터 한 대에 한 번만 드려요. "
+                "이 컴퓨터에서는 이미 체험판을 사용하셨어요. 체험은 한 대에 한 번만 드려요.\n"
                 "계속 쓰시려면 StockLens 카드의 [구매]를 눌러주세요. "
-                "착오라면 상단 [지원 문의]를 눌러 알려주세요."
+                "착오라면 상단 [지원 문의]를 눌러주세요."
             ),
         }
 
@@ -584,13 +589,13 @@ def save_key(key_str: str) -> dict:
     if _is_expired(expiry):
         return {
             "valid": False,
-            "reason": "사용 기간이 끝난 키예요. StockLens 카드의 [구매]를 누르고, 받은 키를 넣어주세요.",
+            "reason": "사용 기간이 끝난 키예요. StockLens 카드의 [구매]를 누르고, 받은 키를 [활성화]로 넣어주세요.",
             "expires_on": expiry,
         }
     if is_revoked(res.get("license_id", "")):
         return {
             "valid": False,
-            "reason": "지금 사용이 중지된 키예요. 착오라면 상단 [지원 문의]를 눌러 알려주세요.",
+            "reason": "지금 사용이 중지된 키예요. 착오라면 상단 [지원 문의]를 눌러주세요.",
         }
 
     p = _license_path()

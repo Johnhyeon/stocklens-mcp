@@ -39,7 +39,7 @@ def test_failure_then_same_tool_success_is_resolved():
     ]
     check = diagnostics._check_recent_tool_failures(records)
     assert check.status == "ok"
-    assert check.summary == "최근 이틀 동안 조회 3번 중 1번이 실패했지만, 그 뒤에는 정상이었어요."
+    assert check.summary == "최근 이틀 동안 조회 3번 중 1번이 실패했지만, 계속 실패하고 있지는 않아요."
     assert check.error_code is None
     assert check.detail and check.detail[0].startswith("get_flow: 실패 1번, 마지막 09:00, 분류 timeout, ReadTimeout")
 
@@ -60,6 +60,20 @@ def test_last_call_failed_is_warn_with_category_action():
     d = check.to_dict()
     assert d["details"]["impact"]
     assert len(d["details"]["lines"]) == 2
+
+
+def test_single_unclear_failure_is_not_warn_but_repeat_is():
+    """AI 앱이 인자를 한 번 잘못 넣은 호출로 카드가 이틀 내내 '주의'가 되면 안 된다.
+    다시 불러도 또 실패하면 그때는 진짜 결함으로 본다."""
+    once = [_rec("list_themes", "2026-09-17T09:00:00", "ValueError", "page는 1 이상이어야 해요")]
+    check = diagnostics._check_recent_tool_failures(once)
+    assert check.status == "ok"
+    assert check.detail and check.detail[0].startswith("list_themes: 실패 1번")
+
+    twice = once + [_rec("list_themes", "2026-09-17T09:00:20", "ValueError", "page는 1 이상이어야 해요")]
+    check = diagnostics._check_recent_tool_failures(twice)
+    assert check.status == "warn"
+    assert check.error_code == "RECENT_TOOL_FAILURES_OTHER"
 
 
 def test_other_tool_success_does_not_resolve_a_failure():
@@ -86,6 +100,7 @@ def test_cancelled_only_is_not_a_failure_but_kept_in_details():
 def test_cancel_after_failure_does_not_hide_the_failure():
     records = [
         _rec("get_flow", "2026-09-17T09:00:00", "ConnectError", "Connection refused"),
+        _rec("get_flow", "2026-09-17T09:00:30", "ConnectError", "Connection refused"),
         _rec("get_flow", "2026-09-17T09:01:00", "CancelledError"),
     ]
     check = diagnostics._check_recent_tool_failures(records)
@@ -113,7 +128,10 @@ def test_offline_report_includes_the_check(tmp_path, monkeypatch):
     monkeypatch.setenv("STOCKLENS_HOME", str(tmp_path))
     monkeypatch.setattr(
         "stock_mcp_server._metrics.load_metrics",
-        lambda days=1: [_rec("get_price", "2026-09-17T10:00:00", "ReadTimeout", "timed out")],
+        lambda days=1: [
+            _rec("get_price", "2026-09-17T10:00:00", "ReadTimeout", "timed out"),
+            _rec("get_price", "2026-09-17T10:00:30", "ReadTimeout", "timed out"),
+        ],
     )
     report = diagnostics.run_diagnostics(online=False)
     check = next(c for c in report.checks if c.id == "RECENT_TOOL_FAILURES")

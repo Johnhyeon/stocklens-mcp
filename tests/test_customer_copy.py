@@ -256,7 +256,11 @@ def test_full_offline_report_without_license(tmp_path, monkeypatch):
     ],
 )
 def test_recent_tool_failures_warn_for_every_category(error_type, detail):
-    records = [{"timestamp": "2026-09-17T10:00:00", "tool": "get_flow", "error": error_type, "error_detail": detail}]
+    # 원인 불명·시간 초과·연결 실패는 되풀이돼야 '주의'다 — 모든 분류의 주의 문구를 보려고 두 번씩.
+    records = [
+        {"timestamp": f"2026-09-17T10:00:0{i}", "tool": "get_flow", "error": error_type, "error_detail": detail}
+        for i in range(2)
+    ]
     check = diagnostics._check_recent_tool_failures(records)
     assert check.status == "warn"
     _assert_check(check, f"RECENT_TOOL_FAILURES({error_type})")

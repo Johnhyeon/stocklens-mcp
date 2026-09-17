@@ -43,7 +43,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from stock_mcp_server._error_class import action_for, classify_error
+from stock_mcp_server._error_class import action_for, classify_error, classify_exception, still_failing
 
 SCHEMA_VERSION = 1
 PRODUCT = "stocklens"
@@ -584,6 +584,7 @@ def _check_recent_tool_failures(records: list[dict] | None = None) -> Diagnostic
 
     - 같은 도구가 실패 뒤에 성공했으면 해결된 것으로 본다(일시 장애가 카드를 계속 붉게
       두면 진짜 경고까지 안 믿게 된다).
+    - 끝에 남은 실패가 아직 실패인지는 `_error_class.still_failing`이 정한다(세 Lens 공통).
     - AI 앱이 취소한 호출(CancelledError)은 실패로 세지 않는다.
     - 한계: 도구가 예외 없이 "⚠️ …" 문자열을 돌려준 실패는 metrics 에 에러로 안 남아서 못 본다.
     """
@@ -605,10 +606,10 @@ def _check_recent_tool_failures(records: list[dict] | None = None) -> Diagnostic
     by_tool: dict[str, dict] = {}
     failed = 0
     for r in calls:
-        slot = by_tool.setdefault(str(r["tool"]), {"failures": [], "cancelled": [], "last": None})
+        slot = by_tool.setdefault(str(r["tool"]), {"failures": [], "cancelled": [], "trailing": []})
         error_type = r.get("error")
         if not error_type:
-            slot["last"] = "ok"
+            slot["trailing"] = []
             continue
         category = classify_error(str(error_type), r.get("error_detail"))
         if category == "cancelled":
@@ -616,16 +617,16 @@ def _check_recent_tool_failures(records: list[dict] | None = None) -> Diagnostic
             slot["cancelled"].append(r)
             continue
         slot["failures"].append((r, category))
-        slot["last"] = "fail"
+        slot["trailing"].append(category)
         failed += 1
 
     total = len(calls)
-    unresolved = [tool for tool, slot in by_tool.items() if slot["last"] == "fail"]
+    unresolved = [tool for tool, slot in by_tool.items() if still_failing(slot["trailing"])]
     detail = _recent_failure_lines(by_tool, unresolved)
 
     if not unresolved:
         summary = (
-            f"최근 이틀 동안 조회 {total}번 중 {failed}번이 실패했지만, 그 뒤에는 정상이었어요."
+            f"최근 이틀 동안 조회 {total}번 중 {failed}번이 실패했지만, 계속 실패하고 있지는 않아요."
             if failed
             else f"최근 이틀 동안 조회 {total}번이 모두 정상이었어요."
         )
@@ -737,23 +738,7 @@ _CATEGORY_LABEL = {
 }
 
 
-def _classify_exception(exc: BaseException) -> str:
-    """예외 사슬을 따라가며 원인 분류를 고른다.
-
-    증권사 클라이언트는 httpx 오류를 비밀 없는 자체 예외로 바꿔 올린다(`raise ... from None`).
-    겉 예외만 보면 타임아웃과 연결 거부가 똑같이 provider_unavailable 이다. from None 이어도
-    __context__ 에 원래 예외가 남아 있으니 거기까지 본다. 겉에서 이미 분류가 나오면
-    (예: credential_invalid → auth) 그게 우선이다.
-    """
-    seen: set[int] = set()
-    current: BaseException | None = exc
-    while current is not None and id(current) not in seen and len(seen) < 6:
-        seen.add(id(current))
-        category = classify_error(type(current).__name__, str(current))
-        if category != "other":
-            return category
-        current = current.__cause__ or current.__context__
-    return "other"
+_classify_exception = classify_exception  # 세 Lens 공통 규칙(_error_class)
 
 
 def _failure_line(name: str, category: str, raw: str | None) -> str:

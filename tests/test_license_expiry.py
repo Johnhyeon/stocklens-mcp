@@ -460,7 +460,7 @@ class TestOneTrialPerMachine:
         second = signer(_today() + timedelta(days=30))   # 다른 이메일로 받은 다른 키
         res = L.save_key(second)
         assert res["valid"] is False
-        assert "이미 체험판을 썼어요" in res["reason"]
+        assert "이미 체험판을 사용하셨어요" in res["reason"]
         # 문의처는 메일 주소가 아니라 Manager 버튼이다.
         assert "[지원 문의]" in res["reason"] and "@" not in res["reason"]
 
