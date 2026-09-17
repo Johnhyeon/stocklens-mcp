@@ -15,7 +15,10 @@ Requirements 3.1)과 문자 그대로 일치해야 한다 — DartLens/TelegramL
 검사 ID (Manager가 파싱하는 고정 식별자, 값 자체를 바꾸지 말 것):
     PACKAGE_IMPORTABLE, COMMAND_AVAILABLE, PYTHON_SUPPORTED, MCP_CONFIG_VALID,
     LICENSE_ACTIVE, CACHE_WRITABLE, KR_DATA_REACHABLE, US_DATA_REACHABLE,
-    UPDATE_CHECK_REACHABLE
+    UPDATE_CHECK_REACHABLE, RECENT_TOOL_FAILURES
+
+RECENT_TOOL_FAILURES 는 세 Lens 공통 검사다(DartLens·TelegramLens 도 같은 ID·같은 판정).
+metrics 기록만 읽으므로 기본 모드에서도 실행된다.
 
 기본(online=False) 진단은 네트워크 호출이 전혀 없어 수 초 내 끝난다.
 online=True 일 때만 KR_DATA_REACHABLE/US_DATA_REACHABLE/UPDATE_CHECK_REACHABLE가
@@ -37,9 +40,12 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
+from stock_mcp_server._error_class import action_for, classify_error
+
 SCHEMA_VERSION = 1
 PRODUCT = "stocklens"
 PACKAGE_NAME = "stocklens-mcp"
+_LENS_NAME = "StockLens"  # _error_class.action_for 가 화면 문구에 넣는 이름
 
 # pyproject.toml의 requires-python과 동일하게 유지할 것.
 MIN_PYTHON = (3, 11)
@@ -66,6 +72,12 @@ def _short(exc: BaseException) -> str:
     msg = _redact(exc)
     raw = f"{type(exc).__name__}: {msg}" if msg else type(exc).__name__
     return raw if len(raw) <= _RAW_MAX else raw[: _RAW_MAX - 1] + "…"
+
+
+# RECENT_TOOL_FAILURES: 최근 이틀(오늘·어제 metrics 파일), 도구별 줄은 최대 8줄·원문 120자.
+_RECENT_LOOKBACK_DAYS = 2
+_RECENT_DETAIL_MAX_LINES = 8
+_RECENT_DETAIL_CHARS = 120
 
 # 고객 문구(summary/action)는 LeetKit Manager 화면에 그대로 뜬다. 규칙:
 # - 터미널 명령·환경변수 이름·예외 이름을 쓰지 않는다. 그런 원문은 details.lines 에만
@@ -140,6 +152,17 @@ ERROR_CATALOG: dict[str, dict] = {
         "repairable": False,
     },
 }
+
+# 최근 조회 실패는 원인 분류마다 코드가 따로 있다(예: RECENT_TOOL_FAILURES_TLS). 할 일은
+# 분류별 공통 문장(_error_class)을 쓴다. cancelled 는 실패로 세지 않으므로 코드가 없다.
+for _category in ("tls", "dns", "timeout", "blocked", "auth", "connect", "schema", "other"):
+    ERROR_CATALOG[f"RECENT_TOOL_FAILURES_{_category.upper()}"] = {
+        "summary": "최근 조회 중 아직 실패로 남아 있는 것이 있어요.",
+        "impact": "AI 앱에서 일부 조회가 실패하고 있어요.",
+        "action": action_for(_category, _LENS_NAME),
+        "repairable": False,
+    }
+del _category
 
 
 @dataclass
@@ -540,6 +563,117 @@ def _check_cache_writable() -> DiagnosticCheck:
         )
 
 
+def _check_recent_tool_failures(records: list[dict] | None = None) -> DiagnosticCheck:
+    """최근 이틀 동안 AI 앱이 부른 도구 중, 아직 실패로 끝나 있는 것이 있는가.
+
+    온라인 확인은 대표 종목 몇 건만 본다. 고객이 실제로 막힌 조회는 그와 다를 수 있어서
+    (2026-09-11 네이버 개편 때 순위·수급만 따로 죽었다) 도구마다 남는 metrics 기록을
+    그대로 읽는다. 네트워크를 타지 않으므로 기본(오프라인) 진단에서도 돈다.
+
+    - 같은 도구가 실패 뒤에 성공했으면 해결된 것으로 본다(일시 장애가 카드를 계속 붉게
+      두면 진짜 경고까지 안 믿게 된다).
+    - AI 앱이 취소한 호출(CancelledError)은 실패로 세지 않는다.
+    - 한계: 도구가 예외 없이 "⚠️ …" 문자열을 돌려준 실패는 metrics 에 에러로 안 남아서 못 본다.
+    """
+    if records is None:
+        from stock_mcp_server._metrics import load_metrics
+
+        records = load_metrics(days=_RECENT_LOOKBACK_DAYS)
+
+    calls = [r for r in records if isinstance(r, dict) and r.get("tool")]
+    if not calls:
+        return DiagnosticCheck(
+            id="RECENT_TOOL_FAILURES",
+            status="ok",
+            critical=False,
+            summary="최근 이틀 동안 AI 앱이 StockLens를 쓴 기록이 없어요.",
+        )
+    calls.sort(key=lambda r: str(r.get("timestamp") or ""))
+
+    by_tool: dict[str, dict] = {}
+    failed = 0
+    for r in calls:
+        slot = by_tool.setdefault(str(r["tool"]), {"failures": [], "cancelled": [], "last": None})
+        error_type = r.get("error")
+        if not error_type:
+            slot["last"] = "ok"
+            continue
+        category = classify_error(str(error_type), r.get("error_detail"))
+        if category == "cancelled":
+            # 취소는 성공도 실패도 아니다 — 그 도구의 마지막 결과를 바꾸지 않는다.
+            slot["cancelled"].append(r)
+            continue
+        slot["failures"].append((r, category))
+        slot["last"] = "fail"
+        failed += 1
+
+    total = len(calls)
+    unresolved = [tool for tool, slot in by_tool.items() if slot["last"] == "fail"]
+    detail = _recent_failure_lines(by_tool, unresolved)
+
+    if not unresolved:
+        summary = (
+            f"최근 이틀 동안 조회 {total}번 중 {failed}번이 실패했지만, 그 뒤에는 정상이었어요."
+            if failed
+            else f"최근 이틀 동안 조회 {total}번이 모두 정상이었어요."
+        )
+        return DiagnosticCheck(
+            id="RECENT_TOOL_FAILURES", status="ok", critical=False, summary=summary, detail=detail,
+        )
+
+    # 대표 분류: 아직 실패로 남은 도구들의 마지막 실패 분류 중 가장 많은 것. 같으면 더 최근 것.
+    last_failures = sorted(
+        (by_tool[tool]["failures"][-1] for tool in unresolved),
+        key=lambda pair: str(pair[0].get("timestamp") or ""),
+        reverse=True,
+    )
+    counts: dict[str, int] = {}
+    for _record, category in last_failures:
+        counts[category] = counts.get(category, 0) + 1
+    top = max(counts.values())
+    category = next(c for _r, c in last_failures if counts[c] == top)
+
+    return DiagnosticCheck(
+        id="RECENT_TOOL_FAILURES",
+        status="warn",
+        critical=False,
+        summary=f"최근 조회 중 아직 실패로 남아 있는 것이 {len(unresolved)}가지 있어요.",
+        detail=detail,
+        error_code=f"RECENT_TOOL_FAILURES_{category.upper()}",
+        fix=action_for(category, _LENS_NAME),
+    )
+
+
+def _hhmm(timestamp: object) -> str:
+    text = str(timestamp or "")
+    return text[11:16] if len(text) >= 16 else "?"
+
+
+def _recent_failure_lines(by_tool: dict[str, dict], unresolved: list[str]) -> list[str]:
+    """도구별 한 줄(지원용). 아직 실패로 남은 도구가 먼저, 그다음 최근 실패 순."""
+    failing = [tool for tool, slot in by_tool.items() if slot["failures"]]
+    failing.sort(key=lambda tool: str(by_tool[tool]["failures"][-1][0].get("timestamp") or ""), reverse=True)
+    failing.sort(key=lambda tool: tool not in unresolved)  # 안정 정렬 — 최근 순서는 유지된다
+    lines: list[str] = []
+    for tool in failing:
+        failures = by_tool[tool]["failures"]
+        record, category = failures[-1]
+        detail = _redact(record.get("error_detail"))[:_RECENT_DETAIL_CHARS]
+        raw = f"{record.get('error')}: {detail}" if detail else str(record.get("error"))
+        lines.append(
+            f"{tool}: 실패 {len(failures)}번, 마지막 {_hhmm(record.get('timestamp'))}, 분류 {category}, {raw}"
+        )
+    for tool, slot in by_tool.items():
+        if slot["cancelled"] and not slot["failures"]:
+            record = slot["cancelled"][-1]
+            lines.append(
+                f"{tool}: 취소 {len(slot['cancelled'])}번(실패로 세지 않음), "
+                f"마지막 {_hhmm(record.get('timestamp'))}, 분류 cancelled, {record.get('error')}"
+            )
+    return lines[:_RECENT_DETAIL_MAX_LINES]
+
+
+
 def _safe_check(fn, *args, fallback_id: str, fallback_critical: bool = True, **kwargs) -> DiagnosticCheck:
     """개별 체크 함수 하나가 예상 못한 예외를 던져도 전체 리포트가 죽지 않게 감싼다.
 
@@ -833,6 +967,9 @@ async def run_diagnostics_async(*, online: bool = False) -> DiagnosticReport:
         _safe_check(_check_mcp_config_valid, targets, fallback_id="MCP_CONFIG_VALID"),
         _safe_check(_check_license_active, license_summary, fallback_id="LICENSE_ACTIVE"),
         _safe_check(_check_cache_writable, fallback_id="CACHE_WRITABLE", fallback_critical=False),
+        _safe_check(
+            _check_recent_tool_failures, fallback_id="RECENT_TOOL_FAILURES", fallback_critical=False
+        ),
     ]
 
     latest_version: str | None = None

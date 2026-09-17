@@ -238,3 +238,23 @@ def test_full_offline_report_without_license(tmp_path, monkeypatch):
     for c in report["checks"]:
         assert_customer_copy(c["summary"], f"{c['id']} summary")
         assert_customer_copy(c["action"], f"{c['id']} action")
+
+
+@pytest.mark.parametrize(
+    "error_type,detail",
+    [
+        ("ConnectError", "[SSL: CERTIFICATE_VERIFY_FAILED]"),
+        ("ReadTimeout", "timed out"),
+        ("ConnectError", "[Errno 11001] getaddrinfo failed"),
+        ("ConnectError", "Connection refused"),
+        ("HTTPStatusError", "Client error '429 Too Many Requests'"),
+        ("KisApiError", "KIS 오류: credential_invalid (http=401)"),
+        ("NaverParseError", "구조 변경 가능성"),
+        ("RuntimeError", "boom"),
+    ],
+)
+def test_recent_tool_failures_warn_for_every_category(error_type, detail):
+    records = [{"timestamp": "2026-09-17T10:00:00", "tool": "get_flow", "error": error_type, "error_detail": detail}]
+    check = diagnostics._check_recent_tool_failures(records)
+    assert check.status == "warn"
+    _assert_check(check, f"RECENT_TOOL_FAILURES({error_type})")
