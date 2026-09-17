@@ -2221,6 +2221,189 @@ async def get_disclosure_list(code: str, page: int = 1, page_size: int = 30) -> 
 
 
 # ---------------------------------------------------------------------------
+# 종목 뉴스 — 출처 둘
+#
+# 2026-09-17 위지트 문의로 만들었다. "오늘 왜 오르나"의 답은 공시가 아니라 기사에
+# 있었는데(대만 T사 평가품 납품 보도자료, 09:19 머니투데이), 한국 뉴스 도구가 없었다.
+# 그날 DART 공시는 30일간 0건이라 "공시 없음 → 재료 없음"으로 잘못 갔다.
+#
+# 1) 종목 태그 API `m.stock.naver.com/api/news/stock/{code}` — 기사 시각이 분 단위로
+#    정확하다. 그런데 네이버가 기사에 종목을 붙이는 게 늦다. 위지트는 당일 기사 3건이
+#    없고 최신이 9/4 였다(19시 실측).
+# 2) 뉴스 검색 `search.naver.com/search.naver?where=news&sort=1` — 당일 기사가 바로
+#    잡힌다. 대신 HTML 이고 시각이 "4시간 전" 같은 상대 표시다.
+# 둘을 합쳐서 낸다. 시각의 정확도가 다르므로 time_basis 로 구분해 싣는다:
+#   article          기사 자체의 시각(분 단위)
+#   relative_display 네이버 표시("N시간 전")를 조회 시각에서 뺀 근사값
+#   date_only        날짜만 있음("2026.09.04.")
+# ---------------------------------------------------------------------------
+
+STOCK_NEWS_URL = f"{MSTOCK_API}/news/stock/{{code}}"
+NEWS_SEARCH_URL = "https://search.naver.com/search.naver"
+# 네이버 뉴스 본문 주소. officeId/articleId 조합으로 200 을 돌려주는 것을 실측했다.
+NAVER_ARTICLE_URL = "https://n.news.naver.com/article/{office}/{article}"
+
+
+def _news_stamp(raw) -> str:
+    """'202609041323' → '2026-09-04 13:23'. 모양이 다르면 빈 문자열(추측하지 않는다)."""
+    s = str(raw or "").strip()
+    if len(s) >= 12 and s[:12].isdigit():
+        return f"{s[:4]}-{s[4:6]}-{s[6:8]} {s[8:10]}:{s[10:12]}"
+    return ""
+
+
+@cached(ttl_market=180, ttl_closed=900)  # 장중 3분, 장마감 15분
+async def get_stock_news(code: str, page_size: int = 20, page: int = 1) -> list[dict]:
+    """네이버가 이 종목에 붙인 기사 목록. 응답은 [{total, items:[...]}, ...] 묶음이다."""
+    import html as _html
+
+    what = f"종목 뉴스({code})"
+    payload = await _api_json(
+        STOCK_NEWS_URL.format(code=code), what=what,
+        params={"pageSize": page_size, "page": page},
+    )
+    groups = _api_list(payload, what=what)
+
+    out: list[dict] = []
+    for grp in groups:
+        items = grp.get("items") if isinstance(grp, dict) else None
+        if not isinstance(items, list):
+            continue
+        for it in items:
+            if not isinstance(it, dict):
+                continue
+            title = _html.unescape(str(it.get("title") or "")).strip()
+            if not title:
+                continue
+            office = str(it.get("officeId") or "").strip()
+            article = str(it.get("articleId") or "").strip()
+            out.append({
+                "title": title,
+                "press": str(it.get("officeName") or "").strip(),
+                "datetime": _news_stamp(it.get("datetime")),
+                "time_basis": "article",
+                "url": (NAVER_ARTICLE_URL.format(office=office, article=article)
+                        if office and article else ""),
+                "snippet": "",
+                "source": "stock_tag",
+            })
+    return out
+
+
+_REL_TIME_RE = re.compile(r"^(\d+)\s*(분|시간|일|주)\s*전$")
+_ABS_DATE_RE = re.compile(r"^(\d{4})\.(\d{1,2})\.(\d{1,2})\.?$")
+
+
+def resolve_display_time(text: str, now) -> tuple[str, str]:
+    """네이버 검색 결과의 시각 표기 → (datetime 문자열, time_basis).
+
+    '4시간 전' → now 에서 빼서 'YYYY-MM-DD HH:MM' (relative_display, 근사).
+    '2026.09.04.' → 'YYYY-MM-DD' (date_only).
+    못 읽으면 ('', 'unknown'). 어느 쪽도 정확한 기사 시각이 아니다 — 호출부가
+    time_basis 를 그대로 사용자에게 보여야 한다.
+    """
+    from datetime import timedelta as _td
+
+    t = " ".join(str(text or "").split())
+    m = _REL_TIME_RE.match(t)
+    if m:
+        n = int(m.group(1))
+        unit = m.group(2)
+        delta = {"분": _td(minutes=n), "시간": _td(hours=n),
+                 "일": _td(days=n), "주": _td(weeks=n)}[unit]
+        approx = now - delta
+        if unit in ("일", "주"):
+            return approx.strftime("%Y-%m-%d"), "date_only"
+        return approx.strftime("%Y-%m-%d %H:%M"), "relative_display"
+    m = _ABS_DATE_RE.match(t)
+    if m:
+        return f"{m.group(1)}-{int(m.group(2)):02d}-{int(m.group(3)):02d}", "date_only"
+    return "", "unknown"
+
+
+# 검색 결과 HTML 의 표식. 2026-09-17 실측 구조(sds-comps). 기사마다 제목 링크에
+# data-heatmap-target=".tit", 본문 요약에 ".body", 그 앞에 언론사(profile-info-title)와
+# 시각(profile-info-subtext)이 온다. 표식이 하나도 안 잡히면 '기사 없음'이 아니라
+# '구조가 바뀌었다'로 올린다 — 그래야 이번 공시 목록 사고처럼 조용히 0건이 되지 않는다.
+_NEWS_TITLE_RE = re.compile(
+    r'<a([^>]*)data-heatmap-target="\.tit"[^>]*>\s*<span[^>]*>(.*?)</span>', re.S)
+_NEWS_BODY_RE = re.compile(
+    r'data-heatmap-target="\.body"[^>]*>\s*<span[^>]*>(.*?)</span>', re.S)
+_NEWS_PRESS_RE = re.compile(r'profile-info-title"[^>]*>.*?<span[^>]*>(.*?)</span>', re.S)
+_NEWS_TIME_RE = re.compile(r'profile-info-subtext"[^>]*>.*?<span[^>]*>(.*?)</span>', re.S)
+_HREF_RE = re.compile(r'href="([^"]*)"')
+_NO_RESULT_MARKERS = ("검색결과가 없습니다", "검색 결과가 없습니다")
+
+
+def parse_news_search_html(text: str, now, limit: int = 15) -> list[dict]:
+    """검색 결과 HTML → 기사 목록. 표식이 없고 '결과 없음' 문구도 없으면 NaverParseError."""
+    import html as _html
+
+    def _clean(fragment: str) -> str:
+        return " ".join(_html.unescape(re.sub(r"<[^>]+>", "", fragment)).split())
+
+    hits = list(_NEWS_TITLE_RE.finditer(text))
+    if not hits:
+        if any(marker in text for marker in _NO_RESULT_MARKERS):
+            return []
+        raise NaverParseError(
+            "뉴스 검색: 결과 페이지에서 기사 표식을 찾지 못했습니다 (네이버 구조 변경 가능성)."
+        )
+
+    out: list[dict] = []
+    prev_end = 0
+    for i, hit in enumerate(hits):
+        head = text[prev_end:hit.start()]
+        tail_end = hits[i + 1].start() if i + 1 < len(hits) else len(text)
+        tail = text[hit.end():tail_end]
+        prev_end = hit.end()
+
+        title = _clean(hit.group(2))
+        if not title:
+            continue
+        href = _HREF_RE.search(hit.group(1) or "")
+        press_m = _NEWS_PRESS_RE.findall(head)
+        time_m = _NEWS_TIME_RE.findall(head)
+        body_m = _NEWS_BODY_RE.search(tail)
+        # 언론사 옆 보조 글자가 시각 하나가 아니다. 네이버뉴스에도 실린 기사는 "9시간 전"
+        # 뒤에 "네이버뉴스" 라벨이 한 칸 더 붙는다(2026-09-17 머니투데이·뉴시스 실측).
+        # 마지막 칸만 집으면 그 기사들의 시각이 통째로 사라진다 — 읽히는 칸을 고른다.
+        displayed, stamp, basis = "", "", "unknown"
+        for raw in reversed(time_m):
+            candidate = _clean(raw)
+            c_stamp, c_basis = resolve_display_time(candidate, now)
+            if c_basis != "unknown":
+                displayed, stamp, basis = candidate, c_stamp, c_basis
+                break
+        if not displayed and time_m:
+            displayed = _clean(time_m[-1])
+        out.append({
+            "title": title,
+            "press": _clean(press_m[-1]) if press_m else "",
+            "datetime": stamp,
+            "time_basis": basis,
+            "displayed_time": displayed,
+            "url": _html.unescape(href.group(1)) if href else "",
+            "snippet": _clean(body_m.group(1))[:160] if body_m else "",
+            "source": "name_search",
+        })
+        if len(out) >= limit:
+            break
+    return out
+
+
+@cached(ttl_market=180, ttl_closed=900)  # 장중 3분, 장마감 15분
+async def search_news(query: str, limit: int = 15) -> list[dict]:
+    """종목명으로 네이버 뉴스 검색(최신순). 당일 기사가 종목 태그보다 먼저 잡힌다."""
+    from datetime import datetime as _datetime
+
+    from stock_mcp_server.market_clock import KST
+
+    resp = await fetch(NEWS_SEARCH_URL, params={"where": "news", "query": query, "sort": "1"})
+    return parse_news_search_html(resp.text or "", _datetime.now(KST), limit=limit)
+
+
+# ---------------------------------------------------------------------------
 # 2026-09 개편으로 새로 생긴 자료
 #
 # 구 화면에는 없던 것들이다. 개편 대응을 하면서 새 화면이 쓰는 API 를 훑다가

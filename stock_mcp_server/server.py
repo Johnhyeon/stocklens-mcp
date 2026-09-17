@@ -56,6 +56,8 @@ from stock_mcp_server.naver import (
     get_report_detail as naver_get_report_detail,
     REPORT_PAGE_URL as naver_report_page_url,
     get_disclosure_list as naver_get_disclosure_list,
+    get_stock_news as naver_get_stock_news,
+    search_news as naver_search_news,
     get_ipo_schedule as naver_get_ipo_schedule,
     get_investor_deposit as naver_get_investor_deposit,
     get_research_by_kind as naver_get_research_by_kind,
@@ -239,9 +241,19 @@ except Exception:
 
 mcp = LensFastMCP(
     "StockLens",
-    instructions="""StockLens — 한국 주식 데이터를 네이버 증권에서 실시간 조회합니다.
-종목코드(예: 005930)나 종목명(예: 삼성전자)으로 검색할 수 있습니다.
-차트 데이터, 투자자 수급, 재무지표, 시장 지수를 제공합니다.
+    # 파일을 만들거나 사용자 상태를 바꾸는 도구. 나머지는 읽기 전용(readOnlyHint)으로
+    # 표시돼 Codex·ChatGPT 앱이 승인 없이 부른다(_tool_schema.py 참고).
+    write_tools=(
+        "watchlist", "export_to_excel", "scan_to_excel",
+        "save_analysis_to_excel", "export_us_to_excel",
+    ),
+    instructions="""StockLens — 한국 주식(네이버 증권)·미국 주식 데이터 도구. 종목명만 받으면 먼저 `search`로 6자리 코드를 확정한다(코드 추측 금지).
+
+## 질문 → 도구 (먼저 이 표를 본다)
+- "오늘 왜 오르나/급등 이유/재료/특징주" → `get_move_context` (시세·기사·공시·리포트를 시각순으로. 공시 0건≠재료 없음)
+- "뉴스/기사" → `get_news` · "현재가" → `get_price` · "수급" → `get_flow`
+- "차트/지표" → `get_chart`/`get_indicators` · "공시" → `get_disclosure` · "리포트" → `get_reports` · "재무" → `get_financial`
+- 여러 종목 → `get_multi_stocks`/`*_batch` · 미국 티커(AAPL) → `get_us_*`
 
 ## 🚨 종목코드 규칙 (절대 원칙)
 
@@ -7416,6 +7428,361 @@ async def get_report_content(
     )
 
 
+# ---------------------------------------------------------------------------
+# 종목 뉴스 · 오늘 움직임 맥락 — 2026-09-17 위지트 문의로 추가
+#
+# "오늘 위지트가 왜 오르고 있어?"에 Claude 는 답했고 GPT 는 못 했다. GPT 세션은
+# search → get_price → get_flow → DART 30일 0건 → TelegramLens 0건 순으로 돌다가
+# "개별 재료 없음 → 가상화폐 테마"로 수렴했다. 실제 촉매는 09:19 보도자료 기사였다.
+# 겹친 원인: (1) 한국 뉴스 도구가 없었다 (2) "왜 오르나"에 해당하는 도구가 없어
+# 모델이 조각 도구를 조합해야 했다 (3) "공시 0건"이 "재료 없음"으로 읽혔다.
+# ---------------------------------------------------------------------------
+
+_NEWS_SOURCE_LABEL = {"stock_tag": "종목태그", "name_search": "이름검색"}
+
+
+def _news_dedup_key(item: dict) -> str:
+    return re.sub(r"\s+", "", str(item.get("title") or ""))[:24]
+
+
+async def _collect_kr_news(code: str, name: str | None, limit: int) -> tuple[list[dict], dict]:
+    """종목 태그 API + 종목명 검색을 합친다. 한쪽이 실패해도 다른 쪽은 돌려준다(부분 결과).
+
+    같은 기사가 양쪽에 있으면 종목 태그 쪽(기사 시각이 정확)을 남긴다 — 태그 결과를
+    먼저 넣기 때문이다. 출처별 상태(ok:N / failed:예외명 / skipped:이유)를 같이 돌려줘
+    호출부가 "이 출처는 빠졌다"를 말할 수 있게 한다.
+    """
+    sources = {"stock_tag": naver_get_stock_news(code, page_size=max(limit, 10))}
+    if name:
+        sources["name_search"] = naver_search_news(name, limit=max(limit, 10))
+    results = await asyncio.gather(*sources.values(), return_exceptions=True)
+
+    status: dict[str, str] = {}
+    merged: list[dict] = []
+    seen: set[str] = set()
+    for src, res in zip(sources.keys(), results):
+        if isinstance(res, BaseException):
+            status[src] = f"failed:{type(res).__name__}"
+            continue
+        status[src] = f"ok:{len(res)}"
+        for it in res:
+            key = _news_dedup_key(it)
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            merged.append(it)
+    if not name:
+        status["name_search"] = "skipped:no_name"
+    merged.sort(key=lambda it: str(it.get("datetime") or ""), reverse=True)
+    return merged, status
+
+
+def _news_time_label(item: dict) -> str:
+    """시각 앞에 정확도를 붙인다. 근사값을 정확한 시각처럼 내보내지 않는다."""
+    stamp = str(item.get("datetime") or "")
+    basis = str(item.get("time_basis") or "unknown")
+    if basis == "article":
+        return stamp or "시각 미상"
+    if basis == "relative_display":
+        shown = item.get("displayed_time") or ""
+        return f"약 {stamp} (네이버 표시 '{shown}')" if stamp else "시각 미상"
+    if basis == "date_only":
+        return f"{stamp} (날짜만)" if stamp else "날짜 미상"
+    return "시각 미상"
+
+
+def _render_news_lines(items: list[dict], name: str | None) -> list[str]:
+    lines: list[str] = []
+    for it in items:
+        title = it.get("title") or "-"
+        url = it.get("url") or ""
+        head = f"[{title}]({url})" if url else title
+        src = _NEWS_SOURCE_LABEL.get(it.get("source"), it.get("source") or "-")
+        mention = ""
+        if name and it.get("source") == "name_search":
+            mention = " · 제목 언급" if name in title else " · 본문 언급"
+        lines.append(f"- {_news_time_label(it)} · {it.get('press') or '-'} · {head} · {src}{mention}")
+        if it.get("snippet"):
+            lines.append(f"  > {it['snippet']}")
+    return lines
+
+
+_NEWS_FOOT = (
+    "※ 종목태그=네이버가 종목을 붙인 기사(시각 정확, 당일 기사는 늦게 붙음). "
+    "이름검색=종목명 뉴스 검색(당일 기사 빠름, 시각은 '약' 근사, 같은 이름의 다른 대상 기사가 섞일 수 있음)."
+)
+_NEWS_STAGE_FOOT = (
+    "※ 기사 제목은 회사 발표 단계(평가품·품질검증·양산·정식 수주)를 구분하지 않습니다. "
+    "판단 전에 본문을 확인하세요."
+)
+
+
+@mcp.tool()
+@safe_tool
+@track_metrics("get_news")
+async def get_news(code: str, limit: int = 10, today_only: bool = False) -> str:
+    """종목뉴스 — 한국 주식 종목의 최근 기사 (네이버 종목 뉴스 + 종목명 뉴스 검색).
+
+    "무슨 뉴스 있어", "기사 찾아줘", "재료가 뭐야" 질문에 사용합니다.
+    "오늘 왜 오르나"는 시세·공시·리포트까지 한 번에 묶는 `get_move_context` 가 맞습니다.
+    공시(get_disclosure)가 0건이어도 기사는 있을 수 있습니다 — 회사 보도자료는 공시가 아닙니다.
+
+    출처가 둘이라 시각 정확도가 다릅니다. 시각 앞의 표기("약")를 그대로 전하세요.
+    - 종목태그: 네이버가 종목을 붙인 기사. 기사 시각 정확(분 단위). 당일 기사는 늦게 붙습니다.
+    - 이름검색: 종목명 뉴스 검색. 당일 기사가 바로 잡힘. 시각은 "N시간 전" 표시를 조회
+      시각에서 뺀 **근사값**이고, 같은 이름의 다른 대상 기사가 섞일 수 있습니다.
+
+    Args:
+        code: 종목코드 6자리 (예: "036090")
+        limit: 기사 수 (기본 10, 최대 30)
+        today_only: True 면 오늘(한국 날짜) 기사만
+    """
+    if not _CODE_RE.match(code or ""):
+        return "종목코드는 6자리 영숫자여야 합니다. 종목명이라면 먼저 search 도구로 코드를 확정하세요."
+    limit = max(1, min(int(limit), 30))
+
+    name = None
+    try:
+        name = (await get_current_price(code)).get("name")
+    except Exception:
+        name = None  # 이름을 못 얻으면 이름검색만 건너뛴다. 태그 기사는 그대로 낸다.
+
+    items, status = await _collect_kr_news(code, name, limit)
+    today = _now_kst().strftime("%Y-%m-%d")
+    if today_only:
+        items = [it for it in items if str(it.get("datetime") or "").startswith(today)]
+    items = items[:limit]
+
+    failed = [k for k, v in status.items() if v.startswith("failed")]
+    tried = [k for k, v in status.items() if not v.startswith("skipped")]
+    label = f"{name} ({code})" if name else code
+    lines = [f"## 종목 뉴스 — {label} (조회 {today} 기준)", ""]
+    if not items:
+        if failed and len(failed) == len(tried):
+            lines.append("⚠️ 뉴스 출처 조회에 모두 실패했습니다 (기사가 없는 것이 아니라 조회 실패).")
+        else:
+            lines.append("기사 없음 (조회 성공, 0건)" + (" — 오늘 기사만 걸렀습니다." if today_only else ""))
+    else:
+        today_items = [it for it in items if str(it.get("datetime") or "").startswith(today)]
+        if today_items and not today_only:
+            lines.append(f"**오늘 기사 {len(today_items)}건** (아래 목록에 포함)")
+            lines.append("")
+        lines.extend(_render_news_lines(items, name))
+    lines.append("")
+    for k in failed:
+        lines.append(
+            f"⚠️ 출처 '{_NEWS_SOURCE_LABEL.get(k, k)}' 조회 실패({status[k].split(':', 1)[1]}) — "
+            "이 출처 기사는 빠져 있습니다. 없음이 아니라 모름입니다."
+        )
+    lines.append(_NEWS_FOOT)
+    lines.append(_NEWS_STAGE_FOOT)
+
+    warnings = [f"뉴스 출처 조회 실패: {k}" for k in failed]
+    if failed and len(failed) == len(tried):
+        completeness = rmeta.NONE
+    elif failed:
+        completeness = rmeta.PARTIAL
+    else:
+        completeness = rmeta.COMPLETE
+    return _append_result_meta(
+        "\n".join(lines),
+        _kr_meta(
+            kind="snapshot", code=code, name=name, data_as_of=today,
+            data_completeness=completeness,
+            extra={"news_sources": status, "count": len(items)},
+            warnings=warnings,
+        ),
+    )
+
+
+def _volume_ratio_text(rows: list[dict] | None, today_compact: str, today_volume) -> str:
+    """오늘 거래량 / 최근 20거래일 평균. 일봉이 없거나 평균이 0이면 빈 문자열."""
+    if not rows or not isinstance(today_volume, (int, float)):
+        return ""
+    prev = [r for r in rows if str(r.get("date")) != today_compact][-20:]
+    vols = [r.get("volume") for r in prev if isinstance(r.get("volume"), (int, float))]
+    if len(vols) < 5:
+        return ""
+    avg = sum(vols) / len(vols)
+    if avg <= 0:
+        return ""
+    return f" — 최근 {len(vols)}거래일 평균({avg:,.0f}주)의 {today_volume / avg:.1f}배"
+
+
+@mcp.tool()
+@safe_tool
+@track_metrics("get_move_context")
+async def get_move_context(code: str) -> str:
+    """오늘왜움직였나 — 시세·거래량 배수·기사·거래소 공시·증권사 리포트를 **시각순으로** 한 번에.
+
+    "오늘 왜 오르나", "왜 떨어져", "급등 이유", "무슨 재료", "특징주" 질문에 **먼저** 사용합니다.
+    get_price → get_disclosure → get_flow 를 따로 이어 부르지 마세요. 이 도구 하나로 모입니다.
+
+    원인을 판정하지 않습니다. 사실을 시각순으로 놓을 뿐입니다. 기사 시각이 가격 반응보다
+    앞서는지는 `get_intraday_chart` 분봉으로 확인합니다. 공시가 0건이어도 재료 없음이
+    아닙니다 — 보도자료·기사는 공시가 아닙니다. 한 출처가 실패하면 그 부분만 "조회 실패"로
+    표시하고 나머지는 돌려줍니다(실패는 없음이 아니라 모름).
+
+    Args:
+        code: 종목코드 6자리 (예: "036090")
+    """
+    if not _CODE_RE.match(code or ""):
+        return "종목코드는 6자리 영숫자여야 합니다. 종목명이라면 먼저 search 도구로 코드를 확정하세요."
+
+    now = _now_kst()
+    today = now.strftime("%Y-%m-%d")
+    today_compact = now.strftime("%Y%m%d")
+    cutoff_disc = (now - _dt.timedelta(days=14)).strftime("%Y-%m-%d")
+    cutoff_rep = (now - _dt.timedelta(days=30)).strftime("%Y-%m-%d")
+
+    price_res, ohlcv_res, disc_res, rep_res = await asyncio.gather(
+        get_current_price(code),
+        get_ohlcv(code, "day", 25),
+        naver_get_disclosure_list(code),
+        naver_get_reports(code, 5),
+        return_exceptions=True,
+    )
+    failures: dict[str, str] = {}
+    price = price_res if isinstance(price_res, dict) and "price" in price_res else None
+    if price is None:
+        failures["시세"] = (type(price_res).__name__ if isinstance(price_res, BaseException)
+                          else "parse")
+    name = (price or {}).get("name") or (
+        price_res.get("name") if isinstance(price_res, dict) else None)
+    rows = ohlcv_res if isinstance(ohlcv_res, list) else None
+    if rows is None:
+        failures["일봉"] = type(ohlcv_res).__name__
+    discs = disc_res if isinstance(disc_res, list) else None
+    if discs is None:
+        failures["공시"] = type(disc_res).__name__
+    reps = rep_res if isinstance(rep_res, list) else None
+    if reps is None:
+        failures["리포트"] = type(rep_res).__name__
+
+    news_items, news_status = await _collect_kr_news(code, name, 15)
+    for k, v in news_status.items():
+        if v.startswith("failed"):
+            failures[f"뉴스({_NEWS_SOURCE_LABEL.get(k, k)})"] = v.split(":", 1)[1]
+
+    label = f"{name} ({code})" if name else code
+    lines = [f"## 오늘 움직임 맥락 — {label} · {today}", ""]
+
+    # 시세 — 세션 이름표를 붙인다. 16시 이후는 애프터마켓 체결이 섞인 값이다.
+    lines.append("### 시세")
+    if price:
+        p = price.get("price")
+        base = price.get("base_price")
+        chg = price.get("change")
+        sess = price.get("price_session")
+        sess_label = _KR_SESSION_LABEL.get(sess, "") if sess else ""
+        if isinstance(chg, (int, float)):
+            rate = f" ({chg / base * 100:+.2f}%)" if base else ""
+            chg_txt = f"{chg:+,}원{rate}"
+        else:
+            chg_txt = "전일대비 데이터 없음"
+        head = f"- 현재가 {p:,}원" + (f" [{sess_label}]" if sess_label else "")
+        lines.append(head + f", 기준가 대비 {chg_txt}" + (f" (기준가 {base:,}원)" if base else ""))
+        o, h, l_, v = price.get("open"), price.get("high"), price.get("low"), price.get("volume")
+        if all(isinstance(x, (int, float)) for x in (o, h, l_)):
+            lines.append(f"- 시가 {o:,} / 고가 {h:,} / 저가 {l_:,}")
+        if isinstance(v, (int, float)):
+            lines.append(f"- 거래량 {v:,}주" + _volume_ratio_text(rows, today_compact, v))
+        else:
+            lines.append("- 거래량 데이터 없음")
+    else:
+        lines.append(f"- 조회 실패({failures.get('시세')}) — 시세 없음이 아니라 모름")
+
+    # 오늘 — 기사는 시각순, 공시는 날짜만 있어 따로
+    today_news = sorted(
+        (it for it in news_items if str(it.get("datetime") or "").startswith(today)),
+        key=lambda it: str(it.get("datetime") or ""),
+    )
+    today_disc = [d for d in (discs or []) if str(d.get("date")) == today]
+    lines.append("")
+    lines.append("### 오늘 시각순 — 기사")
+    if today_news:
+        lines.extend(_render_news_lines(today_news, name))
+    elif any(k.startswith("뉴스") for k in failures) and not news_items:
+        lines.append("- 뉴스 조회 실패 — 기사 없음이 아니라 모름")
+    else:
+        lines.append("- 오늘 날짜 기사 없음 (조회 성공 범위 안에서. 이름검색은 당일 기사를 빨리 잡지만 태그는 늦게 붙습니다)")
+    if today_disc:
+        lines.append("")
+        lines.append("### 오늘 거래소 공시 (시각 없음, 날짜만)")
+        lines.extend(f"- {d.get('title')} · {d.get('source') or '-'}" for d in today_disc)
+
+    older = [it for it in news_items if not str(it.get("datetime") or "").startswith(today)][:5]
+    if older:
+        lines.append("")
+        lines.append("### 최근 기사 (오늘 제외, 최신 5건)")
+        lines.extend(_render_news_lines(older, name))
+
+    lines.append("")
+    lines.append(f"### 최근 14일 거래소 공시 ({cutoff_disc} ~ {today})")
+    if discs is None:
+        lines.append(f"- 조회 실패({failures.get('공시')}) — 없음이 아니라 모름")
+    else:
+        recent = [d for d in discs if str(d.get("date") or "") >= cutoff_disc]
+        if recent:
+            lines.extend(f"- {d.get('date')} · {d.get('title')} · {d.get('source') or '-'}" for d in recent)
+        else:
+            lines.append("- 없음 (조회 성공, 0건) — 재료 없음이 아닙니다. 보도자료·기사는 공시가 아닙니다.")
+        lines.append("  (DART 전용 보고서·기간 전체는 DartLens `list_disclosures`)")
+
+    lines.append("")
+    lines.append(f"### 최근 30일 증권사 리포트 ({cutoff_rep} ~ {today})")
+    if reps is None:
+        lines.append(f"- 조회 실패({failures.get('리포트')}) — 없음이 아니라 모름")
+    else:
+        recent_reps = [r for r in reps if str(r.get("date") or "") >= cutoff_rep]
+        if recent_reps:
+            lines.extend(
+                f"- {r.get('date')} · {r.get('broker') or '-'} · {r.get('title')} "
+                f"(`get_report_content(nid=\"{r.get('nid')}\")`)"
+                for r in recent_reps
+            )
+        else:
+            lines.append("- 없음 (조회 성공, 최근 30일 0건)")
+
+    lines.append("")
+    lines.append("### 읽는 법 (원인 판정 아님)")
+    lines.append("- 이 도구는 사실을 시각순으로 놓을 뿐, 어느 것이 원인인지 판정하지 않습니다.")
+    lines.append("- 기사 시각이 가격 반응보다 앞서는지 보세요. '약' 시각은 표시 기준 근사라 ±1시간 오차가 있습니다. "
+                 "분봉은 `get_intraday_chart`, 투자자별 수급은 `get_flow`.")
+    lines.append("- " + _NEWS_STAGE_FOOT.lstrip("※ "))
+    lines.append("- 테마 동반 여부는 `get_theme_stocks(테마명)`, 커뮤니티 언급은 TelegramLens `telegram_stock_buzz`(설치돼 있을 때).")
+    if failures:
+        lines.append("")
+        lines.append("⚠️ 조회 실패: " + ", ".join(f"{k}({v})" for k, v in failures.items())
+                     + " — 실패한 부분은 '없음'이 아니라 '모름'입니다.")
+
+    if price is None and not news_items:
+        completeness = rmeta.NONE
+    elif failures:
+        completeness = rmeta.PARTIAL
+    else:
+        completeness = rmeta.COMPLETE
+    return _append_result_meta(
+        "\n".join(lines),
+        _kr_meta(
+            kind="snapshot", code=code, name=name, data_as_of=today,
+            data_completeness=completeness,
+            price_session=(price or {}).get("price_session"),
+            extra={
+                "sections": {
+                    "price": "ok" if price else "failed",
+                    "ohlcv": "ok" if rows is not None else "failed",
+                    "disclosure": "ok" if discs is not None else "failed",
+                    "reports": "ok" if reps is not None else "failed",
+                    "news": news_status,
+                },
+                "today_news_count": len(today_news),
+            },
+            warnings=[f"조회 실패: {k}({v})" for k, v in failures.items()],
+        ),
+    )
+
+
 @mcp.tool()
 @safe_tool
 @track_metrics("get_disclosure")
@@ -10203,6 +10570,7 @@ async def _render_reports_by_kind(kind: str, count: int) -> str:
 
 
 def main():
+    mcp.check_write_tools()  # write_tools 오타를 서버 기동 시점에 잡는다
     mcp.run()
 
 

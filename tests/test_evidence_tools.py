@@ -27,7 +27,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 # 68  1.1 상세 수급 2종 (종류는 도구가 아니라 인자로 가른다)
 # 70  2026-09 개편 신규 자료 2종 (공모주 일정·투자자예탁금).
 #     리포트 갈래는 도구를 만들지 않고 get_reports 의 kind 인자로 넣었다.
-EXPECTED_TOOL_COUNT = 70
+# 72  2026-09-17 위지트 문의: 국내 종목 뉴스(get_news)와 "오늘 왜 오르나" 묶음
+#     (get_move_context). 묶음 도구는 조각 도구 4~5개를 잇는 호출을 하나로 줄인다.
+EXPECTED_TOOL_COUNT = 72
 NEW_TOOLS = {"get_detailed_investor_flow", "get_supply_pressure"}
 
 
