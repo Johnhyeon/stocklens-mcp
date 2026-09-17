@@ -88,7 +88,9 @@ class SafeCheckFaultInjectionTests(unittest.TestCase):
         crashed = next(c for c in report.checks if c.id == "LICENSE_ACTIVE")
         self.assertEqual(crashed.status, "fail")
         self.assertTrue(crashed.critical)  # critical 체크의 크래시는 critical=False로 뭉개면 안 됨
-        self.assertIn("RuntimeError", crashed.summary)
+        # 예외 이름은 화면(summary)이 아니라 지원용 details 줄에 남는다.
+        self.assertNotIn("RuntimeError", crashed.summary)
+        self.assertIn("RuntimeError", " ".join(crashed.detail))
         self.assertEqual(report.overall, "fail")
 
     def test_non_critical_check_crash_degrades_but_does_not_fail_overall(self) -> None:

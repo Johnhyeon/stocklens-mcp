@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import shutil
 import sys
 import sysconfig
@@ -45,62 +46,97 @@ MIN_PYTHON = (3, 11)
 
 _ONLINE_CHECK_TIMEOUT = 8.0  # 초. 대표 종목 1개 조회가 이 시간을 넘기면 미도달로 간주.
 
+# details.lines 는 Manager 상세 창에 그대로 뜬다(명령어·경로처럼 보이는 줄만 걸러진다).
+# 그래서 줄 앞은 고객이 읽을 한국어로 쓰고, 예외 원문은 줄 끝 괄호 안에 짧게만 붙인다.
+# URL·쿼리스트링·키처럼 보이는 덩어리는 지운다.
+_RAW_MAX = 80
+_URL_RE = re.compile(r"https?://\S+")
+_QUERY_RE = re.compile(r"\?[^\s'\"]*")
+_SECRETISH_RE = re.compile(r"[A-Za-z0-9_\-]{32,}|[A-Fa-f0-9]{24,}|[A-Z2-7]{24,}")
+
+
+def _redact(text: object) -> str:
+    t = _URL_RE.sub("…", str(text or ""))
+    t = _QUERY_RE.sub("?…", t)
+    return _SECRETISH_RE.sub("…", t).strip()
+
+
+def _short(exc: BaseException) -> str:
+    """괄호 안에 붙일 예외 원문. 예외 이름 + 가린 메시지, 80자 이내."""
+    msg = _redact(exc)
+    raw = f"{type(exc).__name__}: {msg}" if msg else type(exc).__name__
+    return raw if len(raw) <= _RAW_MAX else raw[: _RAW_MAX - 1] + "…"
+
+# 고객 문구(summary/action)는 LeetKit Manager 화면에 그대로 뜬다. 규칙:
+# - 터미널 명령·환경변수 이름·예외 이름을 쓰지 않는다. 그런 원문은 details.lines 에만
+#   남긴다(Manager [결과 복사]로 지원 쪽에 오는 용도).
+# - 할 일은 Manager 버튼 하나로, 이름은 화면 글자 그대로. 해요체.
+# DartLens·TelegramLens 와 같은 상태는 Lens 이름만 다른 같은 문장을 쓴다.
+_ACTION_UPDATE_THEN_SUPPORT = (
+    "StockLens 카드의 [업데이트]를 확인해 주세요. "
+    "업데이트 후에도 같으면 상단 [지원 문의]를 눌러주세요."
+)
+_ACTION_SUPPORT = "상단 [지원 문의]를 눌러주세요."
+_ACTION_LICENSE_MISSING = "StockLens 카드의 [활성화]를 눌러 메일로 받은 키를 넣어주세요."
+_ACTION_LICENSE_INVALID = "StockLens 카드의 [활성화]를 눌러 메일로 받은 키를 다시 넣어주세요."
+_ACTION_MCP_REGISTER = "StockLens 카드의 [MCP 등록]을 눌러주세요."
+
 # 검사 실패(status="fail") 시 붙는 오류 코드 카탈로그.
 # 각 항목은 summary(무엇이 문제인지)/impact(무엇이 안 되는지)/action(어떻게 고치는지)/
 # repairable(사용자가 직접 고칠 수 있는지)을 고정 필드로 갖는다.
 ERROR_CATALOG: dict[str, dict] = {
     "DEPENDENCY_BROKEN": {
-        "summary": "StockLens 패키지 또는 실행 커맨드가 현재 환경에서 정상 동작하지 않습니다.",
-        "impact": "MCP 서버 자체가 실행되지 않습니다.",
-        "action": "uv tool install --force stocklens-mcp",
+        "summary": "StockLens 설치가 온전하지 않아요.",
+        "impact": "AI 앱에서 StockLens가 실행되지 않아요.",
+        "action": _ACTION_UPDATE_THEN_SUPPORT,
         "repairable": True,
     },
     "UNSUPPORTED_PYTHON": {
-        "summary": f"Python {MIN_PYTHON[0]}.{MIN_PYTHON[1]} 이상이 필요합니다.",
-        "impact": "일부 문법/의존성이 동작하지 않을 수 있습니다.",
-        "action": "Python 3.11 이상 설치 후 stocklens-mcp를 재설치하세요.",
+        "summary": f"Python {MIN_PYTHON[0]}.{MIN_PYTHON[1]} 이상이 필요해요.",
+        "impact": "일부 기능이 동작하지 않을 수 있어요.",
+        "action": _ACTION_SUPPORT,
         "repairable": True,
     },
     "MCP_CONFIG_MISSING": {
-        "summary": "Claude Desktop/Code 설정에 stocklens 항목이 없거나 실행 불가능합니다.",
-        "impact": "Claude에서 StockLens 도구가 보이지 않습니다.",
-        "action": "stocklens-setup --target both",
+        "summary": "StockLens가 아직 AI 앱에 등록되지 않았어요.",
+        "impact": "AI 앱에서 StockLens 도구가 보이지 않아요.",
+        "action": _ACTION_MCP_REGISTER,
         "repairable": True,
     },
     "STOCKLENS_LICENSE_MISSING": {
-        "summary": "저장된 라이선스 키가 없습니다.",
-        "impact": "모든 도구가 잠김 상태로 응답합니다.",
-        "action": "stocklens-activate <라이선스-키>",
+        "summary": "라이선스 키가 아직 없어요.",
+        "impact": "모든 도구가 잠겨 있어요.",
+        "action": _ACTION_LICENSE_MISSING,
         "repairable": True,
     },
     "STOCKLENS_LICENSE_INVALID": {
-        "summary": "저장된 라이선스 키가 서명 검증에 실패했습니다.",
-        "impact": "모든 도구가 잠김 상태로 응답합니다.",
-        "action": "구매 시 발송된 키를 다시 정확히 붙여넣어 stocklens-activate로 재활성화하세요.",
+        "summary": "저장된 라이선스 키를 확인할 수 없어요.",
+        "impact": "모든 도구가 잠겨 있어요.",
+        "action": _ACTION_LICENSE_INVALID,
         "repairable": True,
     },
     "CACHE_NOT_WRITABLE": {
-        "summary": "로컬 출력/캐시 폴더에 쓰기 권한이 없습니다.",
-        "impact": "Excel 내보내기, 메트릭 로그 저장이 실패합니다.",
-        "action": "폴더 권한을 확인하거나 STOCKLENS_HOME 환경변수로 쓰기 가능한 경로를 지정하세요.",
+        "summary": "캐시 폴더에 쓸 수 없어요.",
+        "impact": "엑셀 저장과 사용 기록 저장이 안 돼요.",
+        "action": _ACTION_SUPPORT,
         "repairable": True,
     },
     "KR_DATA_UNREACHABLE": {
-        "summary": "네이버 증권에서 국내 시세를 가져오지 못했습니다.",
-        "impact": "한국 주식 도구가 동작하지 않습니다.",
-        "action": "인터넷 연결/방화벽을 확인하세요. 일시적 장애일 수 있습니다.",
+        "summary": "국내 데이터를 가져오지 못했어요.",
+        "impact": "국내 주식 도구가 동작하지 않을 수 있어요.",
+        "action": _ACTION_UPDATE_THEN_SUPPORT,
         "repairable": False,
     },
     "US_DATA_UNREACHABLE": {
-        "summary": "Yahoo Finance에서 미국 시세를 가져오지 못했습니다.",
-        "impact": "미국 주식 도구가 동작하지 않습니다.",
-        "action": "인터넷 연결/방화벽을 확인하세요. 일시적 장애일 수 있습니다.",
+        "summary": "미국 시세를 가져오지 못했어요.",
+        "impact": "미국 주식 도구가 동작하지 않을 수 있어요.",
+        "action": _ACTION_UPDATE_THEN_SUPPORT,
         "repairable": False,
     },
     "UPDATE_CHECK_FAILED": {
-        "summary": "PyPI/GitHub에서 최신 버전 정보를 가져오지 못했습니다.",
-        "impact": "업데이트 알림만 못 받을 뿐 기존 기능에는 영향이 없습니다.",
-        "action": "네트워크 상태를 확인하거나 무시해도 됩니다.",
+        "summary": "최신 버전 정보를 가져오지 못했어요.",
+        "impact": "업데이트 알림만 늦어지고, 다른 기능에는 영향이 없어요.",
+        "action": "그대로 쓰셔도 돼요. 잠시 뒤 [진단]을 다시 눌러보세요.",
         "repairable": False,
     },
 }
@@ -226,7 +262,7 @@ def _check_package_importable() -> DiagnosticCheck:
             id="PACKAGE_IMPORTABLE",
             status="ok",
             critical=True,
-            summary="stocklens-mcp import 가능",
+            summary="StockLens 패키지를 불러올 수 있어요.",
             detail=[
                 f"위치: {Path(stock_mcp_server.__file__).parent}",
                 f"인터프리터: {sys.executable}",
@@ -237,10 +273,10 @@ def _check_package_importable() -> DiagnosticCheck:
             id="PACKAGE_IMPORTABLE",
             status="fail",
             critical=True,
-            summary="stocklens-mcp를 현재 인터프리터에서 import할 수 없습니다.",
-            detail=[str(e)],
+            summary=ERROR_CATALOG["DEPENDENCY_BROKEN"]["summary"],
+            detail=[f"패키지를 불러오지 못했어요 ({_short(e)})", f"인터프리터: {sys.executable}"],
             error_code="DEPENDENCY_BROKEN",
-            fix="uv tool install --force stocklens-mcp",
+            fix=_ACTION_UPDATE_THEN_SUPPORT,
         )
 
 
@@ -251,7 +287,7 @@ def _check_command_available() -> DiagnosticCheck:
             id="COMMAND_AVAILABLE",
             status="ok",
             critical=True,
-            summary="'stocklens' 커맨드를 PATH에서 찾았습니다.",
+            summary="StockLens 실행 파일을 찾았어요.",
             detail=[exe],
         )
 
@@ -269,7 +305,7 @@ def _check_command_available() -> DiagnosticCheck:
                     id="COMMAND_AVAILABLE",
                     status="ok",
                     critical=True,
-                    summary="'stocklens' 커맨드를 찾았습니다.",
+                    summary="StockLens 실행 파일을 찾았어요.",
                     detail=[
                         str(candidate),
                         "PATH에는 없지만 MCP 등록은 이 절대경로로 하므로 그대로 쓰시면 됩니다.",
@@ -281,13 +317,15 @@ def _check_command_available() -> DiagnosticCheck:
         for name in ("stocklens.exe", "stocklens"):
             candidate = scripts_dir / name
             if candidate.exists():
+                # MCP 등록은 이 절대경로를 그대로 적으므로(setup_claude.resolve_server_entry
+                # 4단계) PATH 를 고치라고 할 필요가 없다. 할 일은 등록 한 번이다.
                 return DiagnosticCheck(
                     id="COMMAND_AVAILABLE",
                     status="warn",
                     critical=True,
-                    summary="'stocklens' 커맨드가 sysconfig scripts에는 있지만 PATH에 없습니다.",
-                    detail=[str(candidate)],
-                    fix=f'PATH에 "{scripts_dir}" 추가',
+                    summary="StockLens 실행 파일이 기본 위치가 아닌 곳에 있어요.",
+                    detail=[str(candidate), f"PATH에 없음: {scripts_dir}"],
+                    fix=_ACTION_MCP_REGISTER,
                 )
     except Exception:
         pass
@@ -296,9 +334,9 @@ def _check_command_available() -> DiagnosticCheck:
         id="COMMAND_AVAILABLE",
         status="fail",
         critical=True,
-        summary="'stocklens' 커맨드를 찾을 수 없습니다.",
+        summary="StockLens 실행 파일을 찾지 못했어요.",
         error_code="DEPENDENCY_BROKEN",
-        fix="uv tool install --force stocklens-mcp",
+        fix=_ACTION_UPDATE_THEN_SUPPORT,
     )
 
 
@@ -316,9 +354,10 @@ def _check_python_supported() -> DiagnosticCheck:
         id="PYTHON_SUPPORTED",
         status="fail",
         critical=True,
-        summary=f"Python {ver}는 지원 범위(>= {MIN_PYTHON[0]}.{MIN_PYTHON[1]}) 미만입니다.",
+        summary=f"Python {ver}는 지원하지 않는 버전이에요.",
+        detail=[f"필요한 버전: Python {MIN_PYTHON[0]}.{MIN_PYTHON[1]} 이상", sys.executable],
         error_code="UNSUPPORTED_PYTHON",
-        fix="Python 3.11 이상 설치 후 stocklens-mcp 재설치",
+        fix=_ACTION_SUPPORT,
     )
 
 
@@ -392,9 +431,9 @@ def _check_mcp_config_valid(targets: list[str]) -> DiagnosticCheck:
         id="MCP_CONFIG_VALID",
         status="fail",
         critical=True,
-        summary="Claude Desktop/Code/Codex 어디에도 stocklens가 정상 등록돼 있지 않습니다.",
+        summary=ERROR_CATALOG["MCP_CONFIG_MISSING"]["summary"],
         error_code="MCP_CONFIG_MISSING",
-        fix="stocklens-setup --target both",
+        fix=_ACTION_MCP_REGISTER,
     )
 
 
@@ -426,14 +465,14 @@ def _license_summary() -> LicenseSummary:
 # 셋 다 "키를 다시 넣으세요"가 답이 아니다 — 할 일이 서로 다르다. 같은 문구를 쓰면
 # 기간이 끝난 사람이 키를 재입력하며 시간을 버린다.
 _LICENSE_BLOCKED_SUMMARY = {
-    "expired": "사용 기간이 끝났습니다.",
-    "revoked": "이 라이선스 키는 현재 사용이 중지되어 있습니다.",
-    "clock": "이 컴퓨터의 날짜가 실제보다 과거로 설정되어 있습니다.",
+    "expired": "사용 기간이 끝났어요.",
+    "revoked": "이 라이선스 키는 사용이 중지돼 있어요.",
+    "clock": "이 컴퓨터의 날짜가 실제보다 과거로 되어 있어요.",
 }
 _LICENSE_BLOCKED_FIX = {
-    "expired": "계속 쓰시려면 라이선스를 구매한 뒤 stocklens-activate <라이선스-키>",
-    "revoked": "환불·결제 취소로 중지된 키입니다. 착오라면 문의해주세요.",
-    "clock": "날짜와 시간을 현재에 맞춘 뒤 다시 시도해주세요.",
+    "expired": "StockLens 카드의 [구매]를 누르고, 받은 키를 [활성화]로 넣어주세요.",
+    "revoked": "착오라면 상단 [지원 문의]를 눌러주세요.",
+    "clock": "날짜와 시간을 오늘로 맞춘 뒤 [진단]을 다시 눌러주세요.",
 }
 
 
@@ -443,18 +482,18 @@ def _check_license_active(summary: LicenseSummary) -> DiagnosticCheck:
             id="LICENSE_ACTIVE",
             status="fail",
             critical=True,
-            summary="저장된 라이선스 키가 없습니다.",
+            summary=ERROR_CATALOG["STOCKLENS_LICENSE_MISSING"]["summary"],
             error_code="STOCKLENS_LICENSE_MISSING",
-            fix="stocklens-activate <라이선스-키>",
+            fix=_ACTION_LICENSE_MISSING,
         )
     if summary.status == "invalid":
         return DiagnosticCheck(
             id="LICENSE_ACTIVE",
             status="fail",
             critical=True,
-            summary="저장된 라이선스 키가 유효하지 않습니다.",
+            summary=ERROR_CATALOG["STOCKLENS_LICENSE_INVALID"]["summary"],
             error_code="STOCKLENS_LICENSE_INVALID",
-            fix="stocklens-activate <라이선스-키>",
+            fix=_ACTION_LICENSE_INVALID,
         )
     if summary.status in ("expired", "revoked", "clock"):
         return DiagnosticCheck(
@@ -494,10 +533,10 @@ def _check_cache_writable() -> DiagnosticCheck:
             id="CACHE_WRITABLE",
             status="fail",
             critical=False,
-            summary="캐시/출력 폴더에 쓸 수 없습니다.",
-            detail=[str(e)],
+            summary=ERROR_CATALOG["CACHE_NOT_WRITABLE"]["summary"],
+            detail=[f"폴더에 쓰지 못했어요 ({type(e).__name__})"],
             error_code="CACHE_NOT_WRITABLE",
-            fix="폴더 권한 확인 또는 STOCKLENS_HOME 환경변수로 다른 경로 지정",
+            fix=_ACTION_SUPPORT,
         )
 
 
@@ -517,12 +556,14 @@ def _safe_check(fn, *args, fallback_id: str, fallback_critical: bool = True, **k
     try:
         return fn(*args, **kwargs)
     except Exception as e:
+        # 예외 이름은 summary 가 아니라 details 에 둔다 — 화면에는 할 일만 보인다.
         return DiagnosticCheck(
             id=fallback_id,
             status="fail",
             critical=fallback_critical,
-            summary=f"진단 중 예상치 못한 오류: {type(e).__name__}",
-            detail=[str(e)],
+            summary="이 항목을 확인하다가 문제가 생겼어요.",
+            detail=[f"확인 중 예상치 못한 오류가 났어요 ({_short(e)})"],
+            fix="[진단]을 다시 눌러주세요. 그래도 같으면 상단 [지원 문의]를 눌러주세요.",
         )
 
 
@@ -531,7 +572,7 @@ def _skip(check_id: str) -> DiagnosticCheck:
         id=check_id,
         status="skip",
         critical=False,
-        summary="온라인 진단 생략 (--online 으로 실행하면 확인합니다)",
+        summary="이번 진단에서는 인터넷 연결 확인을 건너뛰었어요.",
     )
 
 
@@ -630,8 +671,10 @@ async def _check_update_check_reachable() -> tuple[DiagnosticCheck, str | None]:
                 id="UPDATE_CHECK_REACHABLE",
                 status="fail",
                 critical=False,
-                summary="PyPI/GitHub 업데이트 확인에 실패했습니다.",
+                summary=ERROR_CATALOG["UPDATE_CHECK_FAILED"]["summary"],
+                detail=["최신 버전 정보 조회 실패"],
                 error_code="UPDATE_CHECK_FAILED",
+                fix=ERROR_CATALOG["UPDATE_CHECK_FAILED"]["action"],
             ),
             None,
         )

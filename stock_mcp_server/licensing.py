@@ -40,26 +40,25 @@ def _purchase_line(prefix: str = "· 구매: ") -> str:
     return f"\n{prefix}{PURCHASE_URL}" if PURCHASE_URL else ""
 
 
+# 도구 잠금 안내 4종은 Claude 답변 안에 그대로 들어간다. 터미널 명령은 적지 않는다 —
+# 주 고객층은 거기서 막히고, LeetKit Manager 가 있는 이유가 그 명령을 안 치게 하려는
+# 것이다. 버튼 이름은 Manager 화면 글자 그대로 쓴다(DartLens·TelegramLens 와 같은 문장).
 LOCKED_MESSAGE = (
-    "🔒 StockLens는 유료 라이선스가 필요합니다.\n"
+    "🔒 StockLens를 쓰려면 라이선스 키가 필요해요.\n"
     "\n"
-    "구매 시 발송된 라이선스 키로 활성화하세요:\n"
-    "    stocklens-activate <라이선스-키>\n"
-    "\n"
-    "· 키는 결제 완료 후 이메일로 발송됩니다."
-    + _purchase_line()
+    "LeetKit Manager의 StockLens 카드에서 [활성화]를 눌러 메일로 받은 키를 넣어주세요.\n"
+    "그래도 같으면 LeetKit Manager 상단 [지원 문의]를 눌러주세요."
 )
 
 # 폐기된 키 전용 안내. LOCKED_MESSAGE와 달리 "키를 넣으세요"라고 하면 안 된다 —
 # 이 사람은 키를 갖고 있고, 그 키가 중지된 것이다. 할 일은 연락이지 재입력이 아니다.
 # 문구는 "위조"가 아니라 결제 문제 쪽으로 쓴다. 대부분은 도둑질이 아니라 착오다.
+# 문의처는 메일 주소가 아니라 [지원 문의]다 — 진단 파일이 같이 와야 확인이 빠르다.
 REVOKED_MESSAGE = (
-    "🔒 이 라이선스 키는 현재 사용이 중지되어 있습니다.\n"
+    "🔒 이 라이선스 키는 지금 사용이 중지돼 있어요.\n"
     "\n"
-    "환불 또는 결제 취소된 키로 확인됩니다.\n"
-    "착오라고 생각되시면 알려주세요 — 확인 후 바로 풀어드리겠습니다.\n"
-    "\n"
-    "· 문의: osy980315@gmail.com"
+    "환불이나 결제 취소로 중지된 키예요.\n"
+    "착오라면 LeetKit Manager 상단 [지원 문의]를 눌러 알려주세요. 확인하고 바로 풀어드릴게요."
 )
 
 # 기간이 끝난 키 전용 안내. LOCKED_MESSAGE("키를 넣으세요")도, REVOKED_MESSAGE
@@ -67,10 +66,10 @@ REVOKED_MESSAGE = (
 # 할 일은 구매다. 체험이 끝난 사람에게 가장 자주 보일 문구라 사과나 경고가 아니라
 # 다음 걸음을 적는다.
 EXPIRED_MESSAGE = (
-    "🔒 StockLens 사용 기간이 끝났습니다.\n"
+    "🔒 StockLens 사용 기간이 끝났어요.\n"
     "\n"
-    "계속 쓰시려면 라이선스를 구매하신 뒤 받으신 키로 활성화하세요:\n"
-    "    stocklens-activate <라이선스-키>"
+    "계속 쓰시려면 LeetKit Manager의 StockLens 카드에서 [구매]를 누르고, "
+    "받은 키를 같은 카드의 [활성화]로 넣어주세요."
     + _purchase_line()
 )
 
@@ -79,10 +78,11 @@ EXPIRED_MESSAGE = (
 # 두 경우 모두에게 맞는 한 가지 할 일만 적는다. "부정 사용"이라고 썼다가 배터리가
 # 닳은 정직한 사용자를 범인 취급하면 그 손해가 훨씬 크다.
 CLOCK_MESSAGE = (
-    "🔒 이 컴퓨터의 날짜가 실제보다 과거로 설정되어 있어 StockLens를 열 수 없습니다.\n"
+    "🔒 이 컴퓨터의 날짜가 실제보다 과거로 되어 있어서 StockLens를 열 수 없어요.\n"
     "\n"
-    "날짜와 시간을 현재에 맞춘 뒤 다시 시도해주세요.\n"
-    "(Windows: 설정 → 시간 및 언어 / Mac: 시스템 설정 → 일반 → 날짜 및 시간)"
+    "날짜와 시간을 오늘로 맞춘 뒤 다시 물어봐 주세요.\n"
+    "(Windows: 설정 → 시간 및 언어 / Mac: 시스템 설정 → 일반 → 날짜 및 시간)\n"
+    "그래도 같으면 LeetKit Manager 상단 [지원 문의]를 눌러주세요."
 )
 
 _licensed_cache = False  # 한 번 유효하면 프로세스 동안 재검증 생략
@@ -360,24 +360,41 @@ def _clock_turned_back(expiry: "date | None") -> bool:
     return False
 
 
+# 아래 reason 들은 LeetKit Manager 의 활성화 창에 그대로 뜬다. 한 글자 빠지게 복사한
+# 사람에게 "서명 불일치(위조/변조)"라고 하면 범인 취급이 되므로, 할 일 하나만 적는다.
+_REASON_RETRY_PASTE = (
+    "키를 확인할 수 없어요. 메일로 받은 키를 빠짐없이 다시 붙여넣어 주세요. "
+    "그래도 같으면 상단 [지원 문의]를 눌러주세요."
+)
+
+
 def verify_key(key_str: str) -> dict:
     """키 문자열이 '판매자가 서명한 이 제품의 진짜 키'인지 검증."""
     try:
         pub = Ed25519PublicKey.from_public_bytes(base64.b64decode(_PUBLIC_KEY_B64))
     except Exception:
-        return {"valid": False, "reason": "공개키 설정 오류"}
+        return {
+            "valid": False,
+            "reason": "지금 설치된 StockLens로는 키를 확인할 수 없어요. 상단 [지원 문의]를 눌러주세요.",
+        }
     try:
         raw = _decode(key_str)
     except Exception:
-        return {"valid": False, "reason": "형식 오류(깨진 키)"}
+        return {"valid": False, "reason": _REASON_RETRY_PASTE}
     payload_len = len(raw) - _SIG_LEN
     if payload_len not in (_PAYLOAD_LEN, _PAYLOAD_LEN_WITH_EXPIRY) or raw[:4] != PRODUCT:
-        return {"valid": False, "reason": "이 제품의 키가 아님"}
+        return {
+            "valid": False,
+            "reason": (
+                "StockLens 키가 아니에요. 메일에서 StockLens 키를 찾아 넣어주세요. "
+                "그래도 같으면 상단 [지원 문의]를 눌러주세요."
+            ),
+        }
     payload, sig = raw[:payload_len], raw[payload_len:]
     try:
         pub.verify(sig, payload)
     except InvalidSignature:
-        return {"valid": False, "reason": "서명 불일치(위조/변조)"}
+        return {"valid": False, "reason": _REASON_RETRY_PASTE}
     # 만료일은 서명 안에 들어 있다 — 고쳐 쓰면 서명이 깨지므로 위 검증에서 걸린다.
     return {
         "valid": True,
@@ -555,9 +572,9 @@ def save_key(key_str: str) -> dict:
         return {
             "valid": False,
             "reason": (
-                "이 컴퓨터에서는 이미 체험판을 사용하셨습니다.\n"
-                "체험은 한 대에 한 번만 드립니다. 계속 쓰시려면 정식 라이선스를 구매해주세요.\n"
-                "착오라고 생각되시면 osy980315@gmail.com 으로 알려주세요."
+                "이 컴퓨터에서는 이미 체험판을 썼어요. 체험은 컴퓨터 한 대에 한 번만 드려요. "
+                "계속 쓰시려면 StockLens 카드의 [구매]를 눌러주세요. "
+                "착오라면 상단 [지원 문의]를 눌러 알려주세요."
             ),
         }
 
@@ -565,9 +582,16 @@ def save_key(key_str: str) -> dict:
     # 행위가 활성화이므로, 그날이 창의 첫날로 기록된다.
     expiry = effective_expiry(res)
     if _is_expired(expiry):
-        return {"valid": False, "reason": "사용 기간이 끝난 키입니다", "expires_on": expiry}
+        return {
+            "valid": False,
+            "reason": "사용 기간이 끝난 키예요. StockLens 카드의 [구매]를 누르고, 받은 키를 넣어주세요.",
+            "expires_on": expiry,
+        }
     if is_revoked(res.get("license_id", "")):
-        return {"valid": False, "reason": "현재 사용이 중지된 키입니다"}
+        return {
+            "valid": False,
+            "reason": "지금 사용이 중지된 키예요. 착오라면 상단 [지원 문의]를 눌러 알려주세요.",
+        }
 
     p = _license_path()
     p.parent.mkdir(parents=True, exist_ok=True)
@@ -692,7 +716,9 @@ def activate_cli() -> None:
         # --json 모드는 항상 파싱 가능한 JSON을 내보내야 하므로 traceback으로 죽으면 안 된다.
         key = None
         if args.json:
-            print(json.dumps({"ok": False, "status": "error", "reason": f"{type(e).__name__}: {e}"}, ensure_ascii=False))
+            # --json 의 reason 은 Manager 활성화 창에 그대로 뜬다. 예외 원문은 괄호 안에만.
+            reason = f"키를 저장하지 못했어요. 상단 [지원 문의]를 눌러주세요. ({type(e).__name__}: {e})"
+            print(json.dumps({"ok": False, "status": "error", "reason": reason}, ensure_ascii=False))
             sys.exit(1)
         print(f"활성화 실패 ❌  — 키 저장 중 오류: {type(e).__name__}: {e}")
         sys.exit(1)

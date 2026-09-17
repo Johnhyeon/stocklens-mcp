@@ -121,35 +121,28 @@ import calendar as _calendar
 import pandas as pd
 
 
-def _support_hint() -> str:
-    """safe_tool 의 '예상 못한 오류' 버킷에서만 붙이는 자가진단 안내.
-
-    이미 원인이 명확한 예외(라이선스/타임아웃/연결오류 등)엔 안 붙인다 — 사소한 것까지
-    문의로 유도하면 노이즈만 늘어난다.
-
-    예전엔 여기서 OS별 zip 명령을 띄워 "Claude 로그를 직접 압축해 메일로 보내라"고
-    안내했다. 그대로 따라 보내온 문의(2026-09-11)를 받아보니, 손으로 만든 zip에는
-    LeetKit Manager 번들이 넣어주는 것이 통째로 빠져 있었다 — 3-Lens 온라인 진단
-    요약도, metrics 기록에서 센 최근 호출 실패 집계도, 홈 경로·키 마스킹도. 받는
-    쪽은 원인을 좁힐 재료가 없고, 보내는 쪽은 마스킹 안 된 로그를 그대로 내보낸다.
-    안내하는 길은 하나로 둔다.
-    """
-    return (
-        "\n\n계속되면:\n"
-        "1) Claude 완전 종료 후 재시작 → 다시 시도\n"
-        "2) 그래도 안 되면 LeetKit Manager를 열고 [지원 문의]를 눌러주세요 "
-        "(진단 로그 zip과 메일 초안이 자동으로 만들어집니다)."
-    )
+# safe_tool 의 '예상 못한 오류' 버킷에서만 붙이는 안내. 원인을 모르는 오류다 —
+# 예전엔 "종목코드가 올바른지 확인해주세요"라고 해서, 멀쩡한 코드를 넣은 사람이 종목을
+# 바꿔가며 재시도했다. 모르는 원인을 고객 입력 탓으로 돌리지 않는다.
+#
+# 문의 길은 [지원 문의] 하나다. 예전엔 OS별 zip 명령을 띄워 "Claude 로그를 직접 압축해
+# 메일로 보내라"고 했는데, 그대로 따라 보내온 문의(2026-09-11)의 zip에는 LeetKit Manager
+# 번들이 넣어주는 것(3-Lens 온라인 진단 요약, metrics 최근 실패 집계, 키 마스킹)이
+# 통째로 빠져 있었다. 이미 원인이 명확한 예외(타임아웃·연결 오류 등)에는 붙이지 않는다.
+_UNKNOWN_ERROR_NEXT = (
+    "조회 중 문제가 생겼어요. 같은 질문을 한 번 더 해보고, "
+    "그래도 같으면 LeetKit Manager 상단 [지원 문의]를 눌러주세요."
+)
 
 
-# 네이버 페이지 구조 변경이 의심될 때의 다음 걸음. _support_hint 와 달리 "Claude 재시작"은
-# 넣지 않는다 — 파싱 실패는 껐다 켜서 풀리는 종류가 아니고, 안 듣는 조치를 먼저 시키면
-# 진짜 할 일(업데이트 · 문의)이 세 번째 줄로 밀린다. 업데이트 다음 줄을 꼭 같이 적는다 —
+# 네이버 페이지 구조 변경이 의심될 때의 다음 걸음. "Claude 재시작"은 넣지 않는다 —
+# 파싱 실패는 껐다 켜서 풀리는 종류가 아니고, 안 듣는 조치를 먼저 시키면 진짜 할 일
+# (업데이트 · 문의)이 세 번째 줄로 밀린다. 업데이트 다음 줄을 꼭 같이 적는다 —
 # 이미 최신인 사람에게 업데이트만 말하면 거기서 길이 끊긴다(2026-09-11 문의가 그랬다).
 _PARSE_FAIL_NEXT = (
-    "LeetKit Manager를 열고 StockLens 카드의 [업데이트]를 확인해 주세요.\n"
-    "업데이트 후에도 같으면 LeetKit Manager의 [지원 문의]를 눌러주세요 "
-    "(진단 로그 zip과 메일 초안이 자동으로 만들어집니다)."
+    "LeetKit Manager의 StockLens 카드에서 [업데이트]를 확인해 주세요.\n"
+    "업데이트 후에도 같으면 LeetKit Manager 상단 [지원 문의]를 눌러주세요 "
+    "(진단 로그 zip과 메일 초안이 자동으로 만들어져요)."
 )
 
 
@@ -210,18 +203,14 @@ def safe_tool(func):
             # 파싱 실패에는 틀린 안내다 — 코드는 멀쩡하고 우리가 못 읽은 것이다.
             # 사용자가 종목명을 바꿔가며 재시도하게 만들면 안 된다.
             return (
-                "⚠️ 네이버 증권 페이지를 읽지 못했습니다 "
-                "(데이터가 없는 것이 아니라 **파싱 실패**입니다).\n"
+                "⚠️ 네이버 증권 페이지를 읽지 못했어요 "
+                "(데이터가 없는 것이 아니라 **파싱 실패**예요).\n"
                 f"(원인: {e})\n"
-                "페이지 구조가 바뀌었을 수 있습니다.\n"
+                "페이지 구조가 바뀌었을 수 있어요.\n"
                 + _PARSE_FAIL_NEXT
             )
         except Exception as e:
-            return (
-                f"⚠️ 데이터 처리 중 오류가 발생했습니다: {type(e).__name__}\n"
-                f"종목코드가 올바른지, 상장된 종목인지 확인해주세요."
-                + _support_hint()
-            )
+            return f"⚠️ {_UNKNOWN_ERROR_NEXT}\n(원인: {type(e).__name__})"
         try:
             notice = await get_update_notice()
         except Exception:
@@ -482,13 +471,17 @@ async def stocklens_status() -> str:
     문제가 있는지 대화 중 가볍게 확인할 때 사용합니다. 이미 기록된 최근 호출 로그와
     업데이트 확인 캐시만 읽으므로 네트워크를 새로 호출하지 않습니다(빠름).
     라이선스 미활성 상태에서도 원인 파악용으로 동작해야 하므로 다른 도구와 달리
-    라이선스 게이트를 걸지 않습니다. 더 깊은 진단(오프라인 재현 등)은 터미널의
-    stocklens-doctor 커맨드를 안내하세요.
+    라이선스 게이트를 걸지 않습니다. 문제가 있으면 LeetKit Manager의 [진단]이나
+    상단 [지원 문의]를 안내하세요. 터미널 명령은 안내하지 마세요.
     """
     try:
         return format_status(build_status())
     except Exception as e:
-        return f"⚠️ 상태 조회 중 오류: {type(e).__name__}. 터미널에서 stocklens-doctor로 더 자세히 진단해보세요."
+        return (
+            "⚠️ 상태를 확인하다가 문제가 생겼어요. LeetKit Manager의 StockLens 카드에서 "
+            "[진단]을 눌러보고, 그래도 같으면 LeetKit Manager 상단 [지원 문의]를 눌러주세요.\n"
+            f"(원인: {type(e).__name__})"
+        )
 
 
 def _normalize_date(raw, is_intraday: bool) -> str:
@@ -1636,10 +1629,10 @@ async def get_price(code: str) -> str:
         # 종목명조차 없으면 애초에 종목 페이지가 아닐 가능성이 높다(잘못된 코드 등).
         if data and data.get("name"):
             text = (
-                f"{data['name']}({code})의 시세를 읽지 못했습니다 "
-                f"(데이터가 없는 것이 아니라 **파싱 실패**입니다).\n"
+                f"{data['name']}({code})의 시세를 읽지 못했어요 "
+                f"(데이터가 없는 것이 아니라 **파싱 실패**예요).\n"
                 f"못 읽은 항목: {', '.join(missing) or '현재가'}\n"
-                f"네이버 증권 페이지 구조가 바뀌었을 수 있습니다. {_PARSE_FAIL_NEXT}"
+                f"네이버 증권 페이지 구조가 바뀌었을 수 있어요. {_PARSE_FAIL_NEXT}"
             )
             warns = [f"현재가 파싱 실패(구조 변경 의심): {', '.join(missing) or 'price'}"]
         else:
@@ -1770,9 +1763,9 @@ async def get_flow(code: str, days: int = 20) -> str:
     except NaverParseError as e:
         # 구조 변경은 '데이터 없음'과 다르다 — 없는 척하면 사용자가 조용히 오해한다.
         return _append_result_meta(
-            f"수급 표를 읽지 못했습니다 (데이터가 없는 것이 아니라 **파싱 실패**입니다).\n"
+            f"수급 표를 읽지 못했어요 (데이터가 없는 것이 아니라 **파싱 실패**예요).\n"
             f"원인: {e}\n"
-            f"네이버 증권 페이지 구조가 바뀌었을 수 있습니다. {_PARSE_FAIL_NEXT}",
+            f"네이버 증권 페이지 구조가 바뀌었을 수 있어요. {_PARSE_FAIL_NEXT}",
             _kr_meta(kind="bars", code=code, data_completeness=rmeta.NONE,
                      warnings=[f"수급 표 파싱 실패(구조 변경 의심): {e}"]),
         )
@@ -2558,9 +2551,9 @@ async def get_financial(code: str) -> str:
         return f"종목코드 {code}의 재무지표를 가져올 수 없습니다."
     if PARSE_MISS_KEY in data:
         return (
-            f"{data.get('name', code)}({code})의 재무 표를 읽지 못했습니다 "
-            f"(재무 자료가 없는 것이 아니라 **파싱 실패**입니다).\n"
-            f"네이버 증권 페이지 구조가 바뀌었을 수 있습니다. "
+            f"{data.get('name', code)}({code})의 재무 표를 읽지 못했어요 "
+            f"(재무 자료가 없는 것이 아니라 **파싱 실패**예요).\n"
+            f"네이버 증권 페이지 구조가 바뀌었을 수 있어요. "
             f"{_PARSE_FAIL_NEXT}"
         )
 
@@ -4165,9 +4158,11 @@ async def export_to_excel(
         try:
             data = await get_investor_flow(code, days)
         except NaverParseError as e:
+            # 다른 파싱 실패 안내와 같은 두 줄을 붙인다. 없으면 여기서 길이 끊긴다.
             return (
-                f"수급 표를 읽지 못했습니다 (데이터 없음이 아니라 파싱 실패): {code}\n"
-                f"원인: {e}"
+                f"수급 표를 읽지 못했어요 (데이터 없음이 아니라 파싱 실패): {code}\n"
+                f"원인: {e}\n"
+                f"네이버 증권 페이지 구조가 바뀌었을 수 있어요. {_PARSE_FAIL_NEXT}"
             )
         if not data:
             return f"수급 데이터를 가져올 수 없습니다: {code}"
@@ -5287,11 +5282,8 @@ def safe_us_tool(func):
         except httpx.ConnectError:
             return "⚠️ Yahoo Finance에 연결할 수 없습니다. 인터넷 연결을 확인해주세요."
         except Exception as e:
-            return (
-                f"⚠️ 미국 주식 데이터 처리 중 오류: {type(e).__name__}\n"
-                f"티커가 올바른지 확인해주세요 (예: AAPL, MSFT, BRK.B)."
-                + _support_hint()
-            )
+            # 원인 불명 버킷이다. 티커 탓으로 돌리지 않는다(safe_tool 과 같은 이유).
+            return f"⚠️ {_UNKNOWN_ERROR_NEXT}\n(원인: {type(e).__name__})"
 
     return wrapper
 

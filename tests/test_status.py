@@ -229,7 +229,8 @@ class StocklensStatusToolTests(unittest.TestCase):
             text = asyncio.run(server.stocklens_status())
 
         self.assertIn("STOCKLENS_STATUS_JSON_START", text)
-        self.assertNotIn("유료 라이선스가 필요", text)  # safe_tool의 LOCKED_MESSAGE가 아님을 확인
+        self.assertNotEqual(text, licensing.LOCKED_MESSAGE)  # safe_tool의 잠금 안내가 아님을 확인
+        self.assertNotIn("라이선스 키가 필요해요", text)
 
 
 if __name__ == "__main__":
