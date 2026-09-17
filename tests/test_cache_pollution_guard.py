@@ -39,6 +39,22 @@ class HomeIsolationGuardTests(unittest.TestCase):
         self.assertTrue(str(cache._root.resolve()).startswith(str(home)))
 
 
+class UnisolatedRunnerGuardTests(unittest.TestCase):
+    def test_unittest_runner_cannot_import_the_test_package(self):
+        # 2026-09-17: unittest discover 로 돌려 conftest 격리가 빠졌고 실사용
+        # broker_state.json·캐시가 덮였다. pytest 밖에서는 패키지가 멈춰야 한다.
+        import subprocess
+
+        root = Path(__file__).resolve().parents[1]
+        env = dict(os.environ)
+        env.pop("STOCKLENS_HOME", None)
+        proc = subprocess.run(
+            [sys.executable, "-c", "import tests"],
+            cwd=root, env=env, capture_output=True, timeout=60)
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn(b"pytest", proc.stderr)
+
+
 class CachedDayDateValidationTests(unittest.TestCase):
     def _bar(self, day: dt.date):
         from decimal import Decimal
