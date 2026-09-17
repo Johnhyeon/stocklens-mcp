@@ -258,3 +258,76 @@ def test_recent_tool_failures_warn_for_every_category(error_type, detail):
     check = diagnostics._check_recent_tool_failures(records)
     assert check.status == "warn"
     _assert_check(check, f"RECENT_TOOL_FAILURES({error_type})")
+
+
+# ---------- 온라인 진단 (Manager 화면) ----------
+#
+# KR/US(와 증권사) details 줄은 Manager 상세 창에 그대로 보인다. 줄 앞은 고객이 읽을
+# 한국어, 예외 원문은 줄 끝 괄호 안에 짧게. URL·쿼리스트링은 들어가지 않는다.
+
+_ONLINE_ERRORS = [
+    ConnectionError("[SSL: CERTIFICATE_VERIFY_FAILED] https://api.stock.naver.com/x?y=1"),
+    TimeoutError(),
+    OSError("[Errno 11001] getaddrinfo failed"),
+    ConnectionRefusedError("Connection refused"),
+    RuntimeError("Client error '403 Forbidden' for url 'https://m.stock.naver.com/api'"),
+    server.NaverParseError("구조 변경 가능성"),
+    RuntimeError("boom"),
+]
+
+
+def _assert_readable_detail_lines(check: diagnostics.DiagnosticCheck, where: str) -> None:
+    for line in check.detail:
+        assert re.match(r"^[가-힣]", line), f"{where}: 한국어로 시작하지 않는 줄 {line!r}"
+        assert "://" not in line and "?" not in line, f"{where}: URL 이 남은 줄 {line!r}"
+
+
+@pytest.mark.parametrize("exc", _ONLINE_ERRORS, ids=lambda e: type(e).__name__)
+def test_kr_and_us_failures_for_every_category(exc):
+    async def fail():
+        raise exc
+
+    probes = tuple((name, fail, judge) for name, _f, judge in diagnostics._kr_probes())
+    kr = asyncio.run(diagnostics._check_kr_data_reachable(probes))
+    _assert_check(kr, f"KR_DATA_REACHABLE({type(exc).__name__})")
+    _assert_readable_detail_lines(kr, "KR_DATA_REACHABLE")
+
+    with patch("stock_mcp_server.yfinance_source.get_price", AsyncMock(side_effect=exc)):
+        us = asyncio.run(diagnostics._check_us_data_reachable())
+    _assert_check(us, f"US_DATA_REACHABLE({type(exc).__name__})")
+    _assert_readable_detail_lines(us, "US_DATA_REACHABLE")
+
+
+def test_broker_check_copy():
+    from types import SimpleNamespace
+
+    from stock_mcp_server.market_data.kis_client import KisApiError
+
+    class Adapter:
+        def __init__(self, exc=None):
+            self.exc = exc
+
+        async def fetch_bars(self, request):
+            if self.exc:
+                raise self.exc
+            return SimpleNamespace(bars=[])
+
+    class Runtime:
+        def __init__(self, adapters):
+            self.adapters = adapters
+
+        def snapshot(self):
+            caps = {p: {"connected": True, "kr_intraday": True, "us_intraday": False} for p in self.adapters}
+            return SimpleNamespace(capabilities=lambda p: caps.get(p, {"connected": False}))
+
+        def providers_for(self, market, source="auto", snapshot=None):
+            return {source: self.adapters[source]} if source in self.adapters else {}
+
+    for adapters in (
+        {"kis": Adapter()},
+        {"kis": Adapter(KisApiError("credential_invalid", 401)), "kiwoom": Adapter()},
+        {"kis": Adapter(TimeoutError()), "kiwoom": Adapter(KisApiError("rate_limited", 429))},
+    ):
+        check = asyncio.run(diagnostics._check_broker_data_reachable(Runtime(adapters)))
+        _assert_check(check, "BROKER_DATA_REACHABLE")
+        _assert_readable_detail_lines(check, "BROKER_DATA_REACHABLE")

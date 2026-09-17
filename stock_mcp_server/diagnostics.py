@@ -15,14 +15,17 @@ Requirements 3.1)과 문자 그대로 일치해야 한다 — DartLens/TelegramL
 검사 ID (Manager가 파싱하는 고정 식별자, 값 자체를 바꾸지 말 것):
     PACKAGE_IMPORTABLE, COMMAND_AVAILABLE, PYTHON_SUPPORTED, MCP_CONFIG_VALID,
     LICENSE_ACTIVE, CACHE_WRITABLE, KR_DATA_REACHABLE, US_DATA_REACHABLE,
-    UPDATE_CHECK_REACHABLE, RECENT_TOOL_FAILURES
+    UPDATE_CHECK_REACHABLE, RECENT_TOOL_FAILURES, BROKER_DATA_REACHABLE
 
 RECENT_TOOL_FAILURES 는 세 Lens 공통 검사다(DartLens·TelegramLens 도 같은 ID·같은 판정).
 metrics 기록만 읽으므로 기본 모드에서도 실행된다.
 
 기본(online=False) 진단은 네트워크 호출이 전혀 없어 수 초 내 끝난다.
 online=True 일 때만 KR_DATA_REACHABLE/US_DATA_REACHABLE/UPDATE_CHECK_REACHABLE가
-실행되며, 각각 국내·미국 대표 종목 1개와 PyPI/GitHub만 조회한다(전수 조사 아님).
+실행되며, 국내는 데이터 종류별 대표 조회 1건씩(현재가·일봉·투자자 수급·시가총액 순위·
+테마 목록·재무), 미국은 대표 종목 1개, 업데이트는 PyPI/GitHub만 조회한다(전수 조사 아님).
+BROKER_DATA_REACHABLE 도 online=True 일 때만, 그리고 연결한 증권사가 있을 때만 checks 에
+들어간다(연결이 없으면 항목 자체가 없다). 증권사마다 읽기 전용 분봉 1건만 조회한다.
 latest_version/update_available도 --online일 때만 채워진다(기본 모드는 무네트워크
 원칙을 지키므로 null).
 """
@@ -37,7 +40,7 @@ import sys
 import sysconfig
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from stock_mcp_server._error_class import action_for, classify_error
@@ -151,6 +154,13 @@ ERROR_CATALOG: dict[str, dict] = {
         "action": "그대로 쓰셔도 돼요. 잠시 뒤 [진단]을 다시 눌러보세요.",
         "repairable": False,
     },
+}
+
+ERROR_CATALOG["BROKER_DATA_UNREACHABLE"] = {
+    "summary": "연결한 증권사의 시세를 가져오지 못했어요.",
+    "impact": "증권사로 받는 분봉·상세 수급이 안 될 수 있어요. 기본 시세는 그대로 돼요.",
+    "action": "StockLens 카드의 [증권사 연결]에서 연결을 다시 확인해 주세요.",
+    "repairable": False,
 }
 
 # 최근 조회 실패는 원인 분류마다 코드가 따로 있다(예: RECENT_TOOL_FAILURES_TLS). 할 일은
@@ -710,79 +720,324 @@ def _skip(check_id: str) -> DiagnosticCheck:
     )
 
 
+# details 줄에 쓰는 분류 이름. 이 줄들은 Manager 상세 창에 그대로 보이므로 영문
+# category 대신 고객이 읽을 말로 쓴다(category 원문은 RECENT_TOOL_FAILURES 줄과 error_code 에 있다).
+_CATEGORY_LABEL = {
+    "tls": "보안 프로그램이 연결을 가로챈 것 같음",
+    "dns": "인터넷 주소를 찾지 못함",
+    "timeout": "연결 시간 초과",
+    "blocked": "요청이 막힘",
+    "auth": "인증 실패",
+    "connect": "서버에 연결하지 못함",
+    "schema": "응답 모양이 달라짐",
+    "cancelled": "중간에 취소됨",
+    "other": "원인 확인 필요",
+}
+
+
+def _classify_exception(exc: BaseException) -> str:
+    """예외 사슬을 따라가며 원인 분류를 고른다.
+
+    증권사 클라이언트는 httpx 오류를 비밀 없는 자체 예외로 바꿔 올린다(`raise ... from None`).
+    겉 예외만 보면 타임아웃과 연결 거부가 똑같이 provider_unavailable 이다. from None 이어도
+    __context__ 에 원래 예외가 남아 있으니 거기까지 본다. 겉에서 이미 분류가 나오면
+    (예: credential_invalid → auth) 그게 우선이다.
+    """
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen and len(seen) < 6:
+        seen.add(id(current))
+        category = classify_error(type(current).__name__, str(current))
+        if category != "other":
+            return category
+        current = current.__cause__ or current.__context__
+    return "other"
+
+
+def _failure_line(name: str, category: str, raw: str | None) -> str:
+    label = _CATEGORY_LABEL.get(category, _CATEGORY_LABEL["other"])
+    return f"{name}: 실패 ({label}, {raw})" if raw else f"{name}: 실패 ({label})"
+
+
+def _dominant_category(failures: list[dict]) -> str:
+    """가장 많이 나온 분류. 같으면 목록에서 먼저 나온 것(국내는 현재가가 맨 앞)."""
+    counts: dict[str, int] = {}
+    for item in failures:
+        counts[item["category"]] = counts.get(item["category"], 0) + 1
+    top = max(counts.values())
+    return next(item["category"] for item in failures if counts[item["category"]] == top)
+
+
 # --- 온라인 검사 (online=True 일 때만) ---
 
 
-async def _check_kr_data_reachable() -> DiagnosticCheck:
-    from stock_mcp_server.naver import get_current_price
-
-    try:
-        data = await asyncio.wait_for(get_current_price("005930"), timeout=_ONLINE_CHECK_TIMEOUT)
-    except Exception as e:
-        return DiagnosticCheck(
-            id="KR_DATA_REACHABLE",
-            status="fail",
-            critical=False,
-            summary="네이버 증권(국내) 시세 조회 실패",
-            detail=[f"{type(e).__name__}: {e}"],
-            error_code="KR_DATA_UNREACHABLE",
-        )
-
-    queried_at = datetime.now(timezone.utc).isoformat()
-    name = data.get("name")
-    price = data.get("price")
+def _judge_price(data) -> tuple[bool, str]:
     # 휴장일에도 최근 종가는 내려오므로 장 상태는 실패 조건에 넣지 않는다.
+    name = (data or {}).get("name")
+    price = (data or {}).get("price")
     if name and isinstance(price, (int, float)) and price > 0:
+        return True, f"{name} {price:,}원"
+    return False, "현재가 칸이 비어 있음"
+
+
+def _judge_rows(data) -> tuple[bool, str]:
+    if isinstance(data, list) and data:
+        return True, ""
+    return False, "빈 응답"
+
+
+def _judge_financials(data) -> tuple[bool, str]:
+    from stock_mcp_server.naver import PARSE_MISS_KEY
+
+    if isinstance(data, dict) and data and PARSE_MISS_KEY not in data:
+        return True, ""
+    return False, "재무 표를 읽지 못함"
+
+
+def _kr_probes() -> tuple:
+    """국내 데이터 종류별 대표 조회 1건씩.
+
+    2026-09-11 네이버 구 페이지 폐지 때 데이터 종류마다 따로 죽었다 — 현재가만 보면
+    수급·순위·재무가 죽은 걸 모른다. 순위는 시가총액 순위를 쓴다. 등락률·거래량·거래대금
+    순위는 장 시작 전에 빈 배열이 정상이라 이른 아침 진단이 거짓 경보를 낸다.
+    """
+    from stock_mcp_server import naver
+
+    return (
+        ("현재가", lambda: naver.get_current_price("005930"), _judge_price),
+        ("일봉", lambda: naver.get_ohlcv("005930", "day", 5), _judge_rows),
+        ("투자자 수급", lambda: naver.get_investor_flow("005930", 5), _judge_rows),
+        ("시가총액 순위", lambda: naver.get_market_cap_ranking("KOSPI", 5), _judge_rows),
+        ("테마 목록", lambda: naver.list_themes(1), _judge_rows),
+        ("재무", lambda: naver.get_financials("005930"), _judge_financials),
+    )
+
+
+async def _run_probe(name: str, factory, judge) -> dict:
+    try:
+        data = await asyncio.wait_for(factory(), timeout=_ONLINE_CHECK_TIMEOUT)
+    except Exception as e:  # asyncio.TimeoutError 포함
+        return {"name": name, "ok": False, "category": _classify_exception(e), "raw": _short(e)}
+    try:
+        ok, note = judge(data)
+    except Exception as e:
+        return {"name": name, "ok": False, "category": "schema", "raw": _short(e)}
+    if not ok:
+        return {"name": name, "ok": False, "category": "schema", "raw": note}
+    return {"name": name, "ok": True, "note": note}
+
+
+async def _check_kr_data_reachable(probes: tuple | None = None) -> DiagnosticCheck:
+    results = await asyncio.gather(*(_run_probe(*probe) for probe in (probes or _kr_probes())))
+    total = len(results)
+    failures = [r for r in results if not r["ok"]]
+    lines = [
+        (f"{r['name']}: 정상 ({r['note']})" if r["note"] else f"{r['name']}: 정상")
+        if r["ok"]
+        else _failure_line(r["name"], r["category"], r["raw"])
+        for r in results
+    ]
+    lines.append(f"확인 시각: {datetime.now().strftime('%H:%M')}")
+
+    if not failures:
         return DiagnosticCheck(
             id="KR_DATA_REACHABLE",
             status="ok",
             critical=False,
-            summary=f"{name} 시세 정상 조회 ({price:,})",
-            detail=[f"조회 시각: {queried_at}"],
+            summary=f"국내 데이터 {total}가지가 모두 정상이에요.",
+            detail=lines,
         )
+
+    # 현재가는 거의 모든 국내 도구의 바탕이라 그것만 실패해도 fail 이다.
+    price_failed = any(r["name"] == "현재가" for r in failures)
+    if len(failures) == total:
+        summary = f"국내 데이터 {total}가지를 모두 가져오지 못했어요."
+    else:
+        names = ", ".join(r["name"] for r in failures)
+        summary = f"국내 데이터 {total}가지 중 {total - len(failures)}가지는 정상이고, {names} 조회가 실패했어요."
+    category = _dominant_category(failures)
     return DiagnosticCheck(
         id="KR_DATA_REACHABLE",
-        status="fail",
+        status="fail" if price_failed or len(failures) == total else "warn",
         critical=False,
-        summary="네이버 증권 응답에 필수 필드가 없습니다.",
-        detail=[f"name={name!r} price={price!r} 조회 시각: {queried_at}"],
+        summary=summary,
+        detail=lines,
+        # Manager 는 error_code 로 분기하지 않지만(2026-09-17 확인) 기존 코드를 유지한다.
+        # 분류는 action 과 details 줄에 드러난다.
         error_code="KR_DATA_UNREACHABLE",
+        fix=action_for(category, _LENS_NAME),
     )
 
 
 async def _check_us_data_reachable() -> DiagnosticCheck:
     from stock_mcp_server import yfinance_source as us
 
-    try:
-        data = await asyncio.wait_for(us.get_price("AAPL"), timeout=_ONLINE_CHECK_TIMEOUT)
-    except Exception as e:
+    def _fail(category: str, raw: str) -> DiagnosticCheck:
         return DiagnosticCheck(
             id="US_DATA_REACHABLE",
             status="fail",
             critical=False,
-            summary="Yahoo Finance(미국) 시세 조회 실패",
-            detail=[f"{type(e).__name__}: {e}"],
+            summary=ERROR_CATALOG["US_DATA_UNREACHABLE"]["summary"],
+            detail=[_failure_line("미국 시세(AAPL)", category, raw)],
             error_code="US_DATA_UNREACHABLE",
+            fix=action_for(category, _LENS_NAME),
         )
 
-    queried_at = datetime.now(timezone.utc).isoformat()
-    name = (data or {}).get("name")
-    price = (data or {}).get("price")
-    if data and name and isinstance(price, (int, float)) and price > 0:
+    try:
+        data = await asyncio.wait_for(us.get_price("AAPL"), timeout=_ONLINE_CHECK_TIMEOUT)
+    except Exception as e:
+        return _fail(_classify_exception(e), _short(e))
+
+    if data is None:
+        # yfinance 쪽이 오류를 삼키고 None 을 준다 — 원인은 여기서 알 수 없다.
+        return _fail("other", "응답 없음")
+    name = data.get("name")
+    price = data.get("price")
+    if name and isinstance(price, (int, float)) and price > 0:
         return DiagnosticCheck(
             id="US_DATA_REACHABLE",
             status="ok",
             critical=False,
-            summary=f"{name} 시세 정상 조회 ({price:,})",
-            detail=[f"조회 시각: {queried_at}"],
+            summary="미국 시세를 정상으로 가져왔어요.",
+            detail=[f"미국 시세: 정상 ({name} {price:,}달러)"],
         )
+    return _fail("schema", "가격 칸이 비어 있음")
+
+
+# --- 증권사 시세 (online=True, 연결한 증권사가 있을 때만) ---
+
+_BROKER_CHECK_TIMEOUT = 10.0  # 초. 토큰을 새로 받아야 하는 첫 호출까지 감안한다.
+_BROKER_PROBE = {"KR": ("005930", "KRX", "국내"), "US": ("AAPL", "NAS", "미국")}
+_EXPERIMENTAL_BROKERS = frozenset({"toss"})  # server._EXPERIMENTAL_BROKERS 와 같은 기준
+
+
+def _latest_opened_trading_day(market: str, now: datetime):
+    """가장 최근에 정규장이 열린 거래일. 오늘 장이 아직 안 열렸으면 그 전 거래일."""
+    from zoneinfo import ZoneInfo
+
+    from stock_mcp_server.market_data.sessions import session_window
+
+    tz = ZoneInfo("Asia/Seoul" if market == "KR" else "America/New_York")
+    today = now.astimezone(tz).date()
+    for back in range(0, 15):
+        day = today - timedelta(days=back)
+        window = session_window(market, day)
+        if window is None or (back == 0 and now < window.open_at):
+            continue
+        return day
+    return today
+
+
+def _safe_broker_raw(exc: BaseException) -> str:
+    """증권사 오류의 원문 대신 쓰는 허용 목록 요약. 메시지 본문은 싣지 않는다.
+
+    증권사 경로의 예외 메시지에는 원칙상 비밀이 없지만, 진단 결과는 화면·지원 번들로
+    나간다. `_broker_summary` 와 같은 원칙으로 이름·상태 코드만 옮긴다.
+    """
+    parts = [type(exc).__name__]
+    status = getattr(exc, "provider_status", None)
+    if isinstance(status, str) and status.isidentifier():
+        parts.append(status)
+    http = getattr(exc, "http_status", None) or getattr(exc, "status_code", None)
+    if isinstance(http, int):
+        parts.append(f"HTTP {http}")
+    root = exc.__cause__ or exc.__context__
+    if root is not None and root is not exc:
+        parts.append(f"원인 {type(root).__name__}")
+    return " ".join(parts)[:_RAW_MAX]
+
+
+async def _probe_broker(runtime, snapshot, provider: str, display_name: str, market: str, now: datetime) -> dict:
+    from stock_mcp_server.market_data.models import BarRequest
+
+    symbol, venue, market_label = _BROKER_PROBE[market]
+    name = f"{display_name} {market_label} 시세"
+    try:
+        # 도구 호출과 같은 경로: 연결 상태 스냅샷 → 저장된 키 → 캐시된 토큰(token_store).
+        adapter = runtime.providers_for(market, provider, snapshot=snapshot).get(provider)
+        if adapter is None:
+            # 연결 기록은 있는데 저장된 키를 못 꺼냈다. 다시 연결하는 게 할 일이다.
+            return {"name": name, "ok": False, "category": "auth", "raw": "저장된 연결 정보를 읽지 못함"}
+        day = _latest_opened_trading_day(market, now)
+        request = BarRequest(
+            symbol=symbol, market=market, interval="1m", start=None, end=None,
+            trading_date=day, row_limit=1, venue=venue, session="regular",
+            adjustment="unadjusted", completed_only=False, source=provider,
+        )
+        dataset = await asyncio.wait_for(adapter.fetch_bars(request), timeout=_BROKER_CHECK_TIMEOUT)
+    except Exception as e:
+        return {"name": name, "ok": False, "category": _classify_exception(e), "raw": _safe_broker_raw(e)}
+    return {"name": name, "ok": True, "note": f"{day.isoformat()} 분봉 {len(dataset.bars)}개"}
+
+
+async def _check_broker_data_reachable(runtime=None, *, now: datetime | None = None) -> DiagnosticCheck | None:
+    """연결한 증권사마다 읽기 전용 시세(분봉) 1건. 연결이 하나도 없으면 None — 검사 항목을 안 넣는다.
+
+    주문·계좌 API 는 부르지 않는다. 확인 대상은 연결 시험·출시 검증을 통과해 도구가
+    실제로 쓰는 시장(kr_intraday/us_intraday)뿐이다.
+    """
+    import os
+
+    from stock_mcp_server.market_data.provider_registry import registry
+
+    if runtime is None:
+        from stock_mcp_server.market_data.runtime import ProviderRuntime
+
+        runtime = ProviderRuntime()
+    snapshot = runtime.snapshot()
+    experimental = os.environ.get("LEETKIT_ENABLE_EXPERIMENTAL_BROKERS") == "1"
+
+    targets: list[tuple[str, str, str]] = []
+    providers: list[str] = []
+    for provider in registry.ids():
+        if provider in _EXPERIMENTAL_BROKERS and not experimental:
+            continue
+        caps = snapshot.capabilities(provider)
+        if not caps.get("connected"):
+            continue
+        markets = [m for m in ("KR", "US") if caps.get(f"{m.lower()}_intraday")]
+        if not markets:
+            continue
+        providers.append(provider)
+        display = registry.require(provider).display_name
+        targets.extend((provider, display, m) for m in markets)
+    if not targets:
+        return None
+
+    now = now or datetime.now(timezone.utc)
+    results = await asyncio.gather(
+        *(_probe_broker(runtime, snapshot, pid, display, market, now) for pid, display, market in targets)
+    )
+    failures = [r for r in results if not r["ok"]]
+    lines = [
+        f"{r['name']}: 정상 ({r['note']})" if r["ok"] else _failure_line(r["name"], r["category"], r["raw"])
+        for r in results
+    ]
+    count = len(providers)
+    if not failures:
+        return DiagnosticCheck(
+            id="BROKER_DATA_REACHABLE",
+            status="ok",
+            critical=False,
+            summary=f"연결한 증권사 {count}곳의 시세 조회가 모두 정상이에요.",
+            detail=lines,
+        )
+
+    if len(failures) == len(results):
+        summary = f"연결한 증권사 {count}곳의 시세를 모두 가져오지 못했어요."
+    else:
+        summary = f"연결한 증권사 {count}곳 중 {', '.join(r['name'] for r in failures)}가 실패했어요."
+    # 인증 실패가 하나라도 있으면 그게 먼저다 — 다시 연결하지 않으면 재시도가 소용없다.
+    category = "auth" if any(r["category"] == "auth" for r in failures) else _dominant_category(failures)
     return DiagnosticCheck(
-        id="US_DATA_REACHABLE",
-        status="fail",
+        id="BROKER_DATA_REACHABLE",
+        status="fail" if len(failures) == len(results) else "warn",
+        # 증권사가 안 돼도 기본 시세(네이버·야후)는 그대로라 카드를 "사용 불가"로 만들지 않는다.
         critical=False,
-        summary="Yahoo Finance 응답에 필수 필드가 없습니다.",
-        detail=[f"name={name!r} price={price!r} 조회 시각: {queried_at}"],
-        error_code="US_DATA_UNREACHABLE",
+        summary=summary,
+        detail=lines,
+        error_code="BROKER_DATA_UNREACHABLE",
+        fix=action_for(category, _LENS_NAME),
     )
 
 
@@ -939,6 +1194,21 @@ def _broker_summary() -> tuple[dict, dict]:
     return capabilities, connections
 
 
+async def _safe_broker_check() -> DiagnosticCheck | None:
+    """증권사 확인이 예상 못한 예외로 죽어도 리포트 전체는 살린다(_safe_check 의 async 판)."""
+    try:
+        return await _check_broker_data_reachable()
+    except Exception as e:  # noqa: BLE001
+        return DiagnosticCheck(
+            id="BROKER_DATA_REACHABLE",
+            status="fail",
+            critical=False,
+            summary="이 항목을 확인하다가 문제가 생겼어요.",
+            detail=[f"확인 중 예상치 못한 오류가 났어요 ({type(e).__name__})"],
+            fix="[진단]을 다시 눌러주세요. 그래도 같으면 상단 [지원 문의]를 눌러주세요.",
+        )
+
+
 async def run_diagnostics_async(*, online: bool = False) -> DiagnosticReport:
     """`run_diagnostics`의 async 코어. 이미 실행 중인 이벤트 루프(예: MCP 도구)
     안에서는 이 쪽을 직접 await 한다 — `run_diagnostics()`는 내부에서
@@ -974,12 +1244,16 @@ async def run_diagnostics_async(*, online: bool = False) -> DiagnosticReport:
 
     latest_version: str | None = None
     if online:
-        kr_check, us_check, (update_check, latest_version) = await asyncio.gather(
+        kr_check, us_check, (update_check, latest_version), broker_check = await asyncio.gather(
             _check_kr_data_reachable(),
             _check_us_data_reachable(),
             _check_update_check_reachable(),
+            _safe_broker_check(),
         )
         checks.extend([kr_check, us_check, update_check])
+        # 새 항목은 뒤에 붙인다 — 기존 항목 순서를 기대하는 소비자를 흔들지 않는다.
+        if broker_check is not None:
+            checks.append(broker_check)
     else:
         checks.extend([
             _skip("KR_DATA_REACHABLE"),
