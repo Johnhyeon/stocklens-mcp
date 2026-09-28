@@ -1,10 +1,9 @@
 # StockLens Tool Reference
 
-**68 tools are installed**; this reference covers the **52** most
-commonly used (Korean 32 + US 20). The rest follow the same rules and
-carry their usage in the tool description.
+All **73 installed tools** are listed here (as of 1.2.0). Tools added later are
+collected under [Newer tools](#-newer-tools). For the product overview and setup, see the [README](../../README.en.md).
 
-[🇰🇷 한국어](../ko/TOOLS.md) | [USAGE](USAGE.md) | [INSTALL](INSTALL.md)
+[🇰🇷 한국어](../ko/TOOLS.md)
 
 ---
 
@@ -382,6 +381,99 @@ Excel snapshots + metric logs:
 Stored locally only. Nothing leaves your machine.
 
 ---
+
+## ➕ Newer tools
+
+### Status and watchlist
+
+#### `stocklens_status`
+One-shot status: version, license, KR/US market state, recent successes and failures, cache writability. Reads only existing logs and caches, so it is fast and makes no new network calls. Works even without an active license so problems can be diagnosed; points users to LeetKit Manager's [Diagnose] or [Support], never to terminal commands.
+
+#### `watchlist`
+"My stocks" list: view, add, remove, clear. Shared by all three LeetKit Lenses. Pass the `codes` from `list` straight into `get_multi_stocks` / `get_flow_batch` / `get_indicators_bulk`.
+- `action`: "list" (default) / "add" / "remove" / "clear"
+- `query`: stock name or 6-digit code for add/remove
+
+### Korean stocks
+
+#### `screen_chart`
+Chart condition screening. Moving-average convergence, bullish/bearish alignment, volatility contraction, price vs. MA, golden/dead cross, volume multiple, MA trend, N-day highs/lows, period change, position within a range, MACD and RSI, scanned across the top stocks by market cap in one call.
+- `market`, `universe_top`, `preset`, condition arguments (`ma_set`, `cross`, `volume_ratio_min`, `new_high_days`, `change_days`, ...), `count`, `page`
+- `refine="60m"` narrows with daily bars first, then re-checks the leaders on intraday bars (broker connection required; takes minutes)
+- Excludes by default: administrative-issue stocks, preferred shares, halted, SPACs, REITs, caution/warning/danger designations, and market cap under KRW 100 billion, and reports what was excluded
+- Condition definitions match Kiwoom's condition search
+
+#### `get_move_context`
+Why did it move today. Price, volume multiple, articles, exchange filings and broker reports in time order. It does not judge the cause; it lays out facts by time. Zero filings does not mean no news. A failing source is marked "lookup failed" while the rest still returns.
+- `code`: 6-digit code
+
+#### `get_news`
+Recent articles for a Korean stock (Naver stock-tagged news plus a name search).
+- `code`, `limit` (default 10, max 30), `today_only`
+- Times from the name search are approximate and marked as such
+
+#### `get_event_reaction`
+Aligns price, volume and investor-flow reaction around a date. Pass a DartLens filing date to see "filing → price/flow". Not a cause or a trading call; windows that cannot be analyzed return a reason instead of numbers.
+- `code`, `event_date`, `before` (default 5, max 60), `after` (default 20, max 60)
+
+#### `get_event_reactions`
+How the stock has reacted to its recent filings, computed in one pass.
+- `code`, `max_events` (default 8, max 15), `before`, `after`, `include_types` / `exclude_types` (earnings/contract/financing/governance/administrative/IR/other)
+- Past reactions are history, not a forecast
+
+#### `get_flow_batch`
+Investor flows for many stocks at once, in parallel.
+- `codes` (up to 30), `days` (default 5; daily mode max 20, summary mode max 60), `summary` (5/20/60-day totals and net-buy day counts)
+
+#### `screen_by_flow`
+From the top N by trading value or volume, keeps only stocks foreigners and/or institutions net-bought for the last N days in a row.
+- `top_n` (default 100, max 500), `market`, `foreign_days`, `inst_days`, `exclude_etf`, `sort_by`
+
+#### `get_sector_valuation`
+Sector/theme PER, PBR and ROE aggregates (median-based) and where each stock sits at a premium or discount.
+- `sector_name` or `code` (a stock code finds its sector), `top_n`, `kind`
+- Loss-making companies' PER is excluded from the aggregate, with the count noted
+
+#### `get_report_content`
+Reads the PDF body of one broker report. One at a time; `mode` = `summary` (first 4,000 chars, default) / `full` (up to 50,000) / `link`.
+- `nid`, `mode`, `max_chars`
+
+#### `get_financial_soundness`
+Capital soundness for financial companies (banks, insurers, brokers): regulatory capital and asset quality instead of a manufacturing-style cash runway. Figures only in official filings (CET1, LCR) are not invented; it says which report to check.
+- `symbol`: Korean code or US ticker
+
+#### `get_ipo_schedule`
+IPO calendar by stage (review, book-building, subscription, listing). Final offer price and demand figures appear only after that stage; missing values are left blank.
+
+#### `get_investor_deposit`
+Market-wide waiting money: customer deposits, margin balances, funds.
+- `days` (default 20, max 100)
+
+#### `save_analysis_to_excel`
+Saves a table the AI assembled from several tools to Excel. Numbers must come from tool output; the tools used (`sources`) and reasoning and limits (`notes`) are saved alongside. No buy/sell calls or price targets.
+- `title`, `rows`, `notes`, `sources`, `filename`, ...
+
+### US stocks
+
+#### `get_us_event_reaction`
+Aligns the price reaction to US earnings by session: pre-market reports react on the same day, after-hours reports on the next trading day.
+- `ticker`, `event_date`, `session` (auto/pre/post), `after` (default 5, max 20)
+
+#### `get_us_filing_detail`
+SEC filing body: keyword excerpts (`find`) and structured dilution/contract clauses (`analyze`). Categories not found are "unconfirmed", not "absent".
+- `ticker`, `accession_no`, `find`, `analyze`, `document`
+
+#### `get_us_liquidity`
+Usable liquidity ledger from SEC XBRL: short-term investments, restricted cash, undrawn revolvers, debt maturities, by as-of date. Unreported items stay "not reported", never zero.
+- `ticker`
+
+#### `get_us_multi_diagnosis`
+Chart stats and technical state (MA20/60, crosses, RSI14) for many US tickers on completed bars. No scores or grades; raw values are kept.
+- `tickers` (up to 20), `include` ("estimates", "earnings", "short")
+
+#### `export_us_to_excel`
+Saves long US price history to Excel with no row cap (get_us_chart stops at 500 rows).
+- `ticker`, `period` (default 10y), `interval`, `filename`
 
 ## 🕐 Result metadata (`RESULT_META_JSON` / `_meta`) - contract v3
 

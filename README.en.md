@@ -58,7 +58,7 @@ Summarize NVIDIA's last 4 quarters of earnings and analyst price targets
 - **Brokerage connection (optional):** connect a Korea Investment & Securities or Kiwoom Securities Open API account for 1-minute bars and more detailed investor flows. Quotes only; no orders, no account access.
 - **Excel export:** save any table as an Excel file.
 
-About 70 tools in all. See the [tool guide](https://github.com/Johnhyeon/stocklens-mcp/blob/main/guides/en/TOOLS.md) and [usage examples](https://github.com/Johnhyeon/stocklens-mcp/blob/main/guides/en/USAGE.md).
+About 70 tools in all. See the [tool guide](https://github.com/Johnhyeon/stocklens-mcp/blob/main/guides/en/TOOLS.md).
 
 ## Labels come first
 

@@ -56,7 +56,7 @@ SK하이닉스 오늘 왜 올랐어? 기사랑 공시 시간순으로 정리해�
 - **증권사 연결 (선택):** 한국투자증권이나 키움증권 Open API를 연결하면 1분봉까지 보고, 투자자별 수급을 더 자세히 봅니다. 시세 조회만 합니다. 주문이나 계좌 조회는 하지 않습니다.
 - **엑셀 저장:** 조회한 표를 엑셀 파일로 남깁니다.
 
-도구는 70여 개입니다. 전체 목록은 [도구 안내](https://github.com/Johnhyeon/stocklens-mcp/blob/main/guides/ko/TOOLS.md), 질문 예시는 [사용 예시](https://github.com/Johnhyeon/stocklens-mcp/blob/main/guides/ko/USAGE.md)에 있습니다.
+도구는 70여 개입니다. 전체 목록은 [도구 안내](https://github.com/Johnhyeon/stocklens-mcp/blob/main/guides/ko/TOOLS.md)에 있습니다.
 
 ## 숫자 이름표 원칙
 
