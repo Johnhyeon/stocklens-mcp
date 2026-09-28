@@ -1,122 +1,98 @@
 <div align="center">
 
-<img src="assets/logo.svg" width="120" height="120" alt="StockLens logo">
+<img src="https://raw.githubusercontent.com/Johnhyeon/stocklens-mcp/main/assets/logo.svg" width="120" height="120" alt="StockLens logo">
 
 # StockLens
 
-**AI-powered Korean stock analysis with real data**
+**Lets Claude and Codex look up stock data themselves before they answer**
 
-[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
-
-[🇰🇷 한국어](README.md) | 🇺🇸 **English** | [🌐 leetkey.kr/en](https://leetkey.kr/en/)
+[leetkey.kr/en](https://leetkey.kr/en/) | [한국어](https://github.com/Johnhyeon/stocklens-mcp/blob/main/README.md) | [Patch notes](https://github.com/Johnhyeon/stocklens-mcp/blob/main/PATCHNOTES.md)
 
 </div>
 
 ---
 
-## Distribution Status
+Ask an AI about a stock and you get a plausible number. The trouble is you can't tell when that number is from or where it came from. Sometimes it is an old figure from training, stated as if it were today's.
 
-Public installation instructions for StockLens ended on 2026-06-01.
+With StockLens connected, the AI fetches the numbers on the spot from Naver Finance, Yahoo Finance and any brokerage account you connect. **Every figure carries the date it is from and its source.** No more screenshots of charts or copy-pasting numbers.
 
-New installations now follow the buyer guide and installer command provided after purchase. Existing users who already installed the public build may continue using the version they have, while new distribution, setup support, and usage templates are organized under the paid package.
+StockLens is the core Lens of [LeetKit](https://leetkey.kr/en/), used together with DartLens (Korean DART filings) and TelegramLens (Telegram stock chatter).
 
-Purchase and a 14-day free trial: **[leetkey.kr/en](https://leetkey.kr/en/)**. StockLens is sold as part of **LeetKit**, together with DartLens and TelegramLens.
+**Ask in English, get answers in English.** The installer and setup guide are in Korean; after that you just talk to your AI.
 
-The source code is not public. This repository holds the overview, usage docs and patch notes only.
+## A real answer
 
-## Why StockLens
+> Summarize investor flows for Samsung Electronics over the last 5 days
 
-When you show AI a chart image, it **guesses the numbers and often gets them wrong** (hallucination).
+**Samsung Electronics: investor flows** `As of 2026-09-23 market close`
 
-**StockLens** connects Claude directly to live data from Naver Finance (Korea's largest stock portal), so AI **reads real numbers instead of guessing**.
+| Date | Institutions | Foreigners |
+|---|---:|---:|
+| Sep 23 | +1,346,883 sh | +4,513,767 sh |
+| Sep 22 | +259,459 sh | +659,851 sh |
 
-```
-❌ "Samsung Electronics is around 80,000 KRW" (guess, wrong)
-✅ "Samsung Electronics at 206,000 KRW, +5.3% vs 20-day MA" (real data)
-```
+Note: since Sep 14, the closing price is the last KRX after-market trade at 20:00, not the regular-session close.
 
-## Features
+Asked right after a market holiday, it still said which trading day the numbers were from. It does not pass off an old number as today's. (Labels translated from the Korean output.)
 
-- 📊 **48 tools** — Market calendar, prices, charts, investor flows, financials, screening, Excel export
-- 🔑 **No API key required** — Uses public Naver Finance data
-- 🚀 **Fast responses** — TTL cache + Semaphore optimization
-- 📁 **Excel snapshots** — Scan once, query instantly
-- 🤖 **Gemini/GPT compatible** — Export to Excel for use with other AIs
-- 🕐 **Result metadata v3** — every response carries the requested range vs. what
-  actually came back, whether the last bar is still forming, whether prices are
-  split-adjusted, and whether financial periods are mixed. Ask for 60 days, get 20,
-  and it says so. All v3 fields are **optional**, so existing consumers can ignore
-  them ([TOOLS.md](guides/en/TOOLS.md))
+## What you can ask
 
-## Installation
-
-The buyer guide covers:
-
-1. Checking or installing `uv`
-2. Installing the StockLens MCP package
-3. Registering it with Claude Desktop or Claude Code
-4. Running diagnostics and the first verification query
-
-Direct public installer commands are no longer published in this README.
-
-## Verify Installation
-
-In Claude:
-```
-Show me Samsung Electronics (005930) current price
-```
-
-If you see the stock name, price, and volume, you're all set.
-
-<!-- TODO: screenshot — Claude response example -->
-<img width="850" height="415" alt="image" src="https://github.com/user-attachments/assets/ac50dd95-85b8-4471-a79c-6aa196f62af4" />
-
-<img width="797" height="948" alt="image" src="https://github.com/user-attachments/assets/1daa0535-4ab5-480c-b70f-dcfdb5c5c864" />
-
-## Installation Diagnosis
-
-```bash
-stocklens-doctor
-```
-
-Auto-checks uv / package / command / config in 4 steps. Shows the exact fix command. Send this to anyone having install trouble.
-
-## Example Queries
+Plain words work, and you can keep narrowing down from the previous answer.
 
 ```
-"Analyze SK Hynix 120-day candles using the 20-day MA trend"
-"Check Kakao's foreign/institutional investor flow for the last 20 days"
-"Find stocks in top-100 market cap with PER under 15"
-"Show today's strongest 3 themes and analyze the leader of each"
+Among the top 300 by market cap, find stocks in a bullish moving-average alignment, above the 20-day line, with volume over 1.5x normal
+Keep only the ones both foreigners and institutions bought over the last 5 days
+Compare PER, ROE and debt ratio for what's left in one table and save it to Excel
 ```
 
-> ✅ Only builds that pass full-tool QA and load tests ship to release. ([details](QUALITY.md))
+```
+Why did SK hynix rise today? Line up the articles and filings in time order
+Summarize NVIDIA's last 4 quarters of earnings and analyst price targets
+```
 
-## Learn More
+## What it covers
 
-- [📘 **All 48 Tools** →](guides/en/TOOLS.md)
-- [💡 **50 Prompt Examples** →](guides/en/USAGE.md)
+- **Korean stocks:** quotes, daily/weekly/monthly charts and indicators, investor flows, financial statements, consensus, broker reports, filings list, news, sectors and themes, ETFs
+- **US stocks:** quotes, charts, financial statements, earnings, analyst views, insider trades, institutional holders, options, short interest
+- **Chart screening:** write a condition in a sentence, such as "moving averages converging" or "golden cross with volume twice normal", and it scans the top KOSPI and KOSDAQ stocks by market cap at once. Definitions match Korean brokerage condition search (Kiwoom).
+- **Brokerage connection (optional):** connect a Korea Investment & Securities or Kiwoom Securities Open API account for 1-minute bars and more detailed investor flows. Quotes only; no orders, no account access.
+- **Excel export:** save any table as an Excel file.
 
-## Supported Environments
+About 70 tools in all. See the [tool guide](https://github.com/Johnhyeon/stocklens-mcp/blob/main/guides/en/TOOLS.md) and [usage examples](https://github.com/Johnhyeon/stocklens-mcp/blob/main/guides/en/USAGE.md).
 
-| Environment | Support |
-|-------------|---------|
-| Claude Desktop (app) | ✅ Main target |
-| Claude Code (CLI) | ✅ |
-| Claude.ai (web) | ❌ Local MCP not supported |
-| ChatGPT / Gemini | Via Excel export workaround |
+## Labels come first
 
-## Market Coverage
+AI usually gets markets wrong not by bad math but by mislabeled numbers: yesterday's value called today's, an estimate stated as fact. StockLens fixes the labels first.
 
-- **Korean market (KOSPI/KOSDAQ)** via Naver Finance — 6-digit tickers (`005930` = Samsung Electronics, `000660` = SK Hynix)
-- **US market (NYSE/NASDAQ)** via Yahoo Finance — alphabet tickers (`AAPL`, `TSLA`, `BRK.B`)
+- **A timestamp on every figure.** "As of Sep 23 close", so you know when each number is from.
+- **No mixing.** After-market prices and regular-session closes, consolidated and separate statements, are never put on one line.
+- **Partial means partial.** If only part of the data was read, it says so. Missing values are never filled in as zero.
+- **It says what it got.** Ask for 60 days and receive 20, and the answer says 20.
 
-Tickers are auto-detected; mix freely in natural language (e.g., "compare 005930 and AAPL"). Full tool list in [TOOLS.md](guides/en/TOOLS.md).
+## Where it runs
 
-## Operating Principle
+| | |
+|---|---|
+| AI apps | Claude Desktop, Codex (ChatGPT account), Claude Code |
+| OS | Windows, macOS |
+| Not supported | Claude.ai on the web (it cannot connect to your PC) |
 
-StockLens does not provide investment recommendations, buy/sell signals, automated trading, or return guarantees. It is a data connection tool that helps Claude read public market data.
+The AI app's own subscription is separate from LeetKit.
+
+## Setup and pricing
+
+- **Setup:** install with a button in LeetKit Manager and paste your key. No commands. Updates are the [Update] button on each Lens card.
+- **Trial:** 14 days free with all three Lenses, email only, no card.
+- **Pricing:** one-time payment, no subscription. StockLens alone (LeetKit STOCK) or all three Lenses (LeetKit FULL Package). Checkout is Korean; overseas cards may not work, so email us first.
+
+Trial and prices: **[leetkey.kr/en](https://leetkey.kr/en/)**
+
+## Not investment advice
+
+StockLens is a data tool that lets your AI look up public market data. It is not an investment advisory, discretionary management or stock recommendation service. It does not recommend buying or selling any security and has no order execution. Data can be delayed or wrong depending on the source, and AI answers are for reference only. Investment decisions and their outcomes are your own responsibility.
 
 ## License
 
-MIT License
+Proprietary software. The source code is not public, and a valid license key is required. See [LICENSE](https://github.com/Johnhyeon/stocklens-mcp/blob/main/LICENSE). This repository holds the overview, usage docs and patch notes only.
+
+Contact: support@leetkey.kr · Made by Leetkey Lab (리트키랩)
