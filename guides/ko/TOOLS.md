@@ -1,0 +1,610 @@
+# StockLens 도구 레퍼런스
+
+설치되는 도구는 **70개**이고, 이 문서는 그중 자주 쓰는 **62개**를
+다룹니다 (한국 주식 41 + 미국 주식 21). 나머지는 같은 규칙을 따르며
+도구 설명에 사용법이 들어 있습니다.
+
+[🇺🇸 English](../en/TOOLS.md) | [USAGE](USAGE.md) | [INSTALL](INSTALL.md)
+
+---
+
+## 🇰🇷 한국 주식 (41)
+
+데이터 소스: 네이버 증권 (공개 데이터, API 키 불필요).
+
+### 기본 조회 (10)
+
+#### `get_market_clock`
+한국장/미국장 현재 상태, 주말/휴장 여부, 최근 거래일, 다음 개장일을 한 번에 조회.
+- 파라미터 없음
+- 종목 분석 전에 데이터 기준시각과 장 상태를 확인할 때 사용
+- KRX와 NYSE/NASDAQ의 장전/정규장/시간외/장마감 상태를 함께 반환
+
+⚠️ 종목 현재가, 차트, 수급을 해석하기 전에 기준 거래일을 확인할 때 먼저 호출.
+
+#### `search` / `search_stock`
+종목명·코드로 검색 (같은 도구, 이름만 다름).
+
+- `query` (str): 종목명(한/영) 또는 6자리 코드
+- 예: `"삼성전자 종목코드"`, `"오이솔루션 검색"`
+
+⚠️ 종목명만 알고 코드 모를 때 **반드시 먼저 호출** (다른 도구에 코드 추측으로 넣지 말 것).
+
+#### `get_price`
+현재가 + 시가·고가·저가·거래량 스냅샷.
+- `code` (str): 6자리 종목코드
+- 예: `"삼성전자 지금 얼마?"`
+
+#### `get_chart`
+OHLCV 시계열 (일/주/월봉).
+- `code` (str), `timeframe` (`day|week|month`, 기본 `day`), `count` (int, 기본 120, 최대 500)
+- 예: `"SK하이닉스 120일 일봉"`, `"카카오 주봉 60개"`
+
+#### `get_flow`
+투자자별 수급 (외국인/기관 순매매, 일별).
+- `code` (str), `days` (int, 기본 20, 최대 60)
+- 예: `"카카오 20일 외국인 수급"`
+- 참고: 네이버 증권은 개인 순매매 컬럼 미제공.
+
+#### `get_financial`
+재무지표 (PER, PBR, 시가총액, EPS, BPS).
+- `code` (str)
+- 예: `"네이버 PER PBR"`, `"현대차 재무"`
+
+#### `get_index`
+KOSPI / KOSDAQ 지수 현재값.
+- 파라미터 없음
+- 예: `"오늘 코스피 어때?"`
+
+#### `watchlist`
+'내 종목'(관심종목) 보기·추가·삭제. **DartLens·TelegramLens와 같은 목록**을 씁니다.
+- `action` (`list|add|remove`), `query` (str, 종목명 또는 코드)
+- 예: `"디오 관심종목에 넣어줘"`, `"내 종목 뭐뭐 있지?"`
+
+#### `stocklens_status`
+자가진단 — 버전·라이선스·국내/미국 장 상태·최근 성공·실패·캐시 상태를 한 번에.
+- 파라미터 없음
+- 다른 도구가 막힐 때 원인 확인용
+
+---
+
+### 기술지표 (2)
+
+#### `get_indicators`
+단일 종목의 15종 기술지표 판정 (이평선·RSI·MACD·볼린저·스토캐스틱·OBV·지지저항 등).
+- `code` (str), `days` (int, 기본 260), `include` (list, 기본 4종), `timeframe` (`day|week|month`)
+- 사용 가능: `ma`, `ma_phase`, `ma_slope`, `ma_cross`, `rsi`, `macd`, `bollinger`, `stochastic`, `obv`, `volume`, `position`, `candle`, `support_resistance`, `volume_profile`, `price_channel`
+- 예: `"삼성전자 RSI MACD 판정"`
+
+⚠️ 판정·스크리닝용. 차트 시각화는 `get_chart`.
+
+#### `get_indicators_bulk`
+여러 종목 지표를 병렬 계산 (스크리닝 핵심).
+- `codes` (list, 최대 50), `days`, `include`
+- 예: `"시총 30개 종목 RSI + MACD 한번에"`
+
+---
+
+### 분봉·시간봉 (2) - 증권사 연결
+
+증권사 Open API 를 연결하면 국내·미국 분봉을 쓸 수 있습니다.
+**한국투자증권과 키움증권 중 하나만 연결하면 충분합니다** (두 곳 다
+국내·미국 분봉을 지원합니다). 연결은 LeetKit Manager 의 [증권사 연결]
+버튼에서 합니다 (시세 조회 전용 App Key·App Secret 만 사용, 계좌번호·주문
+기능은 지원하지 않고 앞으로도 연결하지 않습니다).
+
+- 지원 간격: `1m` `3m` `5m` `10m` `15m` `30m` `60m` `120m` `240m`
+- 시장: `KR` (KRX 정규장 09:00~15:30), `US` (NYSE·NASDAQ·AMEX 정규장 09:30~16:00)
+- 세션: 정규장(`regular`)만 지원. 시간외·주간거래는 검증 후 열립니다
+- 증권사 데이터는 항상 1분봉 원천에서 StockLens 가 세션 기준으로 집계합니다
+- 120·240분봉은 세션 끝의 짧은 꼬리 봉(예: KR 240m = 09:00~13:00 정식 봉 +
+  13:00~15:30 150분 꼬리)이 분리 표기됩니다. 꼬리 봉 거래량을 일반 봉과
+  직접 비교하지 마세요
+- 진행 중 봉은 기본으로 제외됩니다 (`completed_only=False` 로 포함 가능)
+- 일·주·월봉은 기존 `get_chart` / `get_us_chart` (네이버·Yahoo) 가 담당합니다.
+  증권사 일봉은 수정주가 검증 전이라 제공하지 않습니다
+
+**데이터 사용 방식** (Manager 에서 선택):
+- 자동(권장): KR·US 분봉 = 주 사용 증권사 한 곳, 일·주·월봉 = 기존 네이버·Yahoo.
+  장애가 나도 다른 증권사나 다른 공급원으로 자동 전환하지 않습니다 - 오류를
+  그대로 보여주고, 원하면 source="yahoo" 를 직접 지정해 조회할 수 있습니다
+- 증권사 우선: 검증된 증권사 능력을 우선
+- 기본 데이터 유지: 증권사 호출 0회, 연결 전과 완전히 동일하게 동작
+
+**공급원 규칙**: 한 응답 안에서 공급원을 섞지 않습니다. 어떤 공급원이 쓰였는지는
+응답 메타의 `provider` / `fallback_used` 에 항상 표시됩니다.
+
+**미국 분봉 거래량 기준 (실측 확인)**: 증권사 미국 분봉의 거래량은 상장
+거래소(NYSE·NASDAQ) 단독 체결 기준이고, Yahoo 는 전체 시장 통합 기준이라
+같은 분이라도 거래량 숫자의 의미가 다릅니다 (실측: 통합 대비 9~31%).
+가격은 사실상 일치합니다. 거래량 지표는 한 공급원 안에서의 비교(평균 대비
+비율 등)로만 해석하고, 두 공급원의 거래량을 직접 비교하지 마세요.
+
+#### `get_intraday_chart`
+분봉·시간봉 OHLCV 시계열.
+- `symbol` (KR 6자리 코드 또는 US 티커), `market` (`KR|US`), `interval` (기본 `5m`),
+  `date` (기준 거래일, 기본 최근 거래일), `row_limit` (기본 120, 최대 500),
+  `venue` (US 에서 증권사 사용 시 `NYS|NAS|AMS` 필요), `completed_only` (기본 true),
+  `source` (`auto|kis|naver|yahoo`, `kis` 는 strict 라 대체 공급원 없음)
+- 예: `"삼성전자 오늘 5분봉"`, `"AAPL 60분봉 (나스닥)"`
+
+#### `get_intraday_indicators`
+분봉 기준 기술지표 판정 (JSON). 차트와 같은 봉 데이터로 계산합니다.
+- `symbol`, `market`, `interval` (기본 `60m`), `bars` (봉 개수, 기본 260),
+  `include` (get_indicators 와 동일 키), `completed_only`, `source`
+- 일수(`days`)가 아니라 **봉 개수(`bars`)** 기준입니다
+- 이력이 모자라면 값 대신 "계산 불가"로 정직하게 표시됩니다
+
+---
+
+### 상세 수급 (2) - 증권사 연결
+
+증권사 Open API 로만 받을 수 있는 수급 데이터입니다. 국내 종목 전용이고,
+미국 종목에는 이 데이터가 없습니다.
+
+**증권사마다 주는 항목이 다릅니다.** 한쪽이 다른 쪽의 상위집합이 아니라
+서로 반대로 갈립니다:
+
+| | 한국투자증권 | 키움증권 |
+|---|---|---|
+| 투자자 구분 | 3종 (개인·외국인·기관계) | 13종 (기관 세부 포함) |
+| 매수·매도 분해 | 있음 | 없음 (순매매만) |
+| 대차·신용·외국인 보유 | 없음 | 있음 |
+
+그래서 응답에는 **받은 항목과 못 받은 항목이 사유와 함께** 실립니다.
+없는 항목을 0 이나 빈 값으로 채우지 않습니다.
+
+**`foreign`(외국인)의 정의**: KRX·한국투자증권·네이버가 "외국인"이라
+부르는 것은 외국인 + 내외국인의 합입니다. 키움증권은 이 둘을
+`foreign_registered`(외국인)와 `domestic_foreign`(내외국인)으로 나눠
+주므로, StockLens 는 `foreign` 을 두 값의 합으로 맞춰 **두 증권사에서
+같은 뜻**이 되게 합니다 (실측 확인). 키움의 좁은 쪽 값이 필요하면
+`foreign_registered` 를 쓰세요.
+
+#### `get_detailed_investor_flow`
+투자자·기관별 일별 순매매 (JSON). 기존 `get_flow`(네이버 3종)와 다른
+도구이며, `get_flow` 는 증권사 연결 없이 계속 동작합니다.
+- `code` (단건) 또는 `codes` (최대 30종목), `days` (기본 20, 최대 120),
+  `measure` (`net_quantity` 수량 / `net_amount` 금액), `source`
+  (`auto|kis|kiwoom`)
+- **수량과 금액은 다른 숫자입니다.** 실측상 같은 항목이 3.7배까지
+  차이 납니다. 응답의 `unit` 을 빼고 숫자만 인용하지 마세요
+- `unsettled` 에 있는 항목은 **미정산**입니다. 0(매매 없음)이 아닙니다
+- `institution_total`(기관계)은 이미 하위 항목의 합입니다. 같이 더하면
+  두 번 셉니다
+- 예: `"삼성전자 최근 20일 투자자별 수급"`
+
+#### `get_supply_pressure`
+프로그램매매·공매도·신용·대차·외국인 보유 (JSON).
+- `code`/`codes`, `kind` 하나 또는 `kinds` 목록
+  (`program_trading|short_selling|credit|securities_lending|`
+  `foreign_holding|cfd`), `days` (기본 30), `source`
+- 응답은 **종류별 블록으로 나뉩니다.** 각 블록이 자기 `status`·
+  `provider`·`granularity`·`data_as_of`·경고를 따로 갖습니다.
+  서로 다른 종류를 하나의 점수로 합치지 않습니다
+- `granularity` 를 확인하세요. 프로그램매매는 한국투자증권이 **장중
+  시계열**, 키움증권이 **일별**이라 같은 기준으로 비교할 수 없습니다
+- **대차잔고는 공매도 실행이 아닙니다.** 대차는 빌린 주식의 잔고,
+  공매도는 실제 매도 체결입니다
+- 예: `"삼성전자 공매도랑 프로그램매매 최근 한 달"`
+
+**검증 중인 항목**: 데이터 계약 검증을 마친 항목만 실제 값을 돌려줍니다.
+아직 검증 전인 항목은 `verifying`(검증 중)으로 표시되며, 이는 "지원 안
+함"과 다른 상태입니다. 어떤 항목이 어느 상태인지는 LeetKit Manager 의
+증권사 연결 화면과 `stocklens-doctor` 에서 확인할 수 있습니다.
+
+---
+
+### 시장 전체 (2)
+
+종목이 아니라 **시장 단위**로 보는 자료입니다. 2026-09 네이버 개편으로
+새로 열렸습니다.
+
+#### `get_ipo_schedule`
+공모주 일정. 심사 → 수요예측 → 수요예측완료 → 청약 → 청약완료 →
+상장예정 단계로 나뉘어 나옵니다.
+- 인자 없음
+- 종목마다 희망공모가·확정공모가·청약일·상장일·수요예측 경쟁률·주관사
+- **`-` 는 그 단계에 아직 도달하지 않아 정해지지 않은 값입니다.** 0 이
+  아닙니다. 희망공모가는 회사가 제시한 범위이고 확정공모가는 수요예측
+  뒤 정해진 값이라, 둘을 같은 수치로 쓰면 안 됩니다
+- 예: `"이번 주 청약 뭐 있어"`, `"상장 예정 종목 알려줘"`
+
+#### `get_investor_deposit`
+투자자예탁금 추이. 고객예탁금·신용잔고·주식형/채권형/혼합형 펀드를
+일별로, 전일대비 증감과 함께 봅니다.
+- `days` (int, 기본 20, 최대 100)
+- **단위는 억원입니다** (네이버 화면 표기 기준)
+- 고객예탁금은 계좌에 들어와 있는 현금, 신용잔고는 빌려서 산 금액입니다.
+  성격이 달라 더하거나 빼지 마세요
+- 결제일 기준이라 최근 거래일보다 며칠 뒤처집니다. 표의 날짜를 그대로 읽으세요
+- `get_flow` 가 "누가 샀나"라면 이건 "살 돈이 얼마나 대기 중인가"입니다
+- 예: `"예탁금 늘고 있어?"`, `"신용잔고 추이 보여줘"`
+
+---
+
+### 스크리닝 (8)
+
+#### `list_themes`
+네이버 증권 테마 목록 (등락률 순, 페이지당 40개).
+- `page` (int, 기본 1, 최대 7)
+
+#### `get_theme_stocks`
+테마 내 종목 리스트.
+- `theme_name` (str, 부분 매칭), `count` (int, 기본 30, 최대 500), `include_reason` (bool), `page` (int, 기본 1)
+- 등락률 순이라 뒤쪽 쪽에 많이 내린 종목이 있습니다. 결과 머리말에 테마 전체 종목 수와 이 표의 범위가 나오고, 더 있으면 다음 `page`를 알려드립니다.
+- 예: `"AI 반도체 테마 종목"`
+
+#### `list_sectors`
+업종 목록 (약 79개, 등락률 순).
+
+#### `get_sector_stocks`
+업종 내 종목.
+- `sector_name` (str, 부분 매칭), `count` (int, 기본 30, 최대 500), `page` (int, 기본 1)
+- 등락률 순이라 뒤쪽 쪽에 많이 내린 종목이 있습니다. 결과 머리말에 업종 전체 종목 수와 이 표의 범위(예: "전체 175개 중 1~30번째")가 나옵니다.
+- 예: `"통신장비 업종"`
+
+#### `get_volume_ranking` / `get_change_ranking` / `get_market_cap_ranking`
+거래량·등락률·시가총액 상위 종목.
+- `market` (`KOSPI|KOSDAQ|ALL`, 시가총액은 ALL 미지원), `count` (int, 기본 50, 최대 500), `direction` (`change_ranking`만, `up|down`)
+- `sort_by` (`get_volume_ranking`만, `volume|trade_value`, 기본 `volume`): `trade_value`는 시장 전체 거래대금 순위입니다. 주가가 높은 삼성전자·SK하이닉스는 거래량 순위에는 잘 안 보이지만 거래대금 순위에서는 대개 맨 위입니다. 거래량·거래대금은 KRX 체결분입니다(넥스트레이드 제외).
+- `page` (`get_market_cap_ranking`만, int, 기본 1): 501위 아래는 `count=500, page=2`부터 받습니다. 결과에 시장 전체 종목 수와 리츠·펀드·거래정지 표시가 함께 나옵니다.
+- 예: `"오늘 거래량 TOP 50"`, `"코스닥 하락률 20위"`
+
+#### `screen_by_flow`
+거래대금·거래량 상위 중 **외국인·기관이 며칠 연속 순매수**한 종목만 추립니다.
+- `top_n`, `market`, `foreign_days`, `inst_days`, `exclude_etf` (bool), `sort_by` (기본 `trade_value` — 시장 전체 거래대금 상위 `top_n`개가 후보)
+- 예: `"외국인 5일 연속 순매수 종목"`
+
+---
+
+### 벌크 조회 (4)
+
+#### `get_multi_stocks`
+여러 종목 기본 정보 병렬 조회 (현재가·거래량).
+- `codes` (list, 최대 30)
+- 개별 `get_price` N회보다 훨씬 빠름.
+
+#### `get_multi_chart_stats`
+여러 종목 차트 통계 (52주 고점/저점/낙폭·수익률·평균 거래량).
+- `codes` (list, 최대 100), `days` (int, 기본 260)
+- 반환: `current_price`, `high`, `high_date`, `low`, `low_date`, `drawdown_pct`, `recovery_pct`, `period_return_pct`, `avg_volume`
+
+#### `get_flow_batch`
+여러 종목 수급(기관·외국인 순매매) 병렬 조회.
+- `codes` (list), `days` (int)
+- 종목마다 `get_flow`를 반복하는 것보다 훨씬 가볍습니다.
+
+#### `get_financial_batch`
+여러 종목 핵심 재무(PER·PBR·ROE·영업이익률·부채비율·배당률)를 한 표로.
+- `codes` (list)
+- ⚠️ 비교 목적이면 `get_financial`을 반복하지 말고 이걸 쓰세요 (토큰 대폭 절감).
+
+---
+
+### ETF (2)
+
+#### `get_etf_list`
+ETF 1,000+ 목록 + 카테고리 필터·정렬.
+- `category` (7개 중 선택), `keyword`, `sort_by` (`marketSum` 시가총액·기본 | `quant` 거래량 | `threeMonthEarnRate` 3개월 수익률 | `nav` 주당 NAV — 전부 큰 값이 앞), `limit`
+- 3개월 수익률 순은 오른 ETF가 앞, 많이 내린 ETF가 뒤입니다. 수익률 값이 없는 ETF는 순위에서 빠지고 그 수가 결과 아래에 나옵니다.
+- 1·6·12개월 수익률과 배당은 목록에 없어 정렬 기준으로 쓸 수 없습니다. 종목별로 `get_etf_info`에서 확인합니다.
+- 장 시작 전에는 네이버 목록의 등락률·거래량이 비어 있어 '등락률 없음'으로 나오고, 거래량 순을 요청하면 시가총액 순으로 보여주면서 그렇다고 적습니다.
+
+#### `get_etf_info`
+개별 ETF 상세 (기초지수·총보수·구성종목·수익률 1/3/6/12M).
+- `code` (str)
+- 예: `"TIGER 200 상세"`
+
+---
+
+### 분석·공시 (5)
+
+#### `get_consensus`
+증권사 컨센서스 (목표주가·투자의견 분포·실적 추정치).
+- `code` (str)
+- 예: `"삼성전자 애널리스트 목표가"`
+
+#### `get_reports`
+증권사 리포트 목록 + 본문 요약 + PDF 링크.
+- `code` (str) — 종목 리포트를 볼 때
+- `kind` (str) — 종목을 가리지 않는 갈래를 볼 때. `market`(시황)
+  `invest`(투자전략) `economy`(경제) `debenture`(채권) `industry`(산업)
+  `company`(종목)
+- `count` (int)
+- `code` 와 `kind` 는 함께 쓸 수 없습니다. 둘 중 하나는 필요합니다
+- 예: `"LG에너지솔루션 최근 리포트"`, `"오늘 증권가가 시장을 어떻게 보나"`,
+  `"이번 주 산업 리포트 뭐 나왔어"`
+
+#### `get_report_content`
+리포트 **한 건**의 PDF 본문. 목표주가 산출 근거·실적 추정까지 읽습니다.
+- `nid` (str) — `get_reports` 결과에 표시되는 리포트 번호
+- `mode` (str) — `summary` 앞부분(기본) / `full` 전문 / `link` 링크만
+- 예: `"이 리포트 자세히 봐줘"`, `"목표가 근거가 뭐야"`, `"전문 다 보여줘"`
+- 이미지로 만들어진 PDF는 읽을 수 없어 원문 링크로 안내합니다.
+
+#### `get_disclosure`
+DART 공시 목록 (제목·날짜·출처).
+- `code` (str), `limit`
+
+#### `get_event_reaction`
+특정 날짜(공시일 등) **전후 주가·거래량·수급 반응**을 정렬해 보여줍니다.
+- `code`, `event_date` (YYYY-MM-DD), `before` (int), `after` (int)
+- 예: `"이 공시 난 날 주가가 어떻게 반응했어?"`
+- 거래정지 등으로 잴 수 없는 구간은 0%가 아니라 "분석 불가"로 표시합니다.
+
+---
+
+### Excel 출력 (3)
+
+#### `export_to_excel`
+단일 종목 데이터 Excel 저장 (Gemini/GPT에 파일로 넘길 때).
+- `data_type` (`chart|flow|financial`), `code`, `days`, `filename`
+
+#### `scan_to_excel`
+여러 종목 스냅샷 Excel 생성. 한 번 스캔(10~20초) → 이후 `query_excel`로 반복 쿼리(ms 단위).
+- `codes` (list, 최대 500), `days`, `include_financial` (bool), `filename`
+
+#### `query_excel`
+저장된 스냅샷에서 조건 필터링.
+- `file_path`, `filters` (dict), `sort_by`, `descending`, `limit`
+- 예: `"그 스냅샷에서 PER 10 이하, 낙폭 -30% 이상"`
+
+---
+
+### 디버깅 (1)
+
+#### `get_metrics_summary`
+도구 사용량·토큰 통계.
+- `days` (int, 기본 1, 최대 30)
+- 로그: `~/Downloads/kstock/logs/metrics_YYYYMMDD.jsonl`
+
+---
+
+## 🇺🇸 미국 주식 (21)
+
+데이터 소스: **Yahoo Finance (yfinance)**. API 키 불필요, 최대 15분 지연.
+티커 자동 감지 (1~5자 알파벳 + `.`/`-` 특수 = US). BRK.B 등 dot 티커는 `BRK-B`로 내부 변환.
+
+### 탐색·시장 (4)
+
+#### `get_us_search`
+종목명 → 티커 검색.
+- `query` (str): 회사명(한/영) 또는 티커
+- 예: `"Apple 티커"`, `"NVIDIA 검색"`
+⚠️ 티커 모를 때 반드시 먼저 호출.
+
+#### `get_us_market`
+주요 지수 스냅샷 (S&P 500, Dow, Nasdaq, Russell 2000, VIX).
+- 파라미터 없음
+
+#### `get_us_screener`
+10종 프리셋 스크리너.
+- `preset`: `day_gainers`, `day_losers`, `most_actives`, `most_shorted_stocks`, `aggressive_small_caps`, `growth_technology_stocks`, `undervalued_growth_stocks`, `undervalued_large_caps`, `small_cap_gainers`, `conservative_foreign_funds`
+- `count` (int)
+
+#### `get_us_sector`
+섹터별 overview + top 기업.
+- `sector_key`: `technology`, `healthcare`, `financial-services`, `consumer-cyclical`, `consumer-defensive`, `communication-services`, `industrials`, `energy`, `basic-materials`, `utilities`, `real-estate`
+- `top_n` (int)
+
+---
+
+### 기본 데이터 (6)
+
+#### `get_us_price`
+현재가 + 전일대비 + 52주 고저 + 베타 + 시가총액 + 마켓 상태.
+- `ticker` (str): 예 `"AAPL"`, `"TSLA"`, `"BRK.B"`
+
+#### `get_us_info`
+기업 정보 (섹터·산업·시총·사업 요약).
+
+#### `get_us_chart`
+OHLCV 시계열. **500행 상한 (자동 축약, 토큰 보호)**.
+- `ticker`, `period` (`1d/5d/1mo/3mo/6mo/1y/2y/5y/10y/ytd/max`, 기본 `3mo`), `interval` (`1m/5m/15m/30m/1h/1d/1wk/1mo`, 기본 `1d`), `prepost` (bool, 프리/포스트 마켓)
+
+#### `get_us_financials`
+Valuation (P/E, Forward P/E, PEG, P/B) + Profitability (ROE, margin) + Dividend 비율.
+
+#### `get_us_financial_statement`
+재무제표 3종.
+- `ticker`, `statement_type` (`income|balance|cash_flow`), `period` (`annual|quarterly`)
+- 핵심 row만 추출 (Total Revenue, Net Income, Total Assets, Free Cash Flow 등)
+
+#### `get_us_multi_price`
+여러 티커 일괄 조회 (병렬, 30개 1~2초).
+- `tickers` (list, 최대 30)
+
+---
+
+### US 고유 정보 (11)
+
+#### `get_us_earnings`
+다음 실적 발표일 + 최근 EPS 서프라이즈 8분기.
+
+#### `get_us_analyst`
+애널리스트 목표가(평균/중앙값/최고/최저) + buy/hold/sell 분포 + 업·다운그레이드 이력 + EPS/매출 추정치.
+
+#### `get_us_dividends`
+배당 이력 + ex-date + 수익률 + 배당성향 + 5년 평균.
+- `ticker`, `limit` (int, 기본 12)
+
+#### `get_us_options`
+옵션 체인 (calls/puts, IV, OI).
+- `ticker`, `expiration` (date, 미지정 시 최근접), `strikes_around_spot` (int, 기본 10)
+- ⚠️ Greeks(Δ·Γ·Θ) 미포함. yfinance 제공 안 함.
+
+#### `get_us_insider`
+Form 4 내부자 거래 + 최근 6개월 순매수 요약 + 현재 내부자 명단.
+
+#### `get_us_holders`
+기관 보유(13F) + 뮤추얼 펀드 + breakdown(insiders %/institutions %).
+
+#### `get_us_short`
+공매도 지표 (% of float, days to cover).
+- ⚠️ FINRA bi-monthly 공시라 2~4주 stale. 응답에 `date_short_interest` 표시.
+
+#### `get_us_filings`
+SEC 공시 목록 (10-K, 10-Q, 8-K) + EDGAR URL.
+- `ticker`, `limit` (int, 기본 15)
+
+#### `get_us_news`
+최근 뉴스 헤드라인.
+- `ticker`, `limit` (int, 기본 10)
+
+#### `get_us_etf_info`
+ETF 전용 상세 (top holdings, 섹터 비중, 자산 배분, 보수율, YTD 수익률).
+- `ticker`: SPY, QQQ, SCHD, VTI 등
+
+#### `export_us_to_excel`
+미국 주식 장기 데이터를 Excel 파일로 저장 (대화 토큰 소비 없음).
+- `ticker`, `period`, `interval`, `filename`
+
+---
+
+## 🕐 결과 메타 (`RESULT_META_JSON` / `_meta`) - 규약 v3
+
+대부분의 도구는 응답 끝에 `RESULT_META_JSON_START…END` 블록을(JSON 도구는 payload 안
+`_meta` 키로) 붙입니다. `meta_v`가 규약 버전이고 현재 **3**입니다.
+
+**v3에서 늘어난 필드는 전부 선택적입니다.** 해당 개념이 없는 도구에는 키 자체가
+생기지 않고, v2만 아는 소비자는 그대로 무시해도 됩니다. 기존 키
+(`as_of`·`data_as_of`·`data_basis`·`data_completeness`·`warnings`·`entity`)의 의미는
+바뀌지 않았습니다.
+
+### `data_completeness` 는 **요청한 범위** 기준입니다
+
+돌려준 것이 다 왔는지가 아니라, **당신이 물어본 범위를 다 채웠는지**를 말합니다.
+60일을 요청해 20일이 왔으면 그 20일이 온전해도 `partial`입니다.
+
+| 값 | 뜻 |
+|---|---|
+| `complete` | 요청한 범위를 다 채웠다 |
+| `partial` | 일부만 왔다. 없는 부분을 추정으로 메우지 말 것 |
+| `none` | 해당 없음. 조회 실패가 아니라 데이터가 없는 것 |
+
+`coverage.coverage_complete=false` 인데 `data_completeness=complete` 인 조합은
+구조적으로 나올 수 없습니다(값 검증에서 막습니다).
+
+### `coverage` - 요청한 범위와 실제로 돌려준 범위
+
+```json
+"coverage": {
+  "requested": {"unit": "day", "value": 60},
+  "effective": {"unit": "day", "value": 20},
+  "returned_count": 20,
+  "total_count": null,
+  "truncated": true,
+  "coverage_complete": false,
+  "reason": "server_cap"
+}
+```
+
+`reason` 은 열거값입니다: `server_cap`(도구 상한) / `pagination`(원천이 페이지로 끊음)
+/ `source_limit`(원천이 전체 건수를 안 알려줌) / `incomplete_tail`(마지막 봉이 진행 중)
+/ `mixed_periods`(기준 기간 혼재) / `unknown`.
+
+**예: `get_flow_batch(codes=[...], days=60)`**
+이 도구의 상한은 20일입니다. 60일을 요청하면 20일치가 오고, 본문 첫 줄에 그 사실이
+적히며 메타는 위와 같이 `requested=60 / effective=20 / partial` 이 됩니다.
+`per_entity_returned_count` 로 종목별 실제 행 수가, `short_entities` 로 요청 기간보다
+짧게 온 종목 목록이 함께 옵니다. **한 종목이라도 짧으면 그 배치는 `partial`**
+(`reason=source_limit`)입니다 - 20일을 요청해 3일만 온 종목이 섞였는데 전체를
+"다 받았다"고 말할 수는 없습니다.
+
+**예: `get_disclosure(code=...)`**
+네이버는 전체 건수를 알려주지 않으므로 항상 `coverage_complete=false`,
+`total_count=null`, `reason=source_limit` 입니다. 여기서 "최근 공시에 아무것도 없다"를
+결론지을 수 없습니다. 빠짐없이 보려면 DartLens `list_disclosures` 를 쓰세요.
+
+### `bar_state` - 마지막 봉이 끝났는가
+
+```json
+"bar_state": {
+  "timeframe": "week",
+  "last_bar_date": "2026-08-26",
+  "last_bar_complete": false,
+  "last_completed_bar_date": "2026-08-21",
+  "calculation_includes_incomplete": true
+}
+```
+
+`data_basis=in_progress_bar` 는 **장중일 때만** 붙습니다. 수요일 저녁이면 장은 닫혔지만
+그 주 주봉은 금요일까지 남아 있습니다. 그 주봉으로 계산한 이평·RSI 는 금요일에 값이
+바뀝니다. `last_bar_complete=false` 면 `coverage.reason=incomplete_tail` 과 `partial` 이
+함께 붙습니다. **마감 여부를 판별하지 못했을 때(`null`)도 `partial`**
+(`reason=unknown`)입니다 - 모르는 것을 확정치로 내보내지 않습니다. 휴장일을 반영하므로, 추석으로 목·금이 쉬는 주는 수요일 마감으로 그
+주봉이 끝납니다. 거래소 달력을 확인하지 못하면 추측하지 않고 `null`(모름)입니다.
+
+대상: `get_chart` · `get_indicators` · `get_indicators_bulk` · `get_multi_chart_stats`
+
+### `price_adjustment` - 이 가격이 무엇으로 조정된 값인가
+
+```json
+"price_adjustment": {
+  "status": "unknown",
+  "corporate_actions_checked": false,
+  "cross_event_comparison_safe": false
+}
+```
+
+네이버는 조정 기준을 명시하지 않으므로 현재 값은 `unknown` 입니다. 액면분할·유상증자
+전후 구간을 이어 붙여 비교하면 안 된다는 뜻입니다. `status` 는
+`raw`/`split_adjusted`/`total_return_adjusted`/`unknown` 중 하나입니다.
+
+### `period_coverage` - 종목마다 기준 기간이 같은가
+
+`get_financial_batch` 전용입니다. `consistency` 가 `mixed` 면 종목마다 확정 분기가
+달라 PER·ROE 를 그대로 나란히 놓을 수 없습니다. **`mixed` 와 `unknown`(기준을 하나도
+못 읽음) 둘 다 `partial`** 이고, `coverage.reason` 은 각각 `mixed_periods` /
+`unknown` 입니다.
+
+```json
+"period_coverage": {
+  "consistency": "mixed",
+  "periods": {"005930": "2026.06", "096770": "2026.03"},
+  "oldest": "2026.03",
+  "newest": "2026.06"
+}
+```
+
+### `indicator_coverage` - 봉이 모자라 계산되지 않은 지표
+
+`get_indicators` · `get_indicators_bulk`. 주봉 104개로 `ma120` 을 부르면 값이 빠지는데,
+빠진 자리는 "그런 신호가 없다"가 아니라 "아직 계산할 이력이 없다"는 뜻입니다.
+
+```json
+"indicator_coverage": {
+  "available_bars": 104,
+  "required_bars": {"ma5": 5, "ma20": 20, "ma60": 60, "ma120": 120, "ma240": 240},
+  "insufficient": ["ma120", "ma240"]
+}
+```
+
+배치에서는 **가장 짧은 종목**을 기준으로 잡습니다(과대 주장 방지).
+
+`bar_state` 도 마찬가지로 **종목별로 계산한 뒤 합칩니다.** 한 종목이라도 미완성 봉을
+물고 있으면 그 배치의 계산에는 미완성 봉이 섞인 것이고, `last_completed_bar_date` 는
+종목들이 실제로 가진 확정 봉 중 가장 최근 것입니다.
+
+---
+
+## 📁 저장 파일 위치
+
+Excel 스냅샷·메트릭 로그:
+- Windows: `%USERPROFILE%\Downloads\kstock\`
+- macOS/Linux: `~/Downloads/kstock/`
+
+사용자 PC에만 저장, 외부 전송 없음.
+
+---
+
+## ⚠️ 알려진 제약
+
+- **네이버 증권 HTML 구조 변경 시** 일부 필드 파싱 실패 가능 — 릴리즈마다 재검증
+- **Yahoo Finance 15분 지연** — 실시간 호가·다크풀·Level 2 미지원
+- **옵션 Greeks 미제공** — yfinance 자체 미지원
+- **BRK.B SEC 공시** — yfinance gap, `BRK-A`로 조회
+- **공매도 2~4주 stale** — FINRA 공시 스케줄 제약
+
+자세한 품질 검증 내역: [QUALITY.md](../../QUALITY.md)
