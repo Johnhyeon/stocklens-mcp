@@ -266,7 +266,8 @@ KOSPI / KOSDAQ 지수 현재값.
 
 #### `get_multi_chart_stats`
 여러 종목 차트 통계 (52주 고점/저점/낙폭·수익률·평균 거래량).
-- `codes` (list, 최대 100), `days` (int, 기본 260)
+- `codes` (list, 최대 100), `days` (int, 기본 252). 52주는 모든 도구에서 최근 252거래일입니다
+  (`position.high_52w/low_52w` 와 같은 창). 다른 `days` 를 주면 52주가 아니라 그 기간으로 표시됩니다.
 - 반환: `current_price`, `high`, `high_date`, `low`, `low_date`, `drawdown_pct`, `recovery_pct`, `period_return_pct`, `avg_volume`
 
 #### `get_flow_batch`
@@ -609,6 +610,11 @@ SEC 공시 본문. 키워드 주변 발췌(`find`)와 희석·계약 조항 구�
 네이버는 조정 기준을 명시하지 않으므로 현재 값은 `unknown` 입니다. 액면분할·유상증자
 전후 구간을 이어 붙여 비교하면 안 된다는 뜻입니다. `status` 는
 `raw`/`split_adjusted`/`total_return_adjusted`/`unknown` 중 하나입니다.
+과거 가격이 KRX 호가 단위(2,000원 이상은 5원의 배수)에 맞지 않는 봉이 5개 이상 이어지면
+원천이 소급 조정한 수정주가로 보고 `split_adjusted` 로 적습니다. 이때 `basis` 는
+`inferred_from_prices`, `corporate_actions_checked` 는 `false` 이며 `evidence` 에 조정이
+확인된 마지막 날짜(`adjusted_through`)와 예시 가격이 있습니다. 여러 종목 도구는 종목별
+판정을 `per_entity` 에 둡니다.
 
 ### `period_coverage` - 종목마다 기준 기간이 같은가
 

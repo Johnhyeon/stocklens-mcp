@@ -218,7 +218,9 @@ Basic info for many stocks in parallel (current price, volume).
 
 #### `get_multi_chart_stats`
 Chart stats for many stocks (52-week high/low/drawdown/return/avg volume).
-- `codes` (list, max 100), `days` (int, default 260)
+- `codes` (list, max 100), `days` (int, default 252). 52 weeks means the latest 252
+  trading days everywhere (same window as `position.high_52w/low_52w`); any other `days`
+  is labelled as that window, not as 52 weeks.
 
 ---
 
@@ -564,6 +566,11 @@ Applies to `get_chart`, `get_indicators`, `get_indicators_bulk`, `get_multi_char
 Naver does not state its adjustment basis, so the value is `unknown` today: do not
 stitch periods across splits or rights issues. `status` is one of `raw`,
 `split_adjusted`, `total_return_adjusted`, `unknown`.
+When five or more consecutive bars carry prices off the KRX tick grid (prices of
+2,000 KRW and above are always multiples of 5), the source has back-adjusted them and
+the status is `split_adjusted` with `basis: "inferred_from_prices"`,
+`corporate_actions_checked: false`, and an `evidence` block (`adjusted_through`, example
+prices). Multi-stock tools put the per-stock verdicts under `per_entity`.
 
 ### `period_coverage` - are all stocks on the same reporting period?
 
