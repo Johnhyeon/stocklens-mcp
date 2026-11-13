@@ -48,7 +48,7 @@ Investor flow (foreign/institutional net buying, daily).
 Financial metrics (PER, PBR, market cap, EPS, BPS).
 
 #### `get_index`
-KOSPI / KOSDAQ index snapshot. No parameters.
+KOSPI / KOSDAQ index snapshot, market-wide investor net buying, and KOSPI 200 futures (live value, recent closes, futures investor net buying).
 
 ---
 
@@ -292,7 +292,7 @@ Company name → ticker lookup.
 ⚠️ Call this first if you only know the name.
 
 #### `get_us_market`
-Major index snapshot (S&P 500, Dow, Nasdaq, Russell 2000, VIX). No parameters.
+Major index snapshot (S&P 500, Dow, Nasdaq, Russell 2000, VIX) plus index futures (ES, NQ, YM, RTY). No parameters.
 
 #### `get_us_screener`
 10 Yahoo predefined screeners.
