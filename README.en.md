@@ -81,9 +81,9 @@ The AI app's own subscription is separate from LeetKit.
 
 ## Setup and pricing
 
-- **Setup:** install with a button in LeetKit Manager and paste your key. No commands. Updates are the [Update] button on each Lens card.
+- **Setup:** install with a button in LeetKit Manager and paste your key. No commands. Updates are the [전체 업데이트] (Update all) button at the top of Manager.
 - **Trial:** 14 days free with all three Lenses, email only, no card.
-- **Pricing:** one-time payment, no subscription. StockLens alone (LeetKit STOCK) or all three Lenses (LeetKit FULL Package). Checkout is Korean; overseas cards may not work, so email us first.
+- **Pricing:** one-time payment, no subscription. One product, LeetKit FULL Package, with all three Lenses. Checkout is Korean; overseas cards may not work, so email us first.
 
 Trial and prices: **[leetkey.kr/en](https://leetkey.kr/en/)**
 

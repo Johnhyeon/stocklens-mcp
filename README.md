@@ -81,7 +81,7 @@ AI 앱 이용료는 LeetKit과 따로입니다.
 
 - **설치:** LeetKit Manager에서 버튼을 눌러 설치하고, 받은 키를 붙여 넣으면 완료됩니다. 명령어를 입력할 필요는 없습니다. 업데이트는 Manager 상단 [전체 업데이트]를 누릅니다.
 - **체험:** 14일 무료 체험으로 Lens 3개를 전부 써 볼 수 있습니다. 카드 등록 없이 이메일만 있으면 됩니다.
-- **가격:** 한 번 결제, 월 구독 없음. StockLens 단품(LeetKit STOCK)과 3개 Lens 묶음(LeetKit FULL Package)이 있습니다.
+- **가격:** 한 번 결제, 월 구독 없음. 상품은 Lens 3개가 모두 들어 있는 LeetKit FULL Package 하나입니다.
 
 체험 신청과 가격은 **[leetkey.kr](https://leetkey.kr)** 에서 확인하세요.
 
